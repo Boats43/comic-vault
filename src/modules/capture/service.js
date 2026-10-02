@@ -21,10 +21,13 @@
 import {
   createPhysicalAsset, assignIdentity, attachMedia,
   recordAcquisition, linkCollectionItem, assertCollectionItemLinkable, resolveCollectionItemLink,
-  resolvePhysicalCopyChoice, recordPhysicalCopyDecision,
-  ValidationFailedError,
+  resolvePhysicalCopyChoice, recordPhysicalCopyDecision, getPhysicalCopyDecisionForKey,
+  assessTransientDuplicate, retireTransientDuplicate,
+  findPhysicalCopyCandidatesForBook, validatePhysicalCopyChoiceForBook,
+  ValidationFailedError, ConflictError,
 } from '../assets/index.js';
 import * as mapping from './mapping.js';
+import { claimGradeReceipt, restoreGradeReceipt } from '../../lib/gradeReceipt.js';
 
 function requireFields(obj, fields) {
   for (const f of fields) {
@@ -85,6 +88,31 @@ async function captureFromScanOnce({
     ? await resolveCollectionItemLink({ principalId, collectionItemId: scanPayload.collectionItemId })
     : null;
 
+  // GK-279 — a SAME_COPY backstop that already retired its transient row:
+  // a retry finds no collection row any more. Replay from the durable
+  // decision (never re-adjudicate, never 400 on the now-missing row).
+  if (scanPayload.collectionItemId && !existingLink) {
+    const prior = await getPhysicalCopyDecisionForKey({ principalId, captureIdempotencyKey: idempotencyKey });
+    if (prior && prior.choice === 'SAME_COPY' && prior.incoming_retired) {
+      if (copyDisposition?.choice && (copyDisposition.choice !== 'SAME_COPY' || copyDisposition.selectedGkAssetId !== prior.selected_gk_asset_id)) {
+        throw new ConflictError(`capture idempotencyKey "${idempotencyKey}" already recorded a different physical-copy decision`);
+      }
+      const media = [];
+      for (let i = 0; i < photos.length; i++) {
+        media.push(await attachMedia({
+          principalId, gkAssetId: prior.resulting_gk_asset_id, bytes: photos[i].bytes, contentType: photos[i].contentType,
+          captureRole: photos[i].captureRole || 'capture-photo',
+          idempotencyKey: `${idempotencyKey}:media:${i}`, correlationId: scanPayload.correlationId,
+        }));
+      }
+      return {
+        gkAssetId: prior.resulting_gk_asset_id, mintOutcome: 'same-copy-confirmed-existing', linkOutcome: null,
+        identity: null, media, valuation: null, decision: null, acquisition: null,
+        copyDecision: { choice: 'SAME_COPY', canonicalCollectionItemId: prior.canonical_collection_item_id, retired: true, replayed: true },
+      };
+    }
+  }
+
   // GK-266 — CONTINUITY HARDENING. A collectionItemId with no existing
   // link is about to drive a fresh gkAsset mint + media attach + link
   // creation below. Prove the referenced collection_item durably exists
@@ -120,6 +148,7 @@ async function captureFromScanOnce({
   // with the candidates when no choice was supplied). No candidate ->
   // the normal mint path, unchanged, no prompt.
   let copyChoice = null;
+  let transientAssessment = null;
   if (!existingLink && !continuityLink && scanPayload.collectionItemId) {
     copyChoice = await resolvePhysicalCopyChoice({
       principalId, collectionItemId: scanPayload.collectionItemId,
@@ -142,11 +171,26 @@ async function captureFromScanOnce({
     // appended below through the existing attachMedia mechanism.
     gkAssetId = copyChoice.selected.gkAssetId;
     mintOutcome = 'same-copy-confirmed-existing';
+    // BACKSTOP ONLY (the save-time prompt is the normal surface). The
+    // incoming catalogue row is already durable and would otherwise remain
+    // as a duplicate card. It is retired ONLY when every condition holds
+    // (unlinked, no correction history, evidence fully preserved by the
+    // photo in this request); otherwise SAME_COPY is refused BEFORE any
+    // write — never a forced delete, never a weakened immutability.
+    const assess = await assessTransientDuplicate({ principalId, collectionItemId: scanPayload.collectionItemId });
+    const reasons = [...assess.reasons];
+    if (!Array.isArray(photos) || photos.length < 1) reasons.push('no photo supplied to preserve as evidence');
+    if (reasons.length > 0) {
+      throw new ConflictError(`SAME_COPY_UNAVAILABLE: this catalogue entry cannot be safely retired (${reasons.join('; ')})`);
+    }
+    transientAssessment = assess;
     await recordPhysicalCopyDecision({
       principalId, collectionItemId: scanPayload.collectionItemId,
       candidateGkAssetIds: copyChoice.candidates.map((c) => c.gkAssetId),
       choice: 'SAME_COPY', selectedGkAssetId: gkAssetId, resultingGkAssetId: gkAssetId,
-      captureIdempotencyKey: idempotencyKey,
+      captureIdempotencyKey: idempotencyKey, surface: 'CAPTURE',
+      relatedPredictionEventId: assess.predictionEventId,
+      canonicalCollectionItemId: copyChoice.selected.collectionItemId, incomingRetired: true,
     });
   } else {
     const captureBasis = mapping.buildCaptureBasis(principalId, scanPayload);
@@ -248,12 +292,21 @@ async function captureFromScanOnce({
     });
   }
 
+  let retired = false;
+  if (sameCopy && transientAssessment) {
+    // Evidence (photo) is durably on the existing asset and the decision
+    // (with the prediction link) is recorded — only now retire the transient row.
+    const r = await retireTransientDuplicate({ principalId, collectionItemId: scanPayload.collectionItemId });
+    retired = r.retired || r.alreadyGone === true;
+  }
+
   return {
     gkAssetId, mintOutcome, linkOutcome, identity, media, valuation, decision, acquisition,
     ...(copyChoice?.choice ? {
       copyDecision: {
         choice: copyChoice.choice,
         canonicalCollectionItemId: sameCopy ? copyChoice.selected.collectionItemId : (scanPayload.collectionItemId ?? null),
+        ...(sameCopy ? { retired } : {}),
       },
     } : {}),
   };
@@ -265,11 +318,11 @@ async function captureFromScanOnce({
 // surface as a 500: every sub-operation is idempotent, so re-running replays
 // the winner's committed work and converges on the same asset.
 const RACE_CONSTRAINTS = new Set(['idempotency_key_unique', 'collection_item_link_pkey']);
-export async function captureFromScan(args = {}) {
+async function retryOnIdempotencyRace(fn) {
   let lastErr;
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      return await captureFromScanOnce(args);
+      return await fn();
     } catch (e) {
       if (e?.code === '23505' && RACE_CONSTRAINTS.has(e?.constraint)) {
         lastErr = e;
@@ -280,4 +333,95 @@ export async function captureFromScan(args = {}) {
     }
   }
   throw lastErr;
+}
+
+export async function captureFromScan(args = {}) {
+  return retryOnIdempotencyRace(() => captureFromScanOnce(args));
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// GK-279 — SAVE-TIME physical-copy adjudication (the ONE operator prompt).
+// All three entry points are server-authoritative: candidates come from the
+// server, the choice is validated against them, and the durable result is
+// established here — never by the client. Nothing here creates a collection
+// row or mints a gkAssetId.
+// ─────────────────────────────────────────────────────────────────────
+export async function listSaveTimeCopyCandidates({ principalId, book } = {}) {
+  requireFields({ principalId, book }, ['principalId', 'book']);
+  return findPhysicalCopyCandidatesForBook({ principalId, book });
+}
+
+// SAME COPY at save: NO second collection row, NO second asset. The new scan's
+// photo is appended to the existing asset; the model inference the operator
+// just made is linked to the decision from the SERVER-claimed grade receipt.
+async function confirmSameCopyAtSaveOnce({ principalId, book, selectedGkAssetId, gradeReceiptId, photo, idempotencyKey } = {}) {
+  requireFields({ principalId, book, selectedGkAssetId, idempotencyKey }, ['principalId', 'book', 'selectedGkAssetId', 'idempotencyKey']);
+  const { candidates, selected } = await validatePhysicalCopyChoiceForBook({
+    principalId, book, disposition: { choice: 'SAME_COPY', selectedGkAssetId },
+  });
+
+  let replayed = false;
+  const prior = await getPhysicalCopyDecisionForKey({ principalId, captureIdempotencyKey: idempotencyKey });
+  if (prior) {
+    if (prior.choice !== 'SAME_COPY' || prior.selected_gk_asset_id !== selected.gkAssetId) {
+      throw new ConflictError(`idempotencyKey "${idempotencyKey}" already recorded a different physical-copy decision`);
+    }
+    replayed = true;
+  } else {
+    let claim = { ok: false };
+    if (typeof gradeReceiptId === 'string') claim = await claimGradeReceipt({ principalId, receiptId: gradeReceiptId });
+    // A concurrent identical request may have just consumed the (single-use)
+    // receipt and be about to record the decision WITH the prediction link.
+    // Give it a bounded moment so the link is never lost to a race; whoever
+    // inserts first defines the immutable row.
+    if (!claim.ok && typeof gradeReceiptId === 'string') {
+      for (let i = 0; i < 20 && !replayed; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+        if (await getPhysicalCopyDecisionForKey({ principalId, captureIdempotencyKey: idempotencyKey })) replayed = true;
+      }
+    }
+    if (!replayed) try {
+      await recordPhysicalCopyDecision({
+        principalId, collectionItemId: null,
+        candidateGkAssetIds: candidates.map((c) => c.gkAssetId),
+        choice: 'SAME_COPY', selectedGkAssetId: selected.gkAssetId, resultingGkAssetId: selected.gkAssetId,
+        captureIdempotencyKey: idempotencyKey, surface: 'SAVE',
+        relatedPredictionEventId: claim.ok ? (claim.baseline?.modelPredictedProvenance?.predictionEventId ?? null) : null,
+        canonicalCollectionItemId: selected.collectionItemId, incomingRetired: false,
+      });
+    } catch (e) {
+      if (claim.ok) await restoreGradeReceipt({ receiptId: gradeReceiptId, record: claim.record });
+      throw e;
+    }
+  }
+
+  let media = null;
+  if (photo && photo.bytes) {
+    media = await attachMedia({
+      principalId, gkAssetId: selected.gkAssetId, bytes: photo.bytes, contentType: photo.contentType,
+      captureRole: 'capture-photo', idempotencyKey: `${idempotencyKey}:media:0`,
+    });
+  }
+  return { gkAssetId: selected.gkAssetId, canonicalCollectionItemId: selected.collectionItemId, media, replayed };
+}
+
+// ANOTHER COPY at save: durable, idempotent record; the row/asset are created
+// by the ordinary save + the explicit Capture action (which will NOT ask again).
+async function recordAnotherCopyAtSaveOnce({ principalId, book, collectionItemId, idempotencyKey } = {}) {
+  requireFields({ principalId, book, collectionItemId, idempotencyKey }, ['principalId', 'book', 'collectionItemId', 'idempotencyKey']);
+  const { candidates } = await validatePhysicalCopyChoiceForBook({ principalId, book, disposition: { choice: 'ANOTHER_COPY' } });
+  const rec = await recordPhysicalCopyDecision({
+    principalId, collectionItemId,
+    candidateGkAssetIds: candidates.map((c) => c.gkAssetId),
+    choice: 'ANOTHER_COPY', selectedGkAssetId: null, resultingGkAssetId: null,
+    captureIdempotencyKey: idempotencyKey, surface: 'SAVE',
+  });
+  return { decisionId: rec.decisionId, outcome: rec.outcome };
+}
+
+export async function confirmSameCopyAtSave(args = {}) {
+  return retryOnIdempotencyRace(() => confirmSameCopyAtSaveOnce(args));
+}
+export async function recordAnotherCopyAtSave(args = {}) {
+  return retryOnIdempotencyRace(() => recordAnotherCopyAtSaveOnce(args));
 }

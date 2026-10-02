@@ -124,7 +124,7 @@ function formatPendingAge(createdAt) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
-export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, onAddPhoto }) {
+export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, onAddPhoto, onSameCopyRetired }) {
   const [state, setState] = useState({ status: "loading" }); // loading | none | found | error
   const [submitting, setSubmitting] = useState(null); // which actionCode is in flight
   const [lastResult, setLastResult] = useState(null); // { actionCode, operatorActionEventId }
@@ -257,7 +257,13 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
       setCaptureState("idle");
       setCopyDecision(null);
       if (body.copyDecision?.choice === "SAME_COPY") {
-        setSameCopyConfirmed({ gkAssetId: body.gkAssetId, canonicalCollectionItemId: body.copyDecision.canonicalCollectionItemId });
+        setSameCopyConfirmed({ gkAssetId: body.gkAssetId, canonicalCollectionItemId: body.copyDecision.canonicalCollectionItemId, retired: body.copyDecision.retired === true });
+        if (body.copyDecision.retired === true && typeof onSameCopyRetired === "function") {
+          // The server retired this transient duplicate row after preserving its
+          // photo and decision; drop it locally and land on the canonical card.
+          onSameCopyRetired(collectionItemId, body.copyDecision.canonicalCollectionItemId);
+          return;
+        }
       }
       await load(); // re-fetch — now finds the newly-linked asset, transitions to status:'found'
     } catch {
@@ -275,7 +281,7 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
         <div style={panelStyle}>
           <div style={{ color: "#7cc47c", fontSize: 13, fontWeight: 700, marginBottom: 4 }}>SAME COPY CONFIRMED</div>
           <div style={{ color: "#bbb", fontSize: 12 }}>
-            This is the physical copy you already own — its existing GrailKey record was reused and your new photo was added to it as evidence. No second physical asset was created. This catalogue entry is a duplicate view of that copy; its record lives on the original entry.
+            This is the physical copy you already own — its existing GrailKey record was reused and your new photo was added to it as evidence. No second physical asset was created, and this duplicate entry was merged into your existing card.
           </div>
         </div>
       );

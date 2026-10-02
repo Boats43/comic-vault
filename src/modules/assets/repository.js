@@ -842,22 +842,46 @@ export async function insertPhysicalCopyDecision(client, row) {
   const res = await client.query(
     `INSERT INTO data1_dev.physical_copy_decision_event
        (principal_id, choice, incoming_collection_item_id, candidate_gk_asset_ids,
-        selected_gk_asset_id, resulting_gk_asset_id, capture_idempotency_key, rule_version)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        selected_gk_asset_id, resulting_gk_asset_id, capture_idempotency_key, rule_version,
+        surface, related_prediction_event_id, canonical_collection_item_id, incoming_retired)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      ON CONFLICT (principal_id, capture_idempotency_key) DO NOTHING
      RETURNING id`,
-    [row.principalId, row.choice, row.incomingCollectionItemId, row.candidateGkAssetIds,
-     row.selectedGkAssetId, row.resultingGkAssetId, row.captureIdempotencyKey, row.ruleVersion]
+    [row.principalId, row.choice, row.incomingCollectionItemId ?? null, row.candidateGkAssetIds,
+     row.selectedGkAssetId, row.resultingGkAssetId, row.captureIdempotencyKey, row.ruleVersion,
+     row.surface ?? 'CAPTURE', row.relatedPredictionEventId ?? null, row.canonicalCollectionItemId ?? null, row.incomingRetired === true]
   );
   return res.rows[0]?.id || null;
 }
 
 export async function getPhysicalCopyDecision(client, { principalId, captureIdempotencyKey }) {
   const res = await client.query(
-    `SELECT id, choice, incoming_collection_item_id, selected_gk_asset_id, resulting_gk_asset_id
+    `SELECT id, choice, incoming_collection_item_id, selected_gk_asset_id, resulting_gk_asset_id,
+            surface, related_prediction_event_id, canonical_collection_item_id, incoming_retired
        FROM data1_dev.physical_copy_decision_event
       WHERE principal_id = $1 AND capture_idempotency_key = $2`,
     [principalId, captureIdempotencyKey]
   );
   return res.rows[0] || null;
+}
+
+// An ANOTHER_COPY decision the operator already made for this exact catalogue
+// row (save-time prompt) — the capture-time backstop honors it instead of
+// asking a second time.
+export async function getAnotherCopyDecisionForItem(client, { principalId, collectionItemId }) {
+  const res = await client.query(
+    `SELECT id FROM data1_dev.physical_copy_decision_event
+      WHERE principal_id = $1 AND incoming_collection_item_id = $2 AND choice = 'ANOTHER_COPY'
+      ORDER BY decided_at DESC LIMIT 1`,
+    [principalId, collectionItemId]
+  );
+  return res.rows[0] || null;
+}
+
+export async function countOperatorCorrectionsForItem(client, { principalId, collectionItemId }) {
+  const res = await client.query(
+    `SELECT COUNT(*)::int AS n FROM data1_dev.operator_correction_event WHERE principal_id = $1 AND collection_item_id = $2`,
+    [principalId, collectionItemId]
+  );
+  return res.rows[0].n;
 }

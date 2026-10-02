@@ -47,6 +47,11 @@ export {
   linkAssertionEvidence,
   supersedeIdentifierAssertion,
   findPhysicalCopyCandidates,
+  findPhysicalCopyCandidatesForBook,
+  validatePhysicalCopyChoiceForBook,
+  getPhysicalCopyDecisionForKey,
+  assessTransientDuplicate,
+  retireTransientDuplicate,
   recordPhysicalCopyDecision,
   resolvePhysicalCopyChoice,
 } from './service.js';

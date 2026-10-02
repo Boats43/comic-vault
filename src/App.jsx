@@ -4410,6 +4410,7 @@ export function CollectionDetail({
   onClearOperatorGrade,
   onAbortEnrich,
   onAddPhoto,
+  onSameCopyRetired,
   onUpdateField,
   currentIndex,
   totalItems,
@@ -4932,7 +4933,7 @@ export function CollectionDetail({
         )}
       </div>
 
-      <GrailKeyOperatorPanel collectionItemId={item.id} item={item} photos={photos} onAddPhoto={onAddPhoto} />
+      <GrailKeyOperatorPanel collectionItemId={item.id} item={item} photos={photos} onAddPhoto={onAddPhoto} onSameCopyRetired={onSameCopyRetired} />
 
       {/* GK-273 — Research the Market: operator-run escalation, shown only when the structured market result is insufficient. Read-only beside price authority. */}
       <ResearchMarketPanel item={item} />
@@ -12384,38 +12385,38 @@ export default function App() {
         // produces a SIMILARITY signal — it never by itself decides same
         // physical asset; see the async physical-link check below and the
         // SAME COPY / ANOTHER COPY gate in the warning UI.
-        const matchedExisting = save ? catalogue.find(c =>
+        // GK-279 — ONE server-adjudicated physical-copy prompt. The SERVER
+        // supplies the candidates (this principal's owned, collection-linked
+        // physical assets that plausibly match); the operator is asked ONCE,
+        // here, BEFORE any duplicate catalogue row is created or synced.
+        // sameCopyConfirmations is no longer written anywhere.
+        let serverCopyCandidates = [];
+        if (save && isAuthenticated()) {
+          try {
+            const cr = await authFetch("/api/physical-copy", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "candidates", book: { title: data.title, issue: issueNum, year: data.year } }),
+            });
+            if (cr && cr.ok) serverCopyCandidates = (await cr.json().catch(() => ({}))).candidates || [];
+          } catch { serverCopyCandidates = []; /* the capture-time backstop still guards */ }
+        }
+        const hasServerCandidates = serverCopyCandidates.length > 0;
+        // Plain catalogue-only duplicate (no physical asset at stake) keeps
+        // its original single-button behavior.
+        const matchedExisting = (save && !hasServerCandidates) ? catalogue.find(c =>
           titlesLikelySameBook(c.title, data.title) &&
           c.issue === issueNum &&
           c.year === data.year
         ) : null;
-        const isDuplicate = !!matchedExisting;
-        if (isDuplicate) {
-          setDuplicateWarning({ title: data.title, issue: issueNum, year: data.year, existingId: matchedExisting.id, linkStatus: 'checking' });
+        const isDuplicate = hasServerCandidates || !!matchedExisting;
+        if (hasServerCandidates) {
+          const decisionKey = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `pcd-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          setDuplicateWarning({ title: data.title, issue: issueNum, year: data.year, existingId: serverCopyCandidates[0].collectionItemId, linkStatus: 'linked' });
+          setPendingDuplicate({ data: { ...data, issue: issueNum }, b64, existingId: serverCopyCandidates[0].collectionItemId, candidates: serverCopyCandidates, decisionKey });
+        } else if (matchedExisting) {
+          setDuplicateWarning({ title: data.title, issue: issueNum, year: data.year, existingId: matchedExisting.id, linkStatus: 'unlinked' });
           setPendingDuplicate({ data: { ...data, issue: issueNum }, b64, existingId: matchedExisting.id });
-          // GK-270, Case C — fire-and-forget: does the MATCHED existing
-          // catalogue row already carry durable physical-asset identity?
-          // If so, this is no longer a cosmetic "two catalogue rows"
-          // question — it's a real physical-identity decision the
-          // operator must make explicitly (no default, no silent merge,
-          // no silent second row). Reuses the exact resolution
-          // GrailKeyOperatorPanel.jsx already performs for the same
-          // purpose — no new endpoint, no new logic.
-          (async () => {
-            try {
-              const res = await authFetch(`/api/assets?collectionItemId=${encodeURIComponent(matchedExisting.id)}`);
-              const linked = !!(res && res.ok && (await res.json().catch(() => null))?.asset);
-              setDuplicateWarning((prev) =>
-                prev && prev.existingId === matchedExisting.id
-                  ? { ...prev, linkStatus: linked ? 'linked' : 'unlinked' }
-                  : prev
-              );
-            } catch {
-              setDuplicateWarning((prev) =>
-                prev && prev.existingId === matchedExisting.id ? { ...prev, linkStatus: 'unlinked' } : prev
-              );
-            }
-          })();
         } else {
           setDuplicateWarning(null);
           setPendingDuplicate(null);
@@ -13579,6 +13580,19 @@ export default function App() {
     setCatalogue((prev) => prev.filter((x) => x.id !== id));
     setSelectedItem((cur) => (cur && cur.id === id ? null : cur));
     return { id, ok: true };
+  }, [catalogue]);
+
+  // GK-279 — capture-time backstop SAME COPY retired a transient duplicate row
+  // SERVER-side (after preserving its photo and decision). Mirror it locally:
+  // drop that one IndexedDB/catalogue entry (never clearing the store) and
+  // land on the canonical existing card — ONE final Collection card.
+  const handleSameCopyRetired = useCallback(async (retiredId, canonicalId) => {
+    try { await deleteComic(retiredId); } catch { /* local row is re-pruned by the next server hydrate */ }
+    setCatalogue((prev) => prev.filter((x) => x.id !== retiredId));
+    setSelectedItem((cur) => {
+      if (!cur || cur.id !== retiredId) return cur;
+      return catalogue.find((x) => x.id === canonicalId) || null;
+    });
   }, [catalogue]);
 
   const listOnEbay = useCallback(async (item) => {
@@ -15534,11 +15548,43 @@ export default function App() {
                   <div style={{ marginBottom: 8 }}>
                     ⚠️ This may already be a physical copy you own. Is this the SAME copy, or ANOTHER copy?
                   </div>
-                  <div style={{ display: "flex", gap: 8 }}>
+                  {duplicateWarning.error && <div style={{ color: "#ff6666", marginBottom: 6, fontSize: 12 }}>{duplicateWarning.error}</div>}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {(pendingDuplicate.candidates || []).map((cand) => (
                     <button
-                      style={{ flex: 1, background: "#ff9900", color: "#000", border: "none", borderRadius: 4, padding: "6px 10px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+                      key={cand.gkAssetId}
+                      disabled={!!duplicateWarning.busy}
+                      style={{ flex: 1, minWidth: 120, background: "#ff9900", color: "#000", border: "none", borderRadius: 4, padding: "6px 10px", fontWeight: 700, fontSize: 12, cursor: duplicateWarning.busy ? "not-allowed" : "pointer", opacity: duplicateWarning.busy ? 0.6 : 1 }}
                       onClick={async () => {
-                        const { data, b64, existingId } = pendingDuplicate;
+                        const { data, b64, decisionKey } = pendingDuplicate;
+                        const existingId = cand.collectionItemId;
+                        // GK-279 — the SERVER adjudicates SAME COPY: it validates this
+                        // candidate against its own owned-asset set, links the new
+                        // inference (via the server-claimed receipt), appends this scan's
+                        // photo to the existing asset, and records the durable decision.
+                        // No second collection row and no second asset are ever created.
+                        setDuplicateWarning((prev) => (prev ? { ...prev, busy: true, error: null } : prev));
+                        let sameOk = false;
+                        try {
+                          const photoMatch = typeof b64 === "string" ? b64.match(/^data:([^;,]+);base64,(.*)$/) : null;
+                          const sr = await authFetch("/api/physical-copy", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              action: "same",
+                              book: { title: data.title, issue: data.issue, year: data.year },
+                              selectedGkAssetId: cand.gkAssetId,
+                              gradeReceiptId: typeof data.gradeReceiptId === "string" ? data.gradeReceiptId : undefined,
+                              photo: photoMatch ? { bytes: photoMatch[2], contentType: photoMatch[1] } : undefined,
+                              idempotencyKey: decisionKey,
+                            }),
+                          });
+                          sameOk = !!(sr && sr.ok);
+                        } catch { sameOk = false; }
+                        if (!sameOk) {
+                          setDuplicateWarning((prev) => (prev ? { ...prev, busy: false, error: "Could not confirm SAME COPY with the server — nothing was changed. Tap again to retry." } : prev));
+                          return;
+                        }
                         setPendingDuplicate(null);
                         setDuplicateWarning(null);
                         // GK-270 — Same Copy: resolve to the EXISTING
@@ -15630,20 +15676,11 @@ export default function App() {
                                   variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                                   ...mergeConfirmedIdentity(enrich, cur),
                                   ...applyProvisionalIdentity(enrich, cur),
-                                  // GK-270 — durable, explicit record of the
-                                  // operator's own physical-identity
-                                  // decision, so it can be explained later
-                                  // (governing dispatch's own "operator
-                                  // choice must be durable enough to
-                                  // explain the resulting identity decision
-                                  // later" requirement). Persisted via the
-                                  // same collection_item.attributes sync
-                                  // every other field on this object already
-                                  // uses — no new table, no migration.
-                                  sameCopyConfirmations: [
-                                    ...(Array.isArray(cur.sameCopyConfirmations) ? cur.sameCopyConfirmations : []),
-                                    { at: Date.now(), fromTitle: data.title, fromIssue: data.issue || null, fromYear: data.year || null },
-                                  ],
+                                  // GK-279 — the durable physical-copy decision is the
+                                  // SERVER's physical_copy_decision_event, written above.
+                                  // The former client-written sameCopyConfirmations
+                                  // attribute was unvalidated, SAME-only and not
+                                  // authority; it is no longer written.
                                 };
                                 persistCollectionItem(updated).catch(() => {});
                                 return prev.map((x) => x.id === existingId ? updated : x);
@@ -15655,14 +15692,32 @@ export default function App() {
                           // Refresh Market Data retries this exact work
                         }
                       }}
-                    >Same Copy</button>
+                    >{(pendingDuplicate.candidates || []).length > 1 ? `Same Copy — ${cand.title || "?"}${cand.issue ? ` #${cand.issue}` : ""}${cand.grade ? ` · ${cand.grade}` : ""}` : "Same Copy"}</button>
+                    ))}
                     <button
-                      style={{ flex: 1, background: "transparent", color: "#ffaa33", border: "1px solid #ff9900", borderRadius: 4, padding: "6px 10px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}
+                      disabled={!!duplicateWarning.busy}
+                      style={{ flex: 1, minWidth: 120, background: "transparent", color: "#ffaa33", border: "1px solid #ff9900", borderRadius: 4, padding: "6px 10px", fontWeight: 700, fontSize: 12, cursor: duplicateWarning.busy ? "not-allowed" : "pointer", opacity: duplicateWarning.busy ? 0.6 : 1 }}
                       onClick={async () => {
-                      const { data, b64 } = pendingDuplicate;
+                      const { data, b64, decisionKey } = pendingDuplicate;
                       const savedId = await addToCatalogue(data, b64);
                       setPendingDuplicate(null);
                       setDuplicateWarning(null);
+                      // GK-279 — ANOTHER COPY: the server records the operator's
+                      // physical-identity decision for this new catalogue row (so the
+                      // later explicit Capture does NOT ask a second time). Best-effort:
+                      // if it fails, the capture-time backstop still asks once.
+                      if (savedId && decisionKey) {
+                        authFetch("/api/physical-copy", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            action: "another",
+                            book: { title: data.title, issue: data.issue, year: data.year },
+                            collectionItemId: savedId,
+                            idempotencyKey: decisionKey,
+                          }),
+                        }).catch(() => {});
+                      }
                       if (savedId) {
                         // GrailKey Directive V, Task 2 (GK-88, ownership
                         // perimeter) — same shape as gradeBlob's own
@@ -15935,6 +15990,7 @@ export default function App() {
               }
             }}
             onAddPhoto={addPhotoToComic}
+            onSameCopyRetired={handleSameCopyRetired}
             onUpdateField={updateComicField}
             currentIndex={catalogue.indexOf(selectedItem)}
             totalItems={catalogue.length}

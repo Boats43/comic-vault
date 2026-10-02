@@ -1872,15 +1872,20 @@ export async function supersedeIdentifierAssertion({ __onAttemptError, ...args }
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// GK-279 — capture-time PHYSICAL COPY DISAMBIGUATION.
+// GK-279 — PHYSICAL COPY DISAMBIGUATION (server-adjudicated, asked ONCE).
 // PHYSICAL IDENTITY != CATALOGUE SIMILARITY. A candidate is "this might be
 // a physical asset you already own" — never a decision. The operator
-// chooses SAME_COPY (reuse that asset) or ANOTHER_COPY (mint a new one);
+// chooses SAME_COPY (reuse that asset) or ANOTHER_COPY (a distinct one);
 // the server validates the choice against ITS OWN candidate set, so a
 // client can never force linkage to an arbitrary / foreign gkAssetId.
+// The decision surface is the SAVE flow (before any duplicate row is
+// durable); the capture-time check is only a backstop for items that never
+// passed through it, and honors an earlier ANOTHER_COPY decision (no second
+// prompt).
 // ─────────────────────────────────────────────────────────────────────
-export const PHYSICAL_COPY_RULE_VERSION = 'gk279-v1';
+export const PHYSICAL_COPY_RULE_VERSION = 'gk279-v2';
 const PHYSICAL_COPY_CHOICES = ['SAME_COPY', 'ANOTHER_COPY'];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function candidateView(row) {
   const a = row.attributes || {};
@@ -1895,25 +1900,16 @@ function candidateView(row) {
   };
 }
 
-export async function findPhysicalCopyCandidates({ principalId, collectionItemId, book } = {}) {
-  requireFields({ principalId, collectionItemId }, ['principalId', 'collectionItemId']);
-  // The incoming identity comes from the DURABLE collection row first; the
-  // request's own book payload is only a fallback for missing fields.
-  const collectionMod = await import('../collection/index.js');
-  const item = await collectionMod.getMyCollectionItem({ principalId, id: collectionItemId });
-  const attrs = item?.attributes || {};
-  const incoming = {
-    title: attrs.title || book?.title || null,
-    issue: attrs.issue ?? book?.issue ?? null,
-    year: attrs.year ?? book?.year ?? null,
-  };
-  if (!incoming.title) return [];
+// Candidates for an arbitrary incoming identity (no collection row needed —
+// the save-time surface has none yet).
+async function candidatesForIdentity({ principalId, incoming, excludeCollectionItemId = null }) {
+  if (!incoming?.title) return [];
   const client = await acquireConnection();
   try {
     await assertPrincipalActive(client, principalId);
     const rows = await repo.listOwnedLinkedCatalogueRows(client, { principalId });
     return rows
-      .filter((r) => r.collection_item_id !== collectionItemId)
+      .filter((r) => r.collection_item_id !== excludeCollectionItemId)
       .filter((r) => isPlausiblePhysicalCopyCandidate(incoming, r.attributes || {}))
       .map(candidateView);
   } finally {
@@ -1921,36 +1917,108 @@ export async function findPhysicalCopyCandidates({ principalId, collectionItemId
   }
 }
 
-// Returns { candidates, choice, selected }. choice === null means no
-// candidate exists (normal new-asset flow). Throws
+export async function findPhysicalCopyCandidatesForBook({ principalId, book } = {}) {
+  requireFields({ principalId, book }, ['principalId', 'book']);
+  return candidatesForIdentity({
+    principalId,
+    incoming: { title: book.title ?? null, issue: book.issue ?? null, year: book.year ?? null },
+  });
+}
+
+export async function findPhysicalCopyCandidates({ principalId, collectionItemId, book } = {}) {
+  requireFields({ principalId, collectionItemId }, ['principalId', 'collectionItemId']);
+  // The incoming identity comes from the DURABLE collection row first; the
+  // request's own book payload is only a fallback for missing fields.
+  const collectionMod = await import('../collection/index.js');
+  const item = await collectionMod.getMyCollectionItem({ principalId, id: collectionItemId });
+  const attrs = item?.attributes || {};
+  return candidatesForIdentity({
+    principalId,
+    incoming: {
+      title: attrs.title || book?.title || null,
+      issue: attrs.issue ?? book?.issue ?? null,
+      year: attrs.year ?? book?.year ?? null,
+    },
+    excludeCollectionItemId: collectionItemId,
+  });
+}
+
+function validateDisposition(disposition, candidates) {
+  const choice = disposition?.choice;
+  if (!PHYSICAL_COPY_CHOICES.includes(choice)) {
+    throw new ValidationFailedError(`copyDisposition.choice must be one of ${PHYSICAL_COPY_CHOICES.join('|')}`);
+  }
+  if (choice === 'ANOTHER_COPY') {
+    if (disposition.selectedGkAssetId) {
+      throw new ValidationFailedError('ANOTHER_COPY must not carry a selectedGkAssetId');
+    }
+    return { choice, selected: null };
+  }
+  // SAME_COPY: identical refusal for nonexistent and foreign ids — nothing
+  // about other principals' assets is ever revealed.
+  const selected = candidates.find((c) => c.gkAssetId === disposition.selectedGkAssetId) || null;
+  if (!selected) {
+    throw new ValidationFailedError("selectedGkAssetId is not one of this principal's plausible owned candidates");
+  }
+  return { choice, selected };
+}
+
+// SAVE-time validation: no collection row exists. Returns the validated
+// choice + the server's own candidate set (empty set => nothing to decide).
+export async function validatePhysicalCopyChoiceForBook({ principalId, book, disposition } = {}) {
+  const candidates = await findPhysicalCopyCandidatesForBook({ principalId, book });
+  if (candidates.length === 0) {
+    throw new ValidationFailedError('no plausible owned physical copy exists for this book — there is nothing to decide');
+  }
+  const { choice, selected } = validateDisposition(disposition, candidates);
+  return { candidates, choice, selected };
+}
+
+export async function getPhysicalCopyDecisionForKey({ principalId, captureIdempotencyKey } = {}) {
+  requireFields({ principalId, captureIdempotencyKey }, ['principalId', 'captureIdempotencyKey']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    return await repo.getPhysicalCopyDecision(client, { principalId, captureIdempotencyKey });
+  } finally {
+    client.release();
+  }
+}
+
+// Returns { candidates, choice, selected, priorDecision }. choice === null
+// means no candidate exists (normal new-asset flow). Throws
 // PhysicalCopyDecisionRequiredError when candidates exist and the operator
-// has not chosen; ValidationFailedError on any invalid/forged choice.
+// has not chosen (neither now nor at an earlier save-time prompt);
+// ValidationFailedError on any invalid/forged choice.
 export async function resolvePhysicalCopyChoice({ principalId, collectionItemId, book, disposition, captureIdempotencyKey } = {}) {
   const candidates = await findPhysicalCopyCandidates({ principalId, collectionItemId, book });
   if (candidates.length === 0) return { candidates, choice: null, selected: null };
+
+  // The operator already answered for THIS item at save time: honor it, do
+  // not ask again (asked once).
+  const client0 = await acquireConnection();
+  let earlier = null;
+  try {
+    earlier = await repo.getAnotherCopyDecisionForItem(client0, { principalId, collectionItemId });
+  } finally {
+    client0.release();
+  }
+  if (earlier) {
+    if (disposition?.choice === 'SAME_COPY') {
+      throw new IdempotencyConflictError(
+        `collectionItemId "${collectionItemId}" was already decided ANOTHER_COPY; it cannot also be SAME_COPY`
+      );
+    }
+    return { candidates, choice: 'ANOTHER_COPY', selected: null, priorDecision: true };
+  }
+
   if (disposition === undefined || disposition === null) {
     throw new PhysicalCopyDecisionRequiredError(
       'This capture resembles a physical copy you already own — choose SAME_COPY or ANOTHER_COPY',
       candidates
     );
   }
-  const choice = disposition.choice;
-  if (!PHYSICAL_COPY_CHOICES.includes(choice)) {
-    throw new ValidationFailedError(`copyDisposition.choice must be one of ${PHYSICAL_COPY_CHOICES.join('|')}`);
-  }
-  let selected = null;
-  if (choice === 'ANOTHER_COPY') {
-    if (disposition.selectedGkAssetId) {
-      throw new ValidationFailedError('ANOTHER_COPY must not carry a selectedGkAssetId');
-    }
-  } else {
-    // SAME_COPY: identical refusal for nonexistent and foreign ids — nothing
-    // about other principals' assets is ever revealed.
-    selected = candidates.find((c) => c.gkAssetId === disposition.selectedGkAssetId) || null;
-    if (!selected) {
-      throw new ValidationFailedError("selectedGkAssetId is not one of this principal's plausible owned candidates");
-    }
-  }
+  const { choice, selected } = validateDisposition(disposition, candidates);
   // Key reuse with a DIFFERENT decision must fail BEFORE any mutation —
   // otherwise a conflicting retry would mint an orphan asset and only then
   // discover the conflict at decision-record time.
@@ -1971,11 +2039,18 @@ export async function resolvePhysicalCopyChoice({ principalId, collectionItemId,
 }
 
 export async function recordPhysicalCopyDecision({
-  principalId, collectionItemId, candidateGkAssetIds, choice, selectedGkAssetId = null, resultingGkAssetId, captureIdempotencyKey,
+  principalId, collectionItemId = null, candidateGkAssetIds, choice, selectedGkAssetId = null, resultingGkAssetId,
+  captureIdempotencyKey, surface = 'CAPTURE', relatedPredictionEventId = null, canonicalCollectionItemId = null, incomingRetired = false,
 } = {}) {
-  requireFields({ principalId, collectionItemId, candidateGkAssetIds, choice, resultingGkAssetId, captureIdempotencyKey },
-    ['principalId', 'collectionItemId', 'candidateGkAssetIds', 'choice', 'resultingGkAssetId', 'captureIdempotencyKey']);
+  // A SAVE-time ANOTHER_COPY precedes any mint, so it has no resulting asset yet.
+  const noResultYet = surface === 'SAVE' && choice === 'ANOTHER_COPY';
+  requireFields({ principalId, candidateGkAssetIds, choice, captureIdempotencyKey },
+    ['principalId', 'candidateGkAssetIds', 'choice', 'captureIdempotencyKey']);
+  if (!noResultYet && !resultingGkAssetId) throw new ValidationFailedError('Missing required field: resultingGkAssetId');
+  resultingGkAssetId = resultingGkAssetId ?? null;
   if (!PHYSICAL_COPY_CHOICES.includes(choice)) throw new ValidationFailedError('invalid choice');
+  if (!['SAVE', 'CAPTURE'].includes(surface)) throw new ValidationFailedError('invalid surface');
+  if (relatedPredictionEventId && !UUID_RE.test(relatedPredictionEventId)) relatedPredictionEventId = null;
   const client = await acquireConnection();
   try {
     await assertPrincipalActive(client, principalId);
@@ -1984,6 +2059,7 @@ export async function recordPhysicalCopyDecision({
       principalId, choice, incomingCollectionItemId: collectionItemId,
       candidateGkAssetIds, selectedGkAssetId, resultingGkAssetId,
       captureIdempotencyKey, ruleVersion: PHYSICAL_COPY_RULE_VERSION,
+      surface, relatedPredictionEventId, canonicalCollectionItemId, incomingRetired,
     });
     if (id) return { decisionId: id, outcome: 'recorded' };
     const existing = await repo.getPhysicalCopyDecision(client, { principalId, captureIdempotencyKey });
@@ -1995,5 +2071,50 @@ export async function recordPhysicalCopyDecision({
     return { decisionId: existing.id, outcome: 'replayed' };
   } finally {
     client.release();
+  }
+}
+
+// Capture-time SAME_COPY backstop: may the transient unlinked duplicate row
+// be retired? EVERY condition must hold (never forces, never weakens
+// immutability): row exists for this principal, is unlinked, carries no
+// operator correction history, and at most the one capture photo (so the
+// photo supplied in the same request preserves all evidence). The model
+// prediction link survives: the row's server-owned
+// modelPredictedProvenance.predictionEventId is read BEFORE retirement and
+// stored on the decision event.
+export async function assessTransientDuplicate({ principalId, collectionItemId } = {}) {
+  requireFields({ principalId, collectionItemId }, ['principalId', 'collectionItemId']);
+  const collectionMod = await import('../collection/index.js');
+  const item = await collectionMod.getMyCollectionItem({ principalId, id: collectionItemId });
+  const attrs = item?.attributes || {};
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const link = await repo.getCollectionItemLink(client, { collectionItemId });
+    const corrections = await repo.countOperatorCorrectionsForItem(client, { principalId, collectionItemId });
+    const photoCount = Array.isArray(attrs.remoteImages) ? attrs.remoteImages.length : 0;
+    const predictionEventId = attrs?.modelPredictedProvenance?.predictionEventId ?? null;
+    const reasons = [];
+    if (link) reasons.push('row is linked to a physical asset');
+    if (corrections > 0) reasons.push('row carries operator correction history');
+    if (photoCount > 1) reasons.push('row holds more than the single capture photo');
+    return {
+      ok: reasons.length === 0, reasons,
+      predictionEventId: predictionEventId && UUID_RE.test(predictionEventId) ? predictionEventId : null,
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function retireTransientDuplicate({ principalId, collectionItemId } = {}) {
+  requireFields({ principalId, collectionItemId }, ['principalId', 'collectionItemId']);
+  const collectionMod = await import('../collection/index.js');
+  try {
+    await collectionMod.deleteCollectionItem({ principalId, id: collectionItemId });
+    return { retired: true };
+  } catch (e) {
+    if (e instanceof collectionMod.NotFoundError) return { retired: false, alreadyGone: true };
+    throw e;
   }
 }

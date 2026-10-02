@@ -110,19 +110,23 @@ console.log('\n--- Section 2: App.jsx Case C gate wiring (static source-text pro
   assertTrue(/titlesLikelySameBook\(c\.title, data\.title\)/g.test(appSrc) && (appSrc.match(/titlesLikelySameBook\(/g) || []).length >= 2, 'the similarity check is wired at more than one save site (scan path + bulk import), not just one');
 
   assertTrue(/linkStatus === 'linked'/.test(appSrc), "the Case C gate's two-branch split (linked vs unlinked/checking) exists");
-  assertTrue(/>Same Copy<\/button>/.test(appSrc), 'a "Same Copy" control exists');
+  // GK-279: the control label is now per-candidate (ternary), so the closing marker is `"Same Copy"}</button>`.
+  assertTrue(/"Same Copy"\}<\/button>/.test(appSrc), 'a "Same Copy" control exists');
   assertTrue(/>Another Copy<\/button>/.test(appSrc), 'an "Another Copy" control exists (relabeled from the original "Save Another Copy" only in the linked-duplicate branch)');
   assertTrue(/>Save Another Copy<\/button>/.test(appSrc), 'the ORIGINAL single-button, no-physical-stakes path is preserved unchanged for the unlinked/ordinary-duplicate case');
 
   // The Same Copy handler itself, isolated for inspection.
   const sameCopyStart = appSrc.indexOf('Same Copy: resolve to the EXISTING');
-  const sameCopyEnd = appSrc.indexOf('>Same Copy</button>');
+  const sameCopyEnd = appSrc.indexOf('"Same Copy"}</button>');
   assertTrue(sameCopyStart > -1 && sameCopyEnd > sameCopyStart, 'the Same Copy handler block is locatable in source');
   const sameCopySlice = appSrc.slice(sameCopyStart, sameCopyEnd);
   assertTrue(!/\baddToCatalogue\(/.test(sameCopySlice), 'the Same Copy handler never calls addToCatalogue (never mints a new collection_item id)');
   assertTrue(/ownedRefresh: true/.test(sameCopySlice), 'the Same Copy handler sends ownedRefresh:true (reuses the existing GK-254 owned-item mechanism, no new auth surface)');
   assertTrue(/collectionItemId: existingId/.test(sameCopySlice), 'the Same Copy handler targets the EXISTING matched item\'s id, never a freshly-generated one');
-  assertTrue(/sameCopyConfirmations/.test(sameCopySlice), 'a durable confirmation marker is written to the existing item\'s own attributes (explains the identity decision later, no new table/migration)');
+  // GK-279 supersedes the GK-270 client marker: the durable decision is the SERVER's
+  // physical_copy_decision_event; the client-written sameCopyConfirmations attribute is no longer written.
+  assertTrue(!/sameCopyConfirmations:\s*\[/.test(appSrc), 'GK-279: the client-written sameCopyConfirmations attribute is no longer written (server physical_copy_decision_event is the durable decision)');
+  assertTrue(/\/api\/physical-copy/.test(sameCopySlice) || appSrc.indexOf('/api/physical-copy', sameCopyStart - 3000) > -1, 'GK-279: SAME COPY is adjudicated by the server endpoint');
 
   // No default / no auto-proceed: the gate renders only two explicit
   // buttons (Same Copy / Another Copy) when linked, or the original
@@ -133,7 +137,7 @@ console.log('\n--- Section 2: App.jsx Case C gate wiring (static source-text pro
   // 'linked'-gated div wrapper itself is the only place either new
   // button exists, so a 'checking'/'unlinked' render can reach neither.
   assertTrue(
-    appSrc.indexOf("duplicateWarning.linkStatus === 'linked'") < appSrc.indexOf('>Same Copy</button>'),
+    appSrc.indexOf("duplicateWarning.linkStatus === 'linked'") < appSrc.indexOf('"Same Copy"}</button>'),
     'the Same Copy/Another Copy controls are only reachable inside the linkStatus==="linked" branch, never unconditionally'
   );
 }

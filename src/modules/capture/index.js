@@ -8,7 +8,7 @@
 //
 // See docs/adr/DATA-1-CAPTURE-INTEGRATION.md for the full design.
 
-export { captureFromScan } from './service.js';
+export { captureFromScan, listSaveTimeCopyCandidates, confirmSameCopyAtSave, recordAnotherCopyAtSave } from './service.js';
 
 export {
   AssetServiceError,
