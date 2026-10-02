@@ -41,7 +41,7 @@ async function census() {
 }
 
 try {
-  console.log(`=== ${target}${dryRun ? ' (DRY RUN, rolls back)' : ''} -- UTC ${(await client.query("SELECT now() AT TIME ZONE 'UTC' AS t")).rows[0].t.toISOString()} ===`);
+  console.log(`=== ${target}${dryRun ? ' (DRY RUN, rolls back)' : ''} -- UTC (explicit, DB-formatted; never a JS Date) ${(await client.query(`SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS t`)).rows[0].t} ===`);
   const before = await census();
   console.log('BEFORE', JSON.stringify(before));
   const sql = readFileSync(path.join(repoRoot, 'db', 'data0', '0035_learning_spine.sql'), 'utf8');

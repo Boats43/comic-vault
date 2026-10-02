@@ -62,7 +62,11 @@ try {
     if (!exists) throw new Error(`event ${e} does not exist in ${target}`);
     add(table, id, item || null);
   }
-  console.log(`${apply ? 'REGISTERING' : 'DRY RUN (add --apply)'} ${rows.size} event(s) in ${target}:`);
+  // The date is NEVER hand-typed by default: it comes from the database as an explicit UTC calendar
+  // date string (a JS Date here would be shifted by the local timezone -- see GK-278C).
+  const dbUtcDate = (await client.query(`SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS d`)).rows[0].d;
+  const effectiveDate = date || dbUtcDate;
+  console.log(`${apply ? 'REGISTERING' : 'DRY RUN (add --apply)'} ${rows.size} event(s) in ${target} (certification_date ${effectiveDate} UTC):`);
   for (const r of rows.values()) console.log(`  ${r.table}  ${r.id}`);
   if (apply) {
     let n = 0;
@@ -70,7 +74,7 @@ try {
       const res = await client.query(
         `INSERT INTO data1_dev.learning_corpus_exclusion (event_table, event_id, reason_code, reason, ticket, certification_date, source_collection_item_id)
          VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (event_table, event_id) DO NOTHING`,
-        [r.table, r.id, reasonCode, reason, ticket, date || null, r.src]
+        [r.table, r.id, reasonCode, reason, ticket, effectiveDate, r.src]
       );
       n += res.rowCount;
     }
