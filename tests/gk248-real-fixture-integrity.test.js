@@ -52,12 +52,13 @@ for (const f of pfiles) {
   const text = fs.readFileSync(path.join(pdir, f), 'utf8');
   const j = JSON.parse(text);
   ok(j.fixtureKind === 'PREDICTION_VS_OPERATOR_LABEL' && j.sourceType === 'REAL_PRODUCTION_RECORD', `${f}: typed REAL_PRODUCTION_RECORD pair`);
-  ok(j.modelPrediction?.grade && j.operatorLabel?.grade && j.assetIdentity?.title, `${f}: asset identity + modelPrediction + operatorLabel present`);
-  ok(!('truth' in j) && !('groundTruth' in j) && !JSON.stringify(Object.keys(j.operatorLabel)).match(/truth/i) && !JSON.stringify(Object.keys(j.modelPrediction)).match(/truth/i), `${f}: operator label is a LABEL, never "truth"/"groundTruth"`);
-  ok(['provider', 'model', 'modelVersion', 'promptVersion'].every((k) => j.modelPrediction[k] === 'UNKNOWN'), `${f}: provider/model/version/prompt are UNKNOWN (never inferred)`);
+  ok(j.historicalPredictionClaim?.grade && j.operatorLabel?.grade && j.assetIdentity?.title, `${f}: asset identity + historicalPredictionClaim + operatorLabel present`);
+  ok(!('truth' in j) && !('groundTruth' in j) && !JSON.stringify(Object.keys(j.operatorLabel)).match(/truth/i) && !JSON.stringify(Object.keys(j.historicalPredictionClaim)).match(/truth/i), `${f}: operator label is a LABEL, never "truth"/"groundTruth"`);
+  ok(['provider', 'model', 'modelVersion', 'promptVersion'].every((k) => j.historicalPredictionClaim[k] === 'UNKNOWN'), `${f}: provider/model/version/prompt are UNKNOWN (never inferred)`);
+  ok(j.historicalPredictionClaim.sourceStanding === 'CLIENT_REPORTED_UNCORROBORATED' && !('modelPrediction' in j), `${f}: prediction is a client-reported historical claim, not a verified model output`);
   ok(j.adjudication === null, `${f}: no adjudicated answer claimed`);
   ok(scan(j).length === 0 && !/"(id|principalId|collectionItemId|gkAssetId)"/.test(text), `${f}: no principal ID, item ID, credential or PII`);
-  ok(j.labelDiffersFromPrediction === (j.operatorLabel.grade !== j.modelPrediction.grade) && j.labelDiffersFromPrediction === true, `${f}: operator label differs from the first model grade`);
+  ok(j.labelDiffersFromPrediction === (j.operatorLabel.grade !== j.historicalPredictionClaim.grade) && j.labelDiffersFromPrediction === true, `${f}: operator label differs from the first model grade`);
 }
 
 console.log('\n— corpus classes (do not conflate) —');

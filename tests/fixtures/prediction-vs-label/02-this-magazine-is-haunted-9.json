@@ -8,7 +8,7 @@
     "year": "1953",
     "publisher": "Fawcett"
   },
-  "modelPrediction": {
+  "historicalPredictionClaim": {
     "kind": "FIRST_MODEL_GRADE",
     "grade": "GD 2.0",
     "recordedAt": "2026-09-26T04:58:31.665Z",
@@ -16,7 +16,8 @@
     "model": "UNKNOWN",
     "modelVersion": "UNKNOWN",
     "promptVersion": "UNKNOWN",
-    "note": "collection_item.attributes.modelPredictedGrade (write-once at first save). Provider/model/version were never persisted and are NOT inferred."
+    "note": "collection_item.attributes.modelPredictedGrade (write-once at first save) as REPORTED BY THE CLIENT via /api/collection; never server-minted or server-verified, so this is a historical claim, not a verified model output. Provider/model/version/prompt were never persisted and are NOT inferred.",
+    "sourceStanding": "CLIENT_REPORTED_UNCORROBORATED"
   },
   "operatorLabel": {
     "kind": "OPERATOR_ENTERED_GRADE",
