@@ -2206,3 +2206,6 @@ Non-ticket notes — record only, no GK-N assigned, no status tracked.
   identity unresolved. Phase 2 promoted a provisional identity (`pool family
   has 6 members >= 3 floor`), which moved the label but not the boundary. No
   defect established.
+
+### GK-275 — Economic provenance trace (2026-10-01, TRACE + DESIGN ONLY)
+Capture path (`mapping.mapValuation`) writes a client-supplied dollar value into `valuation_event` labelled `engine-computed`; an authenticated client can write an arbitrary value (YES, proven by execution). Production existing rows: 2 CLIENT_ASSERTED, 1 OPERATOR_OVERRIDE. Provenance enum, scorer trust rule, immutability-trigger proposal, GK-180 preconditions A-F, fingerprint and atomic-write design are in `docs/OUTCOME-SPINE-TRACES.md` / `docs/LEARNING-SPINE-LAWS.md`. Nothing enabled or migrated; GK-180 remains CLOSED. Related: GK-261, GK-180, GK-274.

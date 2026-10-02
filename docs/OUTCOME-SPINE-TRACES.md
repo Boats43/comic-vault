@@ -65,3 +65,42 @@ Additionally (VERIFIED, from the Production census): 131 of 139 Production colle
 3. **`modelPredictedGrade*`:** must be minted from the **server's own model result**. `/api/grade` already runs under a verified principal; have it keep a short-TTL, principal-scoped record keyed by `scanId` (server-side only). The collection create call sends only the `scanId` — **never values** — and the server claims that record to write the baseline through an internal patch. No record / unclaimable → the baseline stays absent (UNKNOWN), never client-supplied. This record is the direct precursor of `model_prediction_event` and obeys the same law.
 4. Adversarial tests (GK-260 style): forged insert / overwrite / null-clear via `/api/collection` rejected for all five keys; internal patch SET/CHANGE/CLEAR; legacy rows keep their existing (client-written, unverifiable) values — they are labelled as such, not retro-certified.
 5. No schema change required for this closure.
+
+## Economic provenance trace (2026-10-01) — VERIFIED unless tagged
+
+### Writers of `valuation_event` (sole INSERT: `repository.js insertValuationEvent`, via `recordValuation`)
+| Writer | Value source | Class |
+|---|---|---|
+| `src/modules/capture/service.js` (`captureFromScan`, via `api/capture-scan.js`) | `mapping.mapValuation`: `Number(String(scanPayload.outcome.price).replace(/[^0-9.]/g,''))` from the **request body**; `method` hard-coded `'engine-computed'`; `buildSha` = client `evidence.promptVersion` else `'unknown'` | **CLIENT_ASSERTED** |
+| `src/lib/outcome1RuntimeBridge.js` (only caller `api/enrich.js:13521`) | server pipeline result, but Development-only gated | SERVER_DERIVED (never ran in Production) |
+| Manual scripts (GK-226 correction row) | operator | OPERATOR_OVERRIDE |
+| Tests / replay scripts | synthetic | not production |
+
+**Can an authenticated client write an arbitrary dollar value into `valuation_event`? YES** (through `/api/capture-scan`, subject to the H8 gate). Proof: `mapValuation` executed on an attacker-shaped payload returned the attacker's value with `method 'engine-computed'`; `captureFromScan` validates only required-field presence and correlation ids. Production reachability: `MILESTONE_TEN_H8_PASS` exists as a sensitive Production variable (value unreadable, so open/closed is NOT established); `MILESTONE_TEN_H8_BOOTSTRAP` is absent.
+
+### Existing-row classification (read-only)
+- Production (3 rows): two capture-path rows (idempotency key `<uuid>:valuation`, `build_sha 'unknown'`) → **CLIENT_ASSERTED** by construction; one row keyed `gk226-oml25-valuation-correction-2026-09-20` → **OPERATOR_OVERRIDE**.
+- Development (82 rows): 26 `<uuid>:valuation` capture-path keys (CLIENT_ASSERTED), 9 `operator-override`, remainder test/replay keys. Anything not provable stays LEGACY_UNKNOWN. No backfill performed.
+
+### UPDATE/DELETE and immutability
+No application code mutates or deletes `valuation_event`/`decision_event` (only tests do). No DB triggers exist on them. **Proposal (not installed):** BEFORE UPDATE OR DELETE triggers raising an exception, per the `0014`–`0017` pattern, plus a rollback script. Risks: test suites deleting scratch rows in `data1_dev` would fail (must move to scratch schemas, GK-223 pattern); cleanup scripts need a documented bypass. Rollback = `DROP TRIGGER`.
+
+### Smallest additive provenance field (proposal, no migration)
+Nullable `valuation_event.provenance TEXT CHECK (provenance IN ('SERVER_DERIVED','OPERATOR_OVERRIDE','CLIENT_ASSERTED','LEGACY_UNKNOWN'))`. Server-set only, never from the request body. Capture-path writer sets CLIENT_ASSERTED until it computes the value itself. NULL reads as LEGACY_UNKNOWN.
+
+### GK-180 Production preconditions (hard)
+A. Trusted provenance field exists and is server-set. B. Idempotency key is server-derived from the fingerprint below; the client `d5dIdempotencyKey` path is unused. C. Valuation + decision in ONE transaction. D. Real build identity (never `'unknown'`). E. Linked physical asset only (existing `resolveEligibleSubject`, never mint). F. Server-owned economic inputs: price/grade/decision from the server's own pipeline result in the same request, never `scanPayload`.
+
+### Fingerprint (SAME vs MATERIALLY NEW decision)
+`sha256(principalId | gkAssetId | valueAmount | currency | gradeAssumption | decision.action | sorted reasonCodes | provenance | buildSha | marketPopulationId-or-null)`. Identical → replay (SAME). Any differing component → new valuation + decision (MATERIALLY NEW). Timestamps and request ids are excluded so an unchanged auto-refresh never duplicates.
+
+### Atomic operation design
+One service call `recordValuationAndDecision` in a single `BEGIN…COMMIT`: idempotency check → INSERT valuation → INSERT decision referencing it → two `domain_event`s → one idempotency claim. Removes the orphan-valuation window. Not built.
+
+### GK-261 server-receipt design and INSERT/ON-CONFLICT analysis
+- `/api/grade` (already principal-authenticated) stores a server-side receipt `{principalId, grade/reason/confidence, at, provider, model, promptVersion}` under an opaque scan id (short TTL) and returns only the id. Collection save sends the id, never values; the server claims the receipt (single use) and writes the baseline via an internal patch. Missing/expired/foreign receipt → baseline stays UNKNOWN.
+- Current behavior (VERIFIED, `collection/repository.js`): INSERT strips only the six grading keys, so `modelPredictedGrade/Reason/Confidence/At` and `identityAuthority` insert verbatim from the client blob. ON CONFLICT/UPDATE merge is existing-base `||` incoming: an incoming present value (including explicit null) overwrites; only omitted keys are preserved. These five keys are forgeable/clearable by any authenticated client today.
+- Fix pattern = GK-260 fully-protected set + internal patch path; no schema change. Not implemented.
+
+### Fixture metadata amendment (done, commit 9a43d70)
+Three prediction-vs-label fixtures: `modelPrediction` → `historicalPredictionClaim`, `sourceStanding: CLIENT_REPORTED_UNCORROBORATED`; provider/model/version/prompt remain UNKNOWN; grades and operatorLabel unchanged. `tests/gk248-real-fixture-integrity.test.js` 71/71.

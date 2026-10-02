@@ -53,3 +53,11 @@ Two new append-only tables (`model_prediction_event`, `operator_correction_event
 | Phone-only fixtures (ASM #11, Hulk #180) exist | **UNVERIFIED** (reported by the operator; not on this machine) |
 | Fixture-bank "known corrupt export" cause | **UNVERIFIED** beyond the empty file observed |
 | Any remaining subagent census statement not re-checked above | **SUBAGENT-ONLY** — must be personally verified before any schema authorization |
+
+## Economic provenance laws (added 2026-10-01, dispatch "ECONOMIC PROVENANCE BEFORE GK-180")
+- **DURABLE ECONOMIC PROVENANCE IS PART OF ECONOMIC AUTHORITY. A valuation whose origin cannot be established is not authority — it is a record that something was once asserted.**
+- Unknown provenance remains unknown. It is never promoted, inferred or backfilled from plausibility (`method='engine-computed'` on a row is a label, not proof).
+- A scorer (PredictionError, any future learning consumer) that cannot establish trusted valuation provenance REFUSES. It never scores "best effort".
+- Provenance enum (design only, no migration): `SERVER_DERIVED` | `OPERATOR_OVERRIDE` | `CLIENT_ASSERTED` | `LEGACY_UNKNOWN`. Rows that cannot be proven stay `LEGACY_UNKNOWN`; no blind backfill.
+- Scoring trust rule: SERVER_DERIVED → scoreable. CLIENT_ASSERTED and LEGACY_UNKNOWN → REFUSED (new refusal code, `pe-historical-anchor-v2` when built). OPERATOR_OVERRIDE → scoreable ONLY as an operator-judgment score, reported under a separate label and never aggregated with engine accuracy (it measures the operator, not the engine).
+- A prediction stored in a collection item is a **historical claim** (`CLIENT_REPORTED_UNCORROBORATED`) until a server-owned receipt exists (GK-261 design in OUTCOME-SPINE-TRACES.md).
