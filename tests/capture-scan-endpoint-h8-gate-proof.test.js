@@ -174,6 +174,7 @@ try {
         scanPayload: { collectionItemId: CID, correlationId: randomUUID(), book: { title: 'Brave and the Bold', issue: '141', year: '1978' } },
         photos: [{ bytes: photoBytes.toString('base64'), contentType: 'image/jpeg', captureRole: 'capture-photo' }],
         idempotencyKey: `${TAG}:cap1`,
+        copyDisposition: { choice: 'ANOTHER_COPY' }, // GK-279: prior runs' retained assets share this identity; operator choice required
       },
     };
     idempotencyKeysUsed.push(`${TAG}:cap1:mint`, `${TAG}:cap1:link`, `${TAG}:cap1:identity`, `${TAG}:cap1:media:0`);

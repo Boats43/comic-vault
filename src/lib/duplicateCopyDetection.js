@@ -50,3 +50,37 @@ export function titlesLikelySameBook(titleA, titleB, threshold = 0.6) {
   }
   return overlap / smaller.size >= threshold;
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// GK-279 — capture-time physical-copy candidate matching.
+//
+// A candidate means "this MIGHT be a physical asset you already own" —
+// never "this IS the same physical copy". Deliberately the smallest
+// deterministic signal set (title token overlap + issue + year); no
+// embeddings, no image fingerprinting. Publisher/variant/grade are
+// CONTEXT shown to the operator, never exclusion criteria: a false
+// positive costs one tap, a false negative silently mints a duplicate.
+// ─────────────────────────────────────────────────────────────────────
+function normIssue(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).trim().replace(/^#\s*/, '').toLowerCase();
+}
+
+export function issuesCompatible(a, b) {
+  const x = normIssue(a), y = normIssue(b);
+  if (!x || !y) return true; // unknown on either side cannot exclude
+  return x === y;
+}
+
+export function yearsCompatible(a, b) {
+  const x = parseInt(a, 10), y = parseInt(b, 10);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return true;
+  return Math.abs(x - y) <= 1; // cover-date vs publication-date drift
+}
+
+export function isPlausiblePhysicalCopyCandidate(incoming, existing) {
+  if (!incoming || !existing) return false;
+  return titlesLikelySameBook(incoming.title, existing.title)
+    && issuesCompatible(incoming.issue, existing.issue)
+    && yearsCompatible(incoming.year, existing.year);
+}

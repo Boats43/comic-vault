@@ -18,4 +18,5 @@ export {
   IdempotencyConflictError,
   ValidationFailedError,
   AuthorizationFailedError,
+  PhysicalCopyDecisionRequiredError,
 } from '../assets/index.js';

@@ -821,3 +821,43 @@ export async function listLiveIdentifierAssertions(client, assetId) {
   );
   return r.rows;
 }
+
+// GK-279 — every collection-linked physical asset this principal CURRENTLY
+// OWNS, with its catalogue projection. Ownership is enforced in the WHERE
+// clause (current_owner), never filtered afterward: a foreign principal's
+// asset cannot appear here by construction.
+export async function listOwnedLinkedCatalogueRows(client, { principalId }) {
+  const res = await client.query(
+    `SELECT cil.gk_asset_id, cil.collection_item_id, ci.attributes
+       FROM data1_dev.collection_item_link cil
+       JOIN data1_dev.current_owner co ON co.asset_id = cil.gk_asset_id AND co.owner_principal_id = $1
+       JOIN data1_dev.collection_item ci ON ci.id = cil.collection_item_id AND ci.principal_id = $1
+      ORDER BY cil.collection_item_id`,
+    [principalId]
+  );
+  return res.rows;
+}
+
+export async function insertPhysicalCopyDecision(client, row) {
+  const res = await client.query(
+    `INSERT INTO data1_dev.physical_copy_decision_event
+       (principal_id, choice, incoming_collection_item_id, candidate_gk_asset_ids,
+        selected_gk_asset_id, resulting_gk_asset_id, capture_idempotency_key, rule_version)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (principal_id, capture_idempotency_key) DO NOTHING
+     RETURNING id`,
+    [row.principalId, row.choice, row.incomingCollectionItemId, row.candidateGkAssetIds,
+     row.selectedGkAssetId, row.resultingGkAssetId, row.captureIdempotencyKey, row.ruleVersion]
+  );
+  return res.rows[0]?.id || null;
+}
+
+export async function getPhysicalCopyDecision(client, { principalId, captureIdempotencyKey }) {
+  const res = await client.query(
+    `SELECT id, choice, incoming_collection_item_id, selected_gk_asset_id, resulting_gk_asset_id
+       FROM data1_dev.physical_copy_decision_event
+      WHERE principal_id = $1 AND capture_idempotency_key = $2`,
+    [principalId, captureIdempotencyKey]
+  );
+  return res.rows[0] || null;
+}

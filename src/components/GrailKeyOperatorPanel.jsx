@@ -46,6 +46,28 @@ import { buildCaptureOutcomePrice } from "../lib/captureOutcomeMapping.js";
 // GK-227 — post-capture physical media append.
 import { REQUIRED_CAPTURE_VIEWS, ALL_CAPTURE_VIEWS, computeCaptureViewChecklist } from "../lib/physicalMediaChecklist.js";
 
+// GK-279 — capture-time physical copy disambiguation. A candidate is "this
+// might be a copy you already own" — NEVER proof of identity. Identical
+// catalogue metadata does not mean the same physical copy.
+function CandidateThumb({ imagePath }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let url = null, cancelled = false;
+    (async () => {
+      if (!imagePath) return;
+      try {
+        const res = await authFetch(imagePath);
+        if (!res || !res.ok) return;
+        url = URL.createObjectURL(await res.blob());
+        if (!cancelled) setSrc(url); else URL.revokeObjectURL(url);
+      } catch { /* thumbnail is best-effort context only */ }
+    })();
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
+  }, [imagePath]);
+  if (!src) return <div style={{ width: 44, height: 62, background: "#222", borderRadius: 3, flexShrink: 0 }} />;
+  return <img src={src} alt="" style={{ width: 44, height: 62, objectFit: "cover", borderRadius: 3, flexShrink: 0 }} />;
+}
+
 const ACTIONS = ["LIST", "HOLD", "PASS"];
 const REQUEST_TIMEOUT_MS = 15000;
 
@@ -113,6 +135,10 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
   // own "success" state — it just re-runs load() (below), which finds the
   // newly-linked asset and transitions this whole panel to status:'found'.
   const [captureState, setCaptureState] = useState("idle");
+  // GK-279 — null | { candidates } (blocking SAME COPY / ANOTHER COPY choice)
+  const [copyDecision, setCopyDecision] = useState(null);
+  // GK-279 — null | { gkAssetId, canonicalCollectionItemId } after SAME COPY
+  const [sameCopyConfirmed, setSameCopyConfirmed] = useState(null);
   // H8 (Milestone Ten operator proof) — on-demand only, never fetched
   // automatically: 'idle' | 'loading' | { gkAssetId, mediaId, byteLength }
   // | { error }. Reuses the SAME two existing read-only, authenticated
@@ -163,7 +189,7 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
   // built from already-computed, already-displayed catalogue fields —
   // this reads existing grading/pricing output, it never recomputes or
   // changes any of it.
-  async function captureAsOwnedAsset() {
+  async function captureAsOwnedAsset(disposition) {
     if (captureState === "capturing" || !collectionItemId || !item) return;
     const localPhoto = (item.images && item.images[0]) || item.image || null;
     if (!localPhoto || typeof localPhoto !== "string" || !localPhoto.startsWith("data:")) {
@@ -197,6 +223,7 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
           scanPayload,
           photos: [{ bytes: stripDataUrlPrefix(localPhoto), contentType: contentTypeFromDataUrl(localPhoto), captureRole: "capture-photo" }],
           idempotencyKey,
+          ...(disposition ? { copyDisposition: disposition } : {}),
         }),
         signal: controller.signal,
       });
@@ -209,6 +236,14 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
         return;
       }
       const body = await res.json().catch(() => ({}));
+      if (res.status === 409 && body.error === "PHYSICAL_COPY_DECISION_REQUIRED" && Array.isArray(body.candidates)) {
+        // GK-279 — nothing was minted. The operator must choose. The
+        // pending idempotency key is KEPT so the chosen resubmission is one
+        // server-idempotent capture action.
+        setCopyDecision({ candidates: body.candidates });
+        setCaptureState("idle");
+        return;
+      }
       if (!res.ok) {
         // Definitive failure (e.g. the H8 gate's own 403, or a real
         // validation error) — safe to retire the key, a fresh retry
@@ -220,6 +255,10 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
       }
       retireCaptureIdempotencyKey(collectionItemId);
       setCaptureState("idle");
+      setCopyDecision(null);
+      if (body.copyDecision?.choice === "SAME_COPY") {
+        setSameCopyConfirmed({ gkAssetId: body.gkAssetId, canonicalCollectionItemId: body.copyDecision.canonicalCollectionItemId });
+      }
       await load(); // re-fetch — now finds the newly-linked asset, transitions to status:'found'
     } catch {
       setCaptureState({ ambiguous: true });
@@ -231,13 +270,59 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
   if (state.status === "loading") return null;
   if (state.status === "none") {
     if (!collectionItemId || !item) return null;
+    if (sameCopyConfirmed) {
+      return (
+        <div style={panelStyle}>
+          <div style={{ color: "#7cc47c", fontSize: 13, fontWeight: 700, marginBottom: 4 }}>SAME COPY CONFIRMED</div>
+          <div style={{ color: "#bbb", fontSize: 12 }}>
+            This is the physical copy you already own — its existing GrailKey record was reused and your new photo was added to it as evidence. No second physical asset was created. This catalogue entry is a duplicate view of that copy; its record lives on the original entry.
+          </div>
+        </div>
+      );
+    }
+    if (copyDecision) {
+      return (
+        <div style={panelStyle}>
+          <div style={{ color: "#d4af37", fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Is this the same physical copy you already own?</div>
+          <div style={{ color: "#888", fontSize: 11, marginBottom: 10 }}>
+            Matching title, issue and year does not mean the same copy — you may own more than one. You decide.
+          </div>
+          {copyDecision.candidates.map((c) => (
+            <div key={c.gkAssetId} style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, padding: 8, border: "1px solid rgba(212,175,55,0.2)", borderRadius: 6 }}>
+              <CandidateThumb imagePath={c.imagePath} />
+              <div style={{ flex: 1, fontSize: 12, color: "#ddd" }}>
+                <div style={{ fontWeight: 700 }}>{c.title || "Untitled"}{c.issue ? ` #${String(c.issue).replace(/^#/, "")}` : ""}{c.year ? ` (${c.year})` : ""}</div>
+                <div style={{ color: "#999" }}>{[c.publisher, c.variant, c.grade].filter(Boolean).join(" · ") || "No further details recorded"}</div>
+              </div>
+              <button
+                onClick={() => captureAsOwnedAsset({ choice: "SAME_COPY", selectedGkAssetId: c.gkAssetId })}
+                disabled={captureState === "capturing"}
+                style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid rgba(124,196,124,0.6)", background: "transparent", color: "#7cc47c", fontWeight: 700, fontSize: 12, cursor: captureState === "capturing" ? "not-allowed" : "pointer" }}
+              >SAME COPY</button>
+            </div>
+          ))}
+          <button
+            onClick={() => captureAsOwnedAsset({ choice: "ANOTHER_COPY" })}
+            disabled={captureState === "capturing"}
+            style={{ width: "100%", padding: "10px 0", borderRadius: 6, border: "1px solid rgba(212,175,55,0.5)", background: "transparent", color: "#d4af37", fontWeight: 700, fontSize: 13, cursor: captureState === "capturing" ? "not-allowed" : "pointer" }}
+          >ANOTHER COPY (a different physical book)</button>
+          {captureState === "capturing" && <div style={{ color: "#888", fontSize: 12, marginTop: 6 }}>Working…</div>}
+          {captureState !== "idle" && captureState !== "capturing" && captureState.ambiguous && (
+            <div style={{ color: "#c9a227", fontSize: 12, marginTop: 6 }}>Could not confirm the result — outcome unknown. Tap your choice again to safely retry; it will not create a duplicate.</div>
+          )}
+          {captureState !== "idle" && captureState !== "capturing" && captureState.error && (
+            <div style={{ color: "#e05656", fontSize: 12, marginTop: 6 }}>{captureState.error}</div>
+          )}
+        </div>
+      );
+    }
     return (
       <div style={panelStyle}>
         <div style={{ color: "#888", fontSize: 12, marginBottom: 8 }}>
           No durable GrailKey physical-asset record exists for this catalogue item.
         </div>
         <button
-          onClick={captureAsOwnedAsset}
+          onClick={() => captureAsOwnedAsset()}
           disabled={captureState === "capturing"}
           style={{
             width: "100%", padding: "10px 0", borderRadius: 6,

@@ -46,6 +46,9 @@ export {
   recordIdentifierAssertion,
   linkAssertionEvidence,
   supersedeIdentifierAssertion,
+  findPhysicalCopyCandidates,
+  recordPhysicalCopyDecision,
+  resolvePhysicalCopyChoice,
 } from './service.js';
 
 export {
@@ -56,6 +59,7 @@ export {
   IdempotencyConflictError,
   ValidationFailedError,
   AuthorizationFailedError,
+  PhysicalCopyDecisionRequiredError,
 } from './errors.js';
 
 // Test/shutdown only — not part of the operational contract, but a real

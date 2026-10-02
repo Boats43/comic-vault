@@ -21,7 +21,8 @@ import { createHash } from 'node:crypto';
 import * as repo from './repository.js';
 import { acquireConnection } from './db.js';
 import { checkIdempotencyReplay, claimIdempotencyKey, computeRequestFingerprint } from './idempotency.js';
-import { NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError } from './errors.js';
+import { NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError, IdempotencyConflictError, PhysicalCopyDecisionRequiredError } from './errors.js';
+import { isPlausiblePhysicalCopyCandidate } from '../../lib/duplicateCopyDetection.js';
 import * as media from '../media/index.js';
 import { withRetryOn40P01 } from './retry.js';
 
@@ -1868,4 +1869,131 @@ async function attemptSupersedeIdentifierAssertion({ principalId, gkAssetId, old
 export async function supersedeIdentifierAssertion({ __onAttemptError, ...args } = {}) {
   requireFields(args, ['idempotencyKey']);
   return withRetryOn40P01(() => attemptSupersedeIdentifierAssertion(args), { onAttemptError: __onAttemptError });
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// GK-279 — capture-time PHYSICAL COPY DISAMBIGUATION.
+// PHYSICAL IDENTITY != CATALOGUE SIMILARITY. A candidate is "this might be
+// a physical asset you already own" — never a decision. The operator
+// chooses SAME_COPY (reuse that asset) or ANOTHER_COPY (mint a new one);
+// the server validates the choice against ITS OWN candidate set, so a
+// client can never force linkage to an arbitrary / foreign gkAssetId.
+// ─────────────────────────────────────────────────────────────────────
+export const PHYSICAL_COPY_RULE_VERSION = 'gk279-v1';
+const PHYSICAL_COPY_CHOICES = ['SAME_COPY', 'ANOTHER_COPY'];
+
+function candidateView(row) {
+  const a = row.attributes || {};
+  const img = Array.isArray(a.remoteImages) && typeof a.remoteImages[0] === 'string' && a.remoteImages[0].startsWith('/')
+    ? a.remoteImages[0] : null;
+  return {
+    gkAssetId: row.gk_asset_id,
+    collectionItemId: row.collection_item_id,
+    title: a.title ?? null, issue: a.issue ?? null, year: a.year ?? null,
+    publisher: a.publisher ?? null, variant: a.variant ?? null, grade: a.grade ?? null,
+    imagePath: img,
+  };
+}
+
+export async function findPhysicalCopyCandidates({ principalId, collectionItemId, book } = {}) {
+  requireFields({ principalId, collectionItemId }, ['principalId', 'collectionItemId']);
+  // The incoming identity comes from the DURABLE collection row first; the
+  // request's own book payload is only a fallback for missing fields.
+  const collectionMod = await import('../collection/index.js');
+  const item = await collectionMod.getMyCollectionItem({ principalId, id: collectionItemId });
+  const attrs = item?.attributes || {};
+  const incoming = {
+    title: attrs.title || book?.title || null,
+    issue: attrs.issue ?? book?.issue ?? null,
+    year: attrs.year ?? book?.year ?? null,
+  };
+  if (!incoming.title) return [];
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const rows = await repo.listOwnedLinkedCatalogueRows(client, { principalId });
+    return rows
+      .filter((r) => r.collection_item_id !== collectionItemId)
+      .filter((r) => isPlausiblePhysicalCopyCandidate(incoming, r.attributes || {}))
+      .map(candidateView);
+  } finally {
+    client.release();
+  }
+}
+
+// Returns { candidates, choice, selected }. choice === null means no
+// candidate exists (normal new-asset flow). Throws
+// PhysicalCopyDecisionRequiredError when candidates exist and the operator
+// has not chosen; ValidationFailedError on any invalid/forged choice.
+export async function resolvePhysicalCopyChoice({ principalId, collectionItemId, book, disposition, captureIdempotencyKey } = {}) {
+  const candidates = await findPhysicalCopyCandidates({ principalId, collectionItemId, book });
+  if (candidates.length === 0) return { candidates, choice: null, selected: null };
+  if (disposition === undefined || disposition === null) {
+    throw new PhysicalCopyDecisionRequiredError(
+      'This capture resembles a physical copy you already own — choose SAME_COPY or ANOTHER_COPY',
+      candidates
+    );
+  }
+  const choice = disposition.choice;
+  if (!PHYSICAL_COPY_CHOICES.includes(choice)) {
+    throw new ValidationFailedError(`copyDisposition.choice must be one of ${PHYSICAL_COPY_CHOICES.join('|')}`);
+  }
+  let selected = null;
+  if (choice === 'ANOTHER_COPY') {
+    if (disposition.selectedGkAssetId) {
+      throw new ValidationFailedError('ANOTHER_COPY must not carry a selectedGkAssetId');
+    }
+  } else {
+    // SAME_COPY: identical refusal for nonexistent and foreign ids — nothing
+    // about other principals' assets is ever revealed.
+    selected = candidates.find((c) => c.gkAssetId === disposition.selectedGkAssetId) || null;
+    if (!selected) {
+      throw new ValidationFailedError("selectedGkAssetId is not one of this principal's plausible owned candidates");
+    }
+  }
+  // Key reuse with a DIFFERENT decision must fail BEFORE any mutation —
+  // otherwise a conflicting retry would mint an orphan asset and only then
+  // discover the conflict at decision-record time.
+  if (captureIdempotencyKey) {
+    const client = await acquireConnection();
+    try {
+      const prior = await repo.getPhysicalCopyDecision(client, { principalId, captureIdempotencyKey });
+      if (prior && (prior.choice !== choice || (choice === 'SAME_COPY' && prior.selected_gk_asset_id !== selected.gkAssetId))) {
+        throw new IdempotencyConflictError(
+          `capture idempotencyKey "${captureIdempotencyKey}" already recorded a different physical-copy decision`
+        );
+      }
+    } finally {
+      client.release();
+    }
+  }
+  return { candidates, choice, selected };
+}
+
+export async function recordPhysicalCopyDecision({
+  principalId, collectionItemId, candidateGkAssetIds, choice, selectedGkAssetId = null, resultingGkAssetId, captureIdempotencyKey,
+} = {}) {
+  requireFields({ principalId, collectionItemId, candidateGkAssetIds, choice, resultingGkAssetId, captureIdempotencyKey },
+    ['principalId', 'collectionItemId', 'candidateGkAssetIds', 'choice', 'resultingGkAssetId', 'captureIdempotencyKey']);
+  if (!PHYSICAL_COPY_CHOICES.includes(choice)) throw new ValidationFailedError('invalid choice');
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    // Server-owned idempotency: one decision row per (principal, capture key).
+    const id = await repo.insertPhysicalCopyDecision(client, {
+      principalId, choice, incomingCollectionItemId: collectionItemId,
+      candidateGkAssetIds, selectedGkAssetId, resultingGkAssetId,
+      captureIdempotencyKey, ruleVersion: PHYSICAL_COPY_RULE_VERSION,
+    });
+    if (id) return { decisionId: id, outcome: 'recorded' };
+    const existing = await repo.getPhysicalCopyDecision(client, { principalId, captureIdempotencyKey });
+    if (!existing || existing.choice !== choice || existing.resulting_gk_asset_id !== resultingGkAssetId) {
+      throw new IdempotencyConflictError(
+        `capture idempotencyKey "${captureIdempotencyKey}" already recorded a different physical-copy decision`
+      );
+    }
+    return { decisionId: existing.id, outcome: 'replayed' };
+  } finally {
+    client.release();
+  }
 }

@@ -66,7 +66,7 @@ async function capture(itemId, scanPayloadExtra, bodyExtra = {}) {
   const body = {
     scanPayload: { correlationId: key, collectionItemId: itemId, book: { title: 'GK-277 test', issue: '1', year: '2020' }, ...scanPayloadExtra },
     photos: [{ bytes: ONE_PX, contentType: 'image/png', captureRole: 'capture-photo' }],
-    idempotencyKey: key, ...bodyExtra,
+    idempotencyKey: key, copyDisposition: { choice: 'ANOTHER_COPY' }, ...bodyExtra, // GK-279: repeat captures of one book identity need the explicit operator choice
   };
   const res = mockRes();
   await captureScanRoute({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body }, res);

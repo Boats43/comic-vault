@@ -21,6 +21,7 @@
 import {
   createPhysicalAsset, assignIdentity, attachMedia,
   recordAcquisition, linkCollectionItem, assertCollectionItemLinkable, resolveCollectionItemLink,
+  resolvePhysicalCopyChoice, recordPhysicalCopyDecision,
   ValidationFailedError,
 } from '../assets/index.js';
 import * as mapping from './mapping.js';
@@ -39,8 +40,8 @@ function requireFields(obj, fields) {
 // path, and no A2 background-path exclusion behind them.
 const ALLOWED_ASSET_CLASSES = ['comic', 'generic'];
 
-export async function captureFromScan({
-  principalId, scanPayload, photos = [], idempotencyKey, assetClass = 'comic',
+async function captureFromScanOnce({
+  principalId, scanPayload, photos = [], idempotencyKey, assetClass = 'comic', copyDisposition,
 } = {}) {
   requireFields({ principalId, scanPayload, idempotencyKey }, ['principalId', 'scanPayload', 'idempotencyKey']);
   if (!ALLOWED_ASSET_CLASSES.includes(assetClass)) {
@@ -111,12 +112,42 @@ export async function captureFromScan({
     }
   }
 
+  // GK-279 — PHYSICAL COPY DISAMBIGUATION. Only a would-be FRESH MINT is
+  // gated: an existing link / explicit continuity alias already names its
+  // asset. Catalogue similarity to an owned asset never decides anything —
+  // it only forces the operator to choose SAME_COPY or ANOTHER_COPY
+  // BEFORE any gkAssetId is minted (throws PhysicalCopyDecisionRequiredError
+  // with the candidates when no choice was supplied). No candidate ->
+  // the normal mint path, unchanged, no prompt.
+  let copyChoice = null;
+  if (!existingLink && !continuityLink && scanPayload.collectionItemId) {
+    copyChoice = await resolvePhysicalCopyChoice({
+      principalId, collectionItemId: scanPayload.collectionItemId,
+      book: scanPayload.book, disposition: copyDisposition,
+      captureIdempotencyKey: idempotencyKey,
+    });
+  }
+
   if (existingLink) {
     gkAssetId = existingLink.gkAssetId;
     mintOutcome = 'attached-existing-via-link';
   } else if (continuityLink) {
     gkAssetId = continuityLink.gkAssetId;
     mintOutcome = 'attached-existing-via-continuity-alias';
+  } else if (copyChoice?.choice === 'SAME_COPY') {
+    // SAME COPY: NO new gkAssetId, NO second ownership identity, NO second
+    // collection_item_link (the existing asset's canonical link stands), NO
+    // second identity assignment / acquisition (no duplicated history). The
+    // new photo is still new evidence of the same physical object and is
+    // appended below through the existing attachMedia mechanism.
+    gkAssetId = copyChoice.selected.gkAssetId;
+    mintOutcome = 'same-copy-confirmed-existing';
+    await recordPhysicalCopyDecision({
+      principalId, collectionItemId: scanPayload.collectionItemId,
+      candidateGkAssetIds: copyChoice.candidates.map((c) => c.gkAssetId),
+      choice: 'SAME_COPY', selectedGkAssetId: gkAssetId, resultingGkAssetId: gkAssetId,
+      captureIdempotencyKey: idempotencyKey,
+    });
   } else {
     const captureBasis = mapping.buildCaptureBasis(principalId, scanPayload);
     const mint = await createPhysicalAsset({
@@ -127,7 +158,18 @@ export async function captureFromScan({
     });
     gkAssetId = mint.assetId;
     mintOutcome = mint.outcome;
+    if (copyChoice?.choice === 'ANOTHER_COPY') {
+      // Operator explicitly overrode catalogue similarity: a distinct
+      // physical copy. Durable, and says nothing about grade/value equality.
+      await recordPhysicalCopyDecision({
+        principalId, collectionItemId: scanPayload.collectionItemId,
+        candidateGkAssetIds: copyChoice.candidates.map((c) => c.gkAssetId),
+        choice: 'ANOTHER_COPY', selectedGkAssetId: null, resultingGkAssetId: gkAssetId,
+        captureIdempotencyKey: idempotencyKey,
+      });
+    }
   }
+  const sameCopy = mintOutcome === 'same-copy-confirmed-existing';
 
   // 1c — media mapping. Real bytes (or an honestly-labeled substitute,
   // per C6) in, real stored objects + media rows out — via the Asset
@@ -158,7 +200,7 @@ export async function captureFromScan({
   // multiple collectionItemIds legitimately alias to one asset; the OLD
   // collectionItemId's own row is never touched or removed, so it stays
   // independently resolvable too (aliases accumulate, never replace).
-  if (scanPayload.collectionItemId && !existingLink) {
+  if (scanPayload.collectionItemId && !existingLink && !sameCopy) {
     const link = await linkCollectionItem({
       principalId, collectionItemId: scanPayload.collectionItemId, gkAssetId,
       idempotencyKey: `${idempotencyKey}:link`,
@@ -171,7 +213,7 @@ export async function captureFromScan({
   // identity — an ID_REQUIRED-shaped payload still mints and still gets
   // an identity assignment, just NONE/unresolved.
   const identityEvidence = mapping.mapIdentityEvidence(scanPayload);
-  const identity = await assignIdentity({
+  const identity = sameCopy ? null : await assignIdentity({
     principalId, gkAssetId, catalogEntityId: null, evidence: identityEvidence,
     idempotencyKey: `${idempotencyKey}:identity`,
     correlationId: scanPayload.correlationId,
@@ -198,7 +240,7 @@ export async function captureFromScan({
   const decision = null;
 
   let acquisition = null;
-  if (mapping.hasAcquisition(scanPayload)) {
+  if (!sameCopy && mapping.hasAcquisition(scanPayload)) {
     acquisition = await recordAcquisition({
       principalId, gkAssetId, ...mapping.mapAcquisition(scanPayload),
       idempotencyKey: `${idempotencyKey}:acquisition`,
@@ -206,5 +248,36 @@ export async function captureFromScan({
     });
   }
 
-  return { gkAssetId, mintOutcome, linkOutcome, identity, media, valuation, decision, acquisition };
+  return {
+    gkAssetId, mintOutcome, linkOutcome, identity, media, valuation, decision, acquisition,
+    ...(copyChoice?.choice ? {
+      copyDecision: {
+        choice: copyChoice.choice,
+        canonicalCollectionItemId: sameCopy ? copyChoice.selected.collectionItemId : (scanPayload.collectionItemId ?? null),
+      },
+    } : {}),
+  };
+}
+
+// GK-279 — concurrent identical requests (same idempotencyKey) race on the
+// idempotency / link unique constraints. The loser's unique-violation is not
+// a double-mint (the constraint is exactly what prevents one) but it must not
+// surface as a 500: every sub-operation is idempotent, so re-running replays
+// the winner's committed work and converges on the same asset.
+const RACE_CONSTRAINTS = new Set(['idempotency_key_unique', 'collection_item_link_pkey']);
+export async function captureFromScan(args = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await captureFromScanOnce(args);
+    } catch (e) {
+      if (e?.code === '23505' && RACE_CONSTRAINTS.has(e?.constraint)) {
+        lastErr = e;
+        await new Promise((r) => setTimeout(r, 60 * (attempt + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
 }

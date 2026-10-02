@@ -61,3 +61,13 @@ export class IdempotencyConflictError extends AssetServiceError {
     super('IDEMPOTENCY_CONFLICT', message);
   }
 }
+
+// GK-279 — a capture resembles one or more already-owned physical assets
+// and the operator has not yet chosen SAME_COPY / ANOTHER_COPY. Carries
+// the plausible candidates so the caller can present them; mints nothing.
+export class PhysicalCopyDecisionRequiredError extends AssetServiceError {
+  constructor(message, candidates) {
+    super('PHYSICAL_COPY_DECISION_REQUIRED', message);
+    this.candidates = candidates;
+  }
+}
