@@ -14,6 +14,10 @@ git archaeology exercise to read.
 
 ---
 
+## Regression-harness law (GK-276, 2026-10-02)
+
+**Tests must not consume or mutate the operator's git stash, or rely on ambient worktree mutations.** A test needing git-state manipulation (e.g. proving pre-fix behavior) uses a disposable detached worktree pinned by commit SHA (never a relative ref: `^` is an escape character under Windows cmd.exe and silently resolves to the wrong commit), created and removed in a `finally`, and asserts `git status --porcelain` and `git stash list` are unchanged afterwards. Evidence: `tests/grailkey-directive-q-variant-null-custody.test.js` ran `git stash push` / unqualified `git stash pop`; with nothing to stash, the pop consumed the unrelated GK-179 pre-work stash and left conflict markers in tracked source mid-sweep, voiding every result after it.
+
 ## SHIPMENT BASELINE — 2026-08-26 (GK-168/169/172 + E-UX train)
 
 **First durable, byte-exact shipment-baseline roster committed to this file.** Disclosed explicitly: no prior stamp in this cascade (including the 222/19/4/245 entry immediately below) ever carried a committed byte-exact FAIL/TIMEOUT filename roster in this repo — each was a count-only stamp, cross-checked by diff-against-stash or by "confirmed byte-identical in composition" language without the actual filenames being written down here. This entry is the first to do so, and is authoritative FROM THIS COMMIT FORWARD, not a claim about what any earlier stamp's real roster was.

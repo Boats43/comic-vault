@@ -23,16 +23,18 @@
 // called directly, both pre-fix (git-stashed) and post-fix.
 //
 // Part 1 proves the defect DIRECTLY against ef7cf53's real committed
-// source (git show for App.jsx; git stash for manualCorrection.js), not a
+// source (git show for App.jsx; an isolated disposable worktree at the
+// pre-fix commit for manualCorrection.js — never the operator's stash), not a
 // mirror. Part 2 proves the fix. Part 3 is a render assertion (P's own
 // acceptance requirement, actually tested this time).
 //
 // Invoke: node tests/grailkey-directive-q-variant-null-custody.test.js
 
-import { readFileSync } from 'fs';
+import { readFileSync, mkdtempSync, rmSync, existsSync } from 'fs';
 import { execSync } from 'child_process';
+import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -107,13 +109,13 @@ const THREE_CASES = (merge) => ({
 // Part 1 — the actual pre-fix committed source (git show HEAD, ef7cf53),
 // evaluated, not just string-matched. Every site must resurrect on null.
 // ═══════════════════════════════════════════════════════════════════════
-console.log('Part 1: actual prior behavior (git show HEAD:src/App.jsx), evaluated\n');
+console.log('Part 1: actual prior behavior (git show ef7cf53:src/App.jsx, pinned), evaluated\n');
 {
   let priorAppSrc = null;
   try {
-    priorAppSrc = execSync('git show HEAD:src/App.jsx', { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1024 * 1024 * 50 });
+    priorAppSrc = execSync('git show ef7cf53:src/App.jsx', { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1024 * 1024 * 50 });
   } catch (e) { priorAppSrc = null; }
-  assertTrue(!!priorAppSrc, 'git show HEAD:src/App.jsx succeeded');
+  assertTrue(!!priorAppSrc, 'git show ef7cf53:src/App.jsx succeeded (pinned pre-fix commit)');
 
   if (priorAppSrc) {
     // setResult sites — both used `?? prev.variant`. Two occurrences.
@@ -155,18 +157,36 @@ console.log('Part 1: actual prior behavior (git show HEAD:src/App.jsx), evaluate
 // ═══════════════════════════════════════════════════════════════════════
 // Part 1b — buildCorrectedCatalogueItem, real module, git-stashed.
 // ═══════════════════════════════════════════════════════════════════════
-console.log('\nPart 1b: buildCorrectedCatalogueItem pre-fix (git stash, real import)\n');
+console.log('\nPart 1b: buildCorrectedCatalogueItem pre-fix (isolated disposable worktree at the pre-fix commit, real import)\n');
+// HARNESS LAW (GK-276): regression tests MUST NOT mutate or consume the operator's real git
+// stash or the primary worktree. This part used to run `git stash push` / `git stash pop` in
+// the primary worktree; with the fix long since committed, the push stashed nothing and the
+// unqualified pop consumed the operator's unrelated historical stash (conflict markers in
+// tracked source). The pre-fix source now comes from a DISPOSABLE detached worktree at the
+// commit BEFORE the fix (ef7cf53, the parent of eba3ca1; pinned by sha, never a relative ref), created and removed in a finally block.
 {
-  execSync('git stash push --quiet -- src/lib/manualCorrection.js', { cwd: repoRoot });
+  const gitOut = (args, cwd = repoRoot) => execSync(`git ${args}`, { cwd, encoding: 'utf8' });
+  const statusBefore = gitOut('status --porcelain');
+  const stashBefore = gitOut('stash list');
+  const tmpRoot = mkdtempSync(path.join(os.tmpdir(), 'gk-q-prefix-'));
+  const wt = path.join(tmpRoot, 'wt');
+  let added = false;
   try {
-    const modUrl = `../src/lib/manualCorrection.js?t=${Date.now()}`;
+    gitOut(`worktree add --detach --quiet "${wt}" ef7cf53`);
+    added = true;
+    const modUrl = pathToFileURL(path.join(wt, 'src', 'lib', 'manualCorrection.js')).href;
     const { buildCorrectedCatalogueItem } = await import(modUrl);
     const oldItem = { id: 'x1', title: 'Old Title', variant: 'Old Variant', status: 'kept' };
     const resultValue = buildCorrectedCatalogueItem(oldItem, { title: 'New Title', variantNote: 'New Variant' });
     assertEq(resultValue.variant, null, 'FAILING (pre-fix): a real server-determined variant ("New Variant") is silently discarded — merged.variant is null regardless of enrichData.variantNote');
   } finally {
-    execSync('git stash pop --quiet', { cwd: repoRoot });
+    try { if (added) gitOut(`worktree remove --force "${wt}"`); } catch (e) { console.log('  cleanup note (worktree remove):', e.message); }
+    try { rmSync(tmpRoot, { recursive: true, force: true }); } catch (e) { /* best effort */ }
+    try { gitOut('worktree prune'); } catch (e) { /* best effort */ }
   }
+  assertEq(gitOut('status --porcelain'), statusBefore, 'primary worktree status is byte-identical after the isolated pre-fix check (no mutation, no conflict markers, nothing staged)');
+  assertEq(gitOut('stash list'), stashBefore, 'git stash list is byte-identical after the check (no stash created, none consumed)');
+  assertTrue(!existsSync(wt), 'the disposable worktree directory is gone');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -177,7 +197,9 @@ console.log('\nPart 2: current source — fixed, evaluated\n');
   const appSrc = readFileSync(path.join(repoRoot, 'src/App.jsx'), 'utf8');
   const NEW_PATTERN = /variant:\s*Object\.prototype\.hasOwnProperty\.call\(enrich,\s*'variantNote'\)\s*\?\s*enrich\.variantNote\s*:\s*(prev|cur|item)\.variant/g;
   const newMatches = [...appSrc.matchAll(NEW_PATTERN)];
-  assertEq(newMatches.length, 6, 'current source has exactly 6 presence-aware variant merge sites (matches the audit count)');
+  // src/App.jsx has grown since Directive Q: the original 6 audited sites are now 8. The standing
+  // requirement is that EVERY presence-aware site satisfies the three-case rule (evaluated below).
+  assertTrue(newMatches.length >= 6, `current source has at least the 6 originally-audited presence-aware variant merge sites (found ${newMatches.length})`);
 
   let allPass = true;
   newMatches.forEach((m, i) => {
