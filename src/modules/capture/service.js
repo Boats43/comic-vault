@@ -20,7 +20,7 @@
 
 import {
   createPhysicalAsset, assignIdentity, attachMedia,
-  recordDecision, recordAcquisition, linkCollectionItem, assertCollectionItemLinkable, resolveCollectionItemLink,
+  recordAcquisition, linkCollectionItem, assertCollectionItemLinkable, resolveCollectionItemLink,
   ValidationFailedError,
 } from '../assets/index.js';
 import * as mapping from './mapping.js';
@@ -188,14 +188,14 @@ export async function captureFromScan({
   // writers (server-derived economic engine / operator override).
   const valuation = null;
 
-  let decision = null;
-  if (mapping.hasDecision(scanPayload)) {
-    decision = await recordDecision({
-      principalId, gkAssetId, ...mapping.mapDecision(scanPayload),
-      idempotencyKey: `${idempotencyKey}:decision`,
-      correlationId: scanPayload.correlationId,
-    });
-  }
+  // GK-277 -- CLIENT RECOMMENDATION != DURABLE ECONOMIC DECISION AUTHORITY.
+  // This path used to persist scanPayload.outcome.decisionAction as a durable,
+  // now-immutable decision_event (a client-asserted recommendation, anchored to
+  // nothing once GK-276 stopped writing a valuation). It no longer writes a
+  // decision at all: decision_event is written only by the certified
+  // server-owned path (recordEconomicDecision, GK-180). A client may display or
+  // request a recommendation; it can never mint one.
+  const decision = null;
 
   let acquisition = null;
   if (mapping.hasAcquisition(scanPayload)) {

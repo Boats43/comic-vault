@@ -30,6 +30,7 @@
 // reach /api/capture-scan; there is no other code path in the frontend
 // that calls it.
 
+import { decisionTrustStanding, decisionTrustLabel } from "../lib/decisionTrust.js";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { authFetch, isAuthenticated, getPrincipalScope } from "../lib/grailkeySession.js";
 import {
@@ -433,6 +434,11 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
           <Field label="Card estimate (not a recorded valuation)" value={String(item.price)} />
         ) : null}
         <Field label="Recommendation" value={latestDecision?.recommendation ?? "—"} />
+        {/* GK-277 -- label a decision whose authority chain is not server-derived (historical
+            client-origin rows stay visible as history, never as a trusted recommendation). */}
+        {latestDecision && decisionTrustLabel(decisionTrustStanding(latestDecision, valuations)) ? (
+          <Field label="Recommendation standing" value={decisionTrustLabel(decisionTrustStanding(latestDecision, valuations))} />
+        ) : null}
       </div>
 
       {latestDecision ? (

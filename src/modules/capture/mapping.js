@@ -106,23 +106,10 @@ export function mapIdentityEvidence(scanPayload) {
 // Client-supplied price/value is not valuation_event authority; capture never
 // derives a valuation from the request body.
 
-export function hasDecision(scanPayload) {
-  return !!(scanPayload.outcome && scanPayload.outcome.decisionAction);
-}
-
-export function mapDecision(scanPayload) {
-  return {
-    recommendation: scanPayload.outcome.decisionAction,
-    // scanLog does not carry decision.blockers/warnings (confirmed
-    // against real records) — pricingSource is the one real, always-
-    // present outcome field worth surfacing as a reason code; never
-    // fabricating blocker/warning codes scanLog doesn't actually have.
-    reasonCodes: scanPayload.outcome.pricingSource ? [scanPayload.outcome.pricingSource] : [],
-    // No valuation is recorded by capture (GK-276), so a capture-path decision
-    // carries no valuation anchor.
-    valuationEventId: null,
-  };
-}
+// GK-277 -- hasDecision/mapDecision were DELETED. They turned a client-supplied
+// outcome.decisionAction into a durable decision_event. A client recommendation is
+// not durable economic decision authority; capture never derives a decision from
+// the request body.
 
 // scanLog carries no cost-basis field at all (confirmed —
 // docs/DATA-1-READINESS.md A4: purchasePrice lives only in the client's

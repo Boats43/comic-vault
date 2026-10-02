@@ -237,7 +237,10 @@ try {
   // directly from outcome.price, so recordValuation's own fingerprint
   // (keyed `${idempotencyKey}:valuation`) genuinely differs and correctly
   // throws IdempotencyConflictError, proving the real conflict path.
-  const conflictBody = buildRequestBody({ ...item, decision: { action: 'LIST_NOW' } }, COLLECTION_ITEM_ID, idempotencyKey1);
+  // GK-277: capture writes neither a valuation nor a decision, so the only payload-dependent
+  // sub-operation left is identity: dropping issue/year changes the identity evidence authority
+  // (CORROBORATED -> NONE), which genuinely conflicts with the first request under the same key.
+  const conflictBody = buildRequestBody({ ...item, issue: null, year: null }, COLLECTION_ITEM_ID, idempotencyKey1);
   const beforeConflict = await countAssets();
   const req3 = { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: conflictBody };
   const res3 = mockRes();
