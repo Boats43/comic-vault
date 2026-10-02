@@ -19,7 +19,7 @@
 // idempotent end to end (P2), not idempotent-by-accident.
 
 import {
-  createPhysicalAsset, assignIdentity, attachMedia, recordValuation,
+  createPhysicalAsset, assignIdentity, attachMedia,
   recordDecision, recordAcquisition, linkCollectionItem, assertCollectionItemLinkable, resolveCollectionItemLink,
   ValidationFailedError,
 } from '../assets/index.js';
@@ -180,19 +180,18 @@ export async function captureFromScan({
   // 1d — economics mapping. Each sub-mapping is conditional on the real
   // scanPayload actually carrying the relevant field — never fabricated
   // when absent.
-  let valuation = null;
-  if (mapping.hasValuation(scanPayload)) {
-    valuation = await recordValuation({
-      principalId, gkAssetId, ...mapping.mapValuation(scanPayload),
-      idempotencyKey: `${idempotencyKey}:valuation`,
-      correlationId: scanPayload.correlationId,
-    });
-  }
+  // GK-276 — CLIENT-SUPPLIED PRICE/VALUE IS NOT valuation_event AUTHORITY.
+  // This path used to persist scanPayload.outcome.price into valuation_event
+  // labelled method='engine-computed' although the server never computed it
+  // (an authenticated client could assert any dollar value). It no longer
+  // writes a valuation at all: valuation_event is written only by governed
+  // writers (server-derived economic engine / operator override).
+  const valuation = null;
 
   let decision = null;
   if (mapping.hasDecision(scanPayload)) {
     decision = await recordDecision({
-      principalId, gkAssetId, ...mapping.mapDecision(scanPayload, valuation),
+      principalId, gkAssetId, ...mapping.mapDecision(scanPayload),
       idempotencyKey: `${idempotencyKey}:decision`,
       correlationId: scanPayload.correlationId,
     });

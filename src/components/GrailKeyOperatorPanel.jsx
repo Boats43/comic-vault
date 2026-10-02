@@ -426,6 +426,12 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
           label="Valuation"
           value={latestValuation ? `$${Number(latestValuation.value_amount).toFixed(2)}` : "—"}
         />
+        {/* GK-276 — capture no longer records a valuation from a client-supplied
+            price. Until a governed writer records one, show the card's own
+            current estimate, labelled as NOT a recorded valuation. */}
+        {!latestValuation && item?.price ? (
+          <Field label="Card estimate (not a recorded valuation)" value={String(item.price)} />
+        ) : null}
         <Field label="Recommendation" value={latestDecision?.recommendation ?? "—"} />
       </div>
 

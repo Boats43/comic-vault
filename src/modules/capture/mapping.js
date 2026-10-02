@@ -101,36 +101,16 @@ export function mapIdentityEvidence(scanPayload) {
   return { authority: 'NONE', source: 'unresolved' };
 }
 
-export function hasValuation(scanPayload) {
-  return !!(scanPayload.outcome && scanPayload.outcome.price);
-}
-
-// scanLog's outcome.price is a formatted string ("$6.91"), not a number
-// — real field shape, confirmed against real records, not assumed.
-export function mapValuation(scanPayload) {
-  const valueAmount = Number(String(scanPayload.outcome.price).replace(/[^0-9.]/g, ''));
-  return {
-    valueAmount,
-    valueCurrency: 'USD',
-    // 'engine-computed' is the real enum value valuation_event.method
-    // actually has (src/modules/assets — requireEnum(['engine-computed',
-    // 'operator-override', 'gocollect', 'other'])). The comic-vault
-    // pricing pipeline IS the engine this value names.
-    method: 'engine-computed',
-    compSnapshotRef: scanPayload.correlationId ? `scanlog:${scanPayload.correlationId}` : null,
-    // scanLog does not carry a numeric grade field (only
-    // gradeMultiplier, a derived ratio, not a grade) — left null rather
-    // than mis-mapping gradeMultiplier into a grade-shaped column.
-    gradeAssumption: null,
-    buildSha: scanPayload.evidence?.promptVersion || 'unknown',
-  };
-}
+// GK-276 — hasValuation/mapValuation were DELETED. They turned a client-supplied
+// outcome.price string into a durable valuation_event labelled 'engine-computed'.
+// Client-supplied price/value is not valuation_event authority; capture never
+// derives a valuation from the request body.
 
 export function hasDecision(scanPayload) {
   return !!(scanPayload.outcome && scanPayload.outcome.decisionAction);
 }
 
-export function mapDecision(scanPayload, valuationResult) {
+export function mapDecision(scanPayload) {
   return {
     recommendation: scanPayload.outcome.decisionAction,
     // scanLog does not carry decision.blockers/warnings (confirmed
@@ -138,7 +118,9 @@ export function mapDecision(scanPayload, valuationResult) {
     // present outcome field worth surfacing as a reason code; never
     // fabricating blocker/warning codes scanLog doesn't actually have.
     reasonCodes: scanPayload.outcome.pricingSource ? [scanPayload.outcome.pricingSource] : [],
-    valuationEventId: valuationResult?.valuationEventId ?? null,
+    // No valuation is recorded by capture (GK-276), so a capture-path decision
+    // carries no valuation anchor.
+    valuationEventId: null,
   };
 }
 

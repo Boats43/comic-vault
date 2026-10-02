@@ -186,10 +186,31 @@ try {
   const graph = await getPhysicalAsset({ principalId: JIMMY, gkAssetId });
   assertTrue(graph.media.length === 1 && graph.media[0].media_type === 'capture-photo', 'real media row attached, correct captureRole, confirmed via independent getPhysicalAsset read');
 
-  console.log('\n-- GK-226: real dollar-formatted price string survives to a NON-ZERO durable valuation, not 0.00 --\n');
-  const valRow = await client.query('SELECT value_amount FROM valuation_event WHERE asset_id = $1 ORDER BY occurred_at DESC LIMIT 1', [gkAssetId]);
-  assertTrue(valRow.rowCount === 1, 'a valuation_event row was written for this asset');
-  assertTrue(Number(valRow.rows[0]?.value_amount) === 42.5, `durable value_amount is the real $42.50, not 0.00 (got ${valRow.rows[0]?.value_amount})`);
+  console.log('\n-- GK-276: a client-supplied price (the real "$42.50" string) NEVER becomes a valuation_event --\n');
+  const valRow = await client.query('SELECT value_amount FROM valuation_event WHERE asset_id = $1', [gkAssetId]);
+  assertTrue(valRow.rowCount === 0, 'NO valuation_event row was written from the client-supplied price (GK-276)');
+  assertTrue(res1.body?.valuation === null, 'capture response reports valuation: null');
+
+  console.log('\n-- GK-276 ADVERSARIAL: attacker-shaped payload (arbitrary dollar value + forged economic fields) --\n');
+  {
+    const ATTACK_ITEM_ID = `${TAG}-attack`;
+    await createCollectionItem({ principalId: JIMMY, id: ATTACK_ITEM_ID, assetCategory: 'comic', attributes: { title: 'Attack Shape Comic', issue: '1', year: '2019' } });
+    const atkKey = randomUUID();
+    const atk = buildRequestBody({ ...item, id: ATTACK_ITEM_ID, price: '$999999.00' }, ATTACK_ITEM_ID, atkKey);
+    // forged economic fields at every level a client could place them
+    Object.assign(atk.scanPayload, { valueAmount: 888888, value_amount: 888888, method: 'operator-override', provenance: 'SERVER_DERIVED', buildSha: 'forged-build', gradeAssumption: '9.8', valuation: { valueAmount: 777777, provenance: 'SERVER_DERIVED' } });
+    Object.assign(atk.scanPayload.outcome, { valueAmount: 888888, method: 'operator-override', provenance: 'SERVER_DERIVED', buildSha: 'forged-build', gradeAssumption: '9.8' });
+    Object.assign(atk, { valuation: { valueAmount: 777777 }, provenance: 'SERVER_DERIVED' });
+    const resA = mockRes();
+    await captureScanRoute({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body: atk }, resA);
+    assertTrue(resA.statusCode === 200 && !!resA.body?.gkAssetId, `legitimate capture itself still succeeds with the attacker payload (got ${resA.statusCode})`);
+    createdAssetIds.push(resA.body?.gkAssetId);
+    const vA = await client.query('SELECT id FROM valuation_event WHERE asset_id = $1', [resA.body?.gkAssetId]);
+    assertTrue(vA.rowCount === 0, 'attacker-supplied dollar value created ZERO valuation_event rows');
+    const dA = await client.query('SELECT valuation_event_id FROM decision_event WHERE asset_id = $1', [resA.body?.gkAssetId]);
+    assertTrue(dA.rows.every((r) => r.valuation_event_id === null), 'any capture-path decision carries no valuation anchor');
+    await client.query(`DELETE FROM collection_item WHERE id = $1`, [ATTACK_ITEM_ID]).catch(() => {});
+  }
 
   console.log('\n-- IDEMPOTENCY: repeated submit (same key) cannot double-mint --\n');
   const beforeReplay = await countAssets();
@@ -202,7 +223,10 @@ try {
   assertTrue(afterReplay === beforeReplay, `zero new gk_asset rows from the replay (before=${beforeReplay}, after=${afterReplay})`);
 
   console.log('\n-- IDEMPOTENCY CONFLICT: same key, different payload -> 409, no double-mint --\n');
-  // Changing `price` (not `title`) is the genuinely conflicting field here:
+  // GK-276: capture no longer writes a valuation, so the genuinely conflicting
+  // field is now the decision recommendation (price is ignored entirely).
+  // (historical note on the original price-based version follows)
+  // Changing `price` (not `title`) was the genuinely conflicting field:
   // captureFromScan's collectionItemId already resolves to the existing
   // link by this point (attached-existing, no second mint attempted at
   // all — this module's own documented "new evidence, no second mint"
@@ -213,7 +237,7 @@ try {
   // directly from outcome.price, so recordValuation's own fingerprint
   // (keyed `${idempotencyKey}:valuation`) genuinely differs and correctly
   // throws IdempotencyConflictError, proving the real conflict path.
-  const conflictBody = buildRequestBody({ ...item, price: '$999.99' }, COLLECTION_ITEM_ID, idempotencyKey1);
+  const conflictBody = buildRequestBody({ ...item, decision: { action: 'LIST_NOW' } }, COLLECTION_ITEM_ID, idempotencyKey1);
   const beforeConflict = await countAssets();
   const req3 = { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: conflictBody };
   const res3 = mockRes();
