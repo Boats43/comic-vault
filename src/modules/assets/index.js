@@ -47,6 +47,9 @@ export {
   linkAssertionEvidence,
   supersedeIdentifierAssertion,
   findPhysicalCopyCandidates,
+  isServerProvenContinuity,
+  hasAnotherCopyDecisionForItem,
+  __setCandidateCheckFaultForTests,
   findPhysicalCopyCandidatesForBook,
   validatePhysicalCopyChoiceForBook,
   getPhysicalCopyDecisionForKey,
@@ -65,6 +68,7 @@ export {
   ValidationFailedError,
   AuthorizationFailedError,
   PhysicalCopyDecisionRequiredError,
+  PhysicalCopyCandidateCheckUnavailableError,
 } from './errors.js';
 
 // Test/shutdown only — not part of the operational contract, but a real

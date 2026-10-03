@@ -71,3 +71,13 @@ export class PhysicalCopyDecisionRequiredError extends AssetServiceError {
     this.candidates = candidates;
   }
 }
+
+// GK-279 — the server could NOT determine candidate standing (DB/infra failure).
+// FAIL-CLOSED: this is never "zero candidates". Stable code, distinct from
+// PHYSICAL_COPY_DECISION_REQUIRED and from generic 500s.
+export class PhysicalCopyCandidateCheckUnavailableError extends AssetServiceError {
+  constructor(message, category) {
+    super('PHYSICAL_COPY_CANDIDATE_CHECK_UNAVAILABLE', message);
+    this.category = category || 'UNKNOWN';
+  }
+}

@@ -42,6 +42,8 @@ import {
   ValidationFailedError, AuthorizationFailedError, NotFoundError,
 } from '../src/modules/collection/index.js';
 import { resolveCollectionItemLink } from '../src/modules/assets/index.js';
+import { assertPhysicalCopySaveAllowed, PhysicalCopyCandidateCheckUnavailableError } from '../src/modules/capture/index.js';
+import { respondPhysicalCopyError } from '../src/lib/physicalCopyErrors.js';
 import { put as mediaPut } from '../src/modules/media/index.js';
 import { checkRateLimit } from './rate-limit.js';
 import { claimGradeReceipt, restoreGradeReceipt } from '../src/lib/gradeReceipt.js';
@@ -174,6 +176,21 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const { id: bodyId, assetCategory, attributes, images, gradeReceiptId } = req.body || {};
+      // GK-279 — SERVER-OWNED physical-copy standing for a NEW row, evaluated BEFORE
+      // any photo upload or write (a refusal leaves no orphan and no row). Updates to
+      // an existing row are not a duplicate-creation event. Failure to determine
+      // standing refuses the save (fail-closed) — never "zero candidates".
+      if (typeof bodyId === 'string' && bodyId && attributes && typeof attributes === 'object' && !Array.isArray(attributes)) {
+        let isNewRow;
+        try {
+          await getMyCollectionItem({ principalId, id: bodyId });
+          isNewRow = false;
+        } catch (lookupErr) {
+          if (lookupErr instanceof NotFoundError) isNewRow = true;
+          else throw new PhysicalCopyCandidateCheckUnavailableError('collection existence check failed', lookupErr?.code || lookupErr?.name);
+        }
+        if (isNewRow) await assertPhysicalCopySaveAllowed({ principalId, id: bodyId, attributes });
+      }
       const resolvedAttributes = await withResolvedImages(attributes, images);
       const created = await createCollectionItem({ principalId, id: bodyId, assetCategory, attributes: resolvedAttributes });
       return res.status(200).json(await claimReceiptIfPresent(principalId, bodyId, gradeReceiptId, created));
@@ -211,6 +228,7 @@ export default async function handler(req, res) {
 
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (e) {
+    if (respondPhysicalCopyError(res, e, { principalId, handler: 'collection-create', req })) return;
     if (e instanceof ValidationFailedError) {
       return res.status(400).json({ error: e.message });
     }

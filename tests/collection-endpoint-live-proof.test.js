@@ -56,6 +56,8 @@ function mockRes() {
 console.log('\n=== /api/collection — live proof (real Development DB) ===\n');
 
 const JIMMY = '01a0283a-b1b6-7f90-9b41-9c06bee6ecba'; // real, live gk_principal row (Principal A)
+// GK-279: a unique title per run — the server's physical-copy standing check (correctly) refuses a NEW row that resembles a physical asset this principal already owns, and this principal retains assets from other tests.
+const BOOK_TITLE = `Collection Endpoint Proof ${Date.now().toString(36)}`;
 const TAG = `coll-ep-${Date.now()}`;
 
 function mintTestToken(principalId) {
@@ -104,13 +106,13 @@ try {
   {
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${tokenA}` }, query: {},
-      body: { id: ITEM_A1, assetCategory: 'comic', attributes: { title: 'Brave and the Bold', issue: '141', year: '1978' } },
+      body: { id: ITEM_A1, assetCategory: 'comic', attributes: { title: BOOK_TITLE, issue: '141', year: '1978' } },
     };
     const res = mockRes();
     await collectionRoute(req, res);
     assertTrue(res.statusCode === 200, `create -> 200 (got ${res.statusCode}, body=${JSON.stringify(res.body)})`);
     assertTrue(res.body?.id === ITEM_A1, 'returned item carries the caller-supplied id');
-    assertTrue(res.body?.attributes?.title === 'Brave and the Bold', 'attributes round-trip verbatim');
+    assertTrue(res.body?.attributes?.title === BOOK_TITLE, 'attributes round-trip verbatim');
   }
 
   console.log('\n-- "desktop login, same account" simulation: LIST as Principal A shows the item just created via a SEPARATE request --\n');
@@ -135,7 +137,7 @@ try {
   {
     const req = {
       method: 'PUT', headers: { authorization: `Bearer ${tokenA}` }, query: { id: ITEM_A1 },
-      body: { attributes: { title: 'Brave and the Bold', issue: '141', year: '1978', price: '$8.93' } },
+      body: { attributes: { title: BOOK_TITLE, issue: '141', year: '1978', price: '$8.93' } },
     };
     const res = mockRes();
     await collectionRoute(req, res);
@@ -147,7 +149,7 @@ try {
     const before = (await client.query('SELECT COUNT(*)::int AS n FROM collection_item WHERE principal_id = $1', [JIMMY])).rows[0].n;
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${tokenA}` }, query: {},
-      body: { id: ITEM_A1, assetCategory: 'comic', attributes: { title: 'Brave and the Bold', issue: '141', year: '1978', price: '$8.93' } },
+      body: { id: ITEM_A1, assetCategory: 'comic', attributes: { title: BOOK_TITLE, issue: '141', year: '1978', price: '$8.93' } },
     };
     const res = mockRes();
     await collectionRoute(req, res);

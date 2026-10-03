@@ -21,6 +21,7 @@ import {
   ValidationFailedError, ConflictError, NotFoundError, AuthorizationFailedError, IdempotencyConflictError,
 } from '../src/modules/capture/index.js';
 import { checkRateLimit } from './rate-limit.js';
+import { respondPhysicalCopyError } from '../src/lib/physicalCopyErrors.js';
 
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
@@ -83,6 +84,7 @@ export default async function handler(req, res) {
     }
     return res.status(400).json({ error: "action must be one of candidates|same|another" });
   } catch (e) {
+    if (respondPhysicalCopyError(res, e, { principalId, handler: 'physical-copy', req })) return;
     if (e instanceof ValidationFailedError) return res.status(400).json({ error: e.message });
     if (e instanceof ConflictError || e instanceof IdempotencyConflictError) return res.status(409).json({ error: e.message });
     if (e instanceof NotFoundError || e instanceof AuthorizationFailedError) return res.status(404).json({ error: 'Not found' });

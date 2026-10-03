@@ -22,7 +22,8 @@ import {
   createPhysicalAsset, assignIdentity, attachMedia,
   recordAcquisition, linkCollectionItem, assertCollectionItemLinkable, resolveCollectionItemLink,
   resolvePhysicalCopyChoice, recordPhysicalCopyDecision, getPhysicalCopyDecisionForKey,
-  assessTransientDuplicate, retireTransientDuplicate,
+  assessTransientDuplicate, retireTransientDuplicate, isServerProvenContinuity, hasAnotherCopyDecisionForItem,
+  PhysicalCopyDecisionRequiredError,
   findPhysicalCopyCandidatesForBook, validatePhysicalCopyChoiceForBook,
   ValidationFailedError, ConflictError,
 } from '../assets/index.js';
@@ -129,14 +130,25 @@ async function captureFromScanOnce({
 
   let continuityLink = null;
   if (!existingLink && scanPayload.priorCollectionItemId) {
-    continuityLink = await resolveCollectionItemLink({
+    const claimed = await resolveCollectionItemLink({
       principalId, collectionItemId: scanPayload.priorCollectionItemId,
     });
-    if (!continuityLink) {
+    // Nonexistent and foreign ids are indistinguishable (resolveCollectionItemLink
+    // returns null for both) -> one refusal, no information leak.
+    if (!claimed) {
       throw new ValidationFailedError(
         `priorCollectionItemId "${scanPayload.priorCollectionItemId}" does not resolve to an ` +
         `existing linked asset for this principal — cannot assert rescan continuity`
       );
+    }
+    // GK-279 — CONTINUITY MUST BE SERVER-PROVEN. priorCollectionItemId is a CLIENT
+    // assertion; the server never validated that it is really this row's
+    // predecessor. It bypasses duplicate discovery ONLY when a durable operator
+    // SAME_COPY decision names this incoming row and resolves to the same asset.
+    // Otherwise it is IGNORED as a bypass and the candidate guard below applies.
+    if (scanPayload.collectionItemId
+        && await isServerProvenContinuity({ principalId, collectionItemId: scanPayload.collectionItemId, priorGkAssetId: claimed.gkAssetId })) {
+      continuityLink = claimed;
     }
   }
 
@@ -424,4 +436,27 @@ export async function confirmSameCopyAtSave(args = {}) {
 }
 export async function recordAnotherCopyAtSave(args = {}) {
   return retryOnIdempotencyRace(() => recordAnotherCopyAtSaveOnce(args));
+}
+
+// GK-279 — SERVER-OWNED candidate standing at the durable WRITE boundary
+// (POST /api/collection, creating a NEW row). The client cannot assert "no
+// candidates", skip a preflight, or omit anything: the standing is computed
+// here from durable state. ZERO candidates => allowed. Candidates + no
+// operator decision for this exact row => PhysicalCopyDecisionRequiredError.
+// Check failure => PhysicalCopyCandidateCheckUnavailableError (fail-closed).
+// Nothing is written by this function.
+export async function assertPhysicalCopySaveAllowed({ principalId, id, attributes } = {}) {
+  requireFields({ principalId, id, attributes }, ['principalId', 'id', 'attributes']);
+  const candidates = await findPhysicalCopyCandidatesForBook({
+    principalId,
+    book: { title: attributes.title ?? null, issue: attributes.issue ?? null, year: attributes.year ?? null },
+  });
+  if (candidates.length === 0) return { standing: 'ZERO_CANDIDATES' };
+  if (await hasAnotherCopyDecisionForItem({ principalId, collectionItemId: id })) {
+    return { standing: 'DECISION_RECORDED' };
+  }
+  throw new PhysicalCopyDecisionRequiredError(
+    'This book resembles a physical copy you already own — choose SAME_COPY or ANOTHER_COPY before it is saved',
+    candidates
+  );
 }

@@ -12177,7 +12177,7 @@ export default function App() {
       thumb = null;
     }
     const entry = {
-      id: `cv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      id: (typeof data._presetId === "string" && data._presetId) ? data._presetId : `cv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       title: data.title || "",
       publisher: data.publisher || "",
       year: data.year || "",
@@ -12390,7 +12390,11 @@ export default function App() {
         // physical assets that plausibly match); the operator is asked ONCE,
         // here, BEFORE any duplicate catalogue row is created or synced.
         // sameCopyConfirmations is no longer written anywhere.
+        // FAIL-CLOSED: "the check failed" is NOT "zero candidates". The server also
+        // re-enforces this at the durable write (POST /api/collection), so this
+        // preflight is UX, not authority — but on failure we do not save.
         let serverCopyCandidates = [];
+        let candidateCheckFailed = false;
         if (save && isAuthenticated()) {
           try {
             const cr = await authFetch("/api/physical-copy", {
@@ -12399,18 +12403,23 @@ export default function App() {
               body: JSON.stringify({ action: "candidates", book: { title: data.title, issue: issueNum, year: data.year } }),
             });
             if (cr && cr.ok) serverCopyCandidates = (await cr.json().catch(() => ({}))).candidates || [];
-          } catch { serverCopyCandidates = []; /* the capture-time backstop still guards */ }
+            else candidateCheckFailed = true;
+          } catch { candidateCheckFailed = true; }
         }
         const hasServerCandidates = serverCopyCandidates.length > 0;
         // Plain catalogue-only duplicate (no physical asset at stake) keeps
         // its original single-button behavior.
-        const matchedExisting = (save && !hasServerCandidates) ? catalogue.find(c =>
+        const matchedExisting = (save && !hasServerCandidates && !candidateCheckFailed) ? catalogue.find(c =>
           titlesLikelySameBook(c.title, data.title) &&
           c.issue === issueNum &&
           c.year === data.year
         ) : null;
-        const isDuplicate = hasServerCandidates || !!matchedExisting;
-        if (hasServerCandidates) {
+        const isDuplicate = candidateCheckFailed || hasServerCandidates || !!matchedExisting;
+        if (candidateCheckFailed) {
+          // Keep the scan result on screen; create NO collection row.
+          setDuplicateWarning({ title: data.title, issue: issueNum, year: data.year, existingId: null, linkStatus: 'check-failed' });
+          setPendingDuplicate({ data: { ...data, issue: issueNum }, b64, existingId: null, checkFailed: true });
+        } else if (hasServerCandidates) {
           const decisionKey = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `pcd-${Date.now()}-${Math.random().toString(36).slice(2)}`;
           setDuplicateWarning({ title: data.title, issue: issueNum, year: data.year, existingId: serverCopyCandidates[0].collectionItemId, linkStatus: 'linked' });
           setPendingDuplicate({ data: { ...data, issue: issueNum }, b64, existingId: serverCopyCandidates[0].collectionItemId, candidates: serverCopyCandidates, decisionKey });
@@ -15699,25 +15708,35 @@ export default function App() {
                       style={{ flex: 1, minWidth: 120, background: "transparent", color: "#ffaa33", border: "1px solid #ff9900", borderRadius: 4, padding: "6px 10px", fontWeight: 700, fontSize: 12, cursor: duplicateWarning.busy ? "not-allowed" : "pointer", opacity: duplicateWarning.busy ? 0.6 : 1 }}
                       onClick={async () => {
                       const { data, b64, decisionKey } = pendingDuplicate;
-                      const savedId = await addToCatalogue(data, b64);
+                      // GK-279 — ANOTHER COPY: the server records the operator's decision for
+                      // the id the new row WILL have, BEFORE the row exists — the server's own
+                      // standing check at the durable write requires it. If it cannot be
+                      // recorded, nothing is saved.
+                      const presetId = `cv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                      if (decisionKey) {
+                        setDuplicateWarning((prev) => (prev ? { ...prev, busy: true, error: null } : prev));
+                        let recorded = false;
+                        try {
+                          const ar = await authFetch("/api/physical-copy", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              action: "another",
+                              book: { title: data.title, issue: data.issue, year: data.year },
+                              collectionItemId: presetId,
+                              idempotencyKey: decisionKey,
+                            }),
+                          });
+                          recorded = !!(ar && ar.ok);
+                        } catch { recorded = false; }
+                        if (!recorded) {
+                          setDuplicateWarning((prev) => (prev ? { ...prev, busy: false, error: "Could not record your ANOTHER COPY choice with the server — nothing was saved. Tap again to retry." } : prev));
+                          return;
+                        }
+                      }
+                      const savedId = await addToCatalogue({ ...data, _presetId: presetId }, b64);
                       setPendingDuplicate(null);
                       setDuplicateWarning(null);
-                      // GK-279 — ANOTHER COPY: the server records the operator's
-                      // physical-identity decision for this new catalogue row (so the
-                      // later explicit Capture does NOT ask a second time). Best-effort:
-                      // if it fails, the capture-time backstop still asks once.
-                      if (savedId && decisionKey) {
-                        authFetch("/api/physical-copy", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            action: "another",
-                            book: { title: data.title, issue: data.issue, year: data.year },
-                            collectionItemId: savedId,
-                            idempotencyKey: decisionKey,
-                          }),
-                        }).catch(() => {});
-                      }
                       if (savedId) {
                         // GrailKey Directive V, Task 2 (GK-88, ownership
                         // perimeter) — same shape as gradeBlob's own
@@ -15789,7 +15808,45 @@ export default function App() {
                   </div>
                 </div>
               )}
-              {duplicateWarning && pendingDuplicate && duplicateWarning.linkStatus !== 'linked' && (
+              {duplicateWarning && pendingDuplicate && duplicateWarning.linkStatus === 'check-failed' && (
+                // GK-279 — the ownership check could not complete. Nothing was saved.
+                <div style={{ background: "#ff990022", border: "1px solid #ff9900", borderRadius: 6, padding: "8px 12px", marginBottom: 8, color: "#ffaa33", fontSize: 13 }}>
+                  <div style={{ marginBottom: 8 }}>
+                    ⚠️ We couldn't finish checking whether you already own this book, so it was NOT saved. Your scan result is still on screen.
+                  </div>
+                  {duplicateWarning.error && <div style={{ color: "#ff6666", marginBottom: 6, fontSize: 12 }}>{duplicateWarning.error}</div>}
+                  <button
+                    disabled={!!duplicateWarning.busy}
+                    style={{ background: "#ff9900", color: "#000", border: "none", borderRadius: 4, padding: "6px 14px", fontWeight: 700, fontSize: 12, cursor: duplicateWarning.busy ? "not-allowed" : "pointer", opacity: duplicateWarning.busy ? 0.6 : 1 }}
+                    onClick={async () => {
+                      const { data } = pendingDuplicate;
+                      setDuplicateWarning((prev) => (prev ? { ...prev, busy: true, error: null } : prev));
+                      let ok = false, cands = [];
+                      try {
+                        const cr = await authFetch("/api/physical-copy", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ action: "candidates", book: { title: data.title, issue: data.issue, year: data.year } }),
+                        });
+                        if (cr && cr.ok) { ok = true; cands = (await cr.json().catch(() => ({}))).candidates || []; }
+                      } catch { ok = false; }
+                      if (!ok) {
+                        setDuplicateWarning((prev) => (prev ? { ...prev, busy: false, error: "The ownership check is still unavailable. Nothing was saved — try again in a moment." } : prev));
+                        return;
+                      }
+                      if (cands.length > 0) {
+                        const decisionKey = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `pcd-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                        setDuplicateWarning((prev) => (prev ? { ...prev, linkStatus: 'linked', busy: false, existingId: cands[0].collectionItemId } : prev));
+                        setPendingDuplicate((prev) => (prev ? { ...prev, candidates: cands, decisionKey, checkFailed: false } : prev));
+                        return;
+                      }
+                      // The SERVER confirmed zero candidates: expose the ordinary save control.
+                      setDuplicateWarning((prev) => (prev ? { ...prev, linkStatus: 'unlinked', busy: false, resumeSave: true } : prev));
+                    }}
+                  >Retry ownership check</button>
+                </div>
+              )}
+              {duplicateWarning && pendingDuplicate && duplicateWarning.linkStatus !== 'linked' && duplicateWarning.linkStatus !== 'check-failed' && (
                 // GK-270 — unchanged original behavior when the matched row
                 // carries no durable physical-asset link (Case B territory:
                 // an ordinary catalogue-level duplicate with no physical
@@ -15798,7 +15855,7 @@ export default function App() {
                 // the heavier Case C gate above only ever applies when
                 // real physical identity is actually on the line.
                 <div style={{ background: "#ff990022", border: "1px solid #ff9900", borderRadius: 6, padding: "8px 12px", marginBottom: 8, color: "#ffaa33", fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span>⚠️ Already in collection. Tap Save to add another copy.</span>
+                  <span>{duplicateWarning.resumeSave ? "Ownership check passed. Tap Save to add this book." : "⚠️ Already in collection. Tap Save to add another copy."}</span>
                   <button
                     style={{ background: "#ff9900", color: "#000", border: "none", borderRadius: 4, padding: "4px 10px", fontWeight: 700, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap", marginLeft: 8 }}
                     onClick={async () => {

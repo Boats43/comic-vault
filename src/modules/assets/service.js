@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto';
 import * as repo from './repository.js';
 import { acquireConnection } from './db.js';
 import { checkIdempotencyReplay, claimIdempotencyKey, computeRequestFingerprint } from './idempotency.js';
-import { NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError, IdempotencyConflictError, PhysicalCopyDecisionRequiredError } from './errors.js';
+import { AssetServiceError, NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError, IdempotencyConflictError, PhysicalCopyDecisionRequiredError, PhysicalCopyCandidateCheckUnavailableError } from './errors.js';
 import { isPlausiblePhysicalCopyCandidate } from '../../lib/duplicateCopyDetection.js';
 import * as media from '../media/index.js';
 import { withRetryOn40P01 } from './retry.js';
@@ -1902,18 +1902,33 @@ function candidateView(row) {
 
 // Candidates for an arbitrary incoming identity (no collection row needed —
 // the save-time surface has none yet).
+// Test seam ONLY (precedent: __setReceiptStoreForTests): forces the candidate
+// check to fail so the fail-closed path can be proven with a real handler.
+let candidateCheckFault = null;
+export function __setCandidateCheckFaultForTests(fault) { candidateCheckFault = fault || null; }
+
+// FAIL-CLOSED: any infrastructure failure is PHYSICAL_COPY_CANDIDATE_CHECK_UNAVAILABLE,
+// never an empty (= "zero candidates") result. Domain errors pass through unchanged.
 async function candidatesForIdentity({ principalId, incoming, excludeCollectionItemId = null }) {
   if (!incoming?.title) return [];
-  const client = await acquireConnection();
   try {
-    await assertPrincipalActive(client, principalId);
-    const rows = await repo.listOwnedLinkedCatalogueRows(client, { principalId });
-    return rows
-      .filter((r) => r.collection_item_id !== excludeCollectionItemId)
-      .filter((r) => isPlausiblePhysicalCopyCandidate(incoming, r.attributes || {}))
-      .map(candidateView);
-  } finally {
-    client.release();
+    if (candidateCheckFault) throw new Error(candidateCheckFault);
+    const client = await acquireConnection();
+    try {
+      await assertPrincipalActive(client, principalId);
+      const rows = await repo.listOwnedLinkedCatalogueRows(client, { principalId });
+      return rows
+        .filter((r) => r.collection_item_id !== excludeCollectionItemId)
+        .filter((r) => isPlausiblePhysicalCopyCandidate(incoming, r.attributes || {}))
+        .map(candidateView);
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    if (e instanceof AssetServiceError) throw e;
+    throw new PhysicalCopyCandidateCheckUnavailableError(
+      'Physical-copy candidate check could not complete', e?.code || e?.name || 'UNKNOWN'
+    );
   }
 }
 
@@ -2091,12 +2106,13 @@ export async function assessTransientDuplicate({ principalId, collectionItemId }
   try {
     await assertPrincipalActive(client, principalId);
     const link = await repo.getCollectionItemLink(client, { collectionItemId });
-    const corrections = await repo.countOperatorCorrectionsForItem(client, { principalId, collectionItemId });
+    const refs = await repo.countProtectedReferencesForItem(client, { principalId, collectionItemId });
     const photoCount = Array.isArray(attrs.remoteImages) ? attrs.remoteImages.length : 0;
     const predictionEventId = attrs?.modelPredictedProvenance?.predictionEventId ?? null;
     const reasons = [];
     if (link) reasons.push('row is linked to a physical asset');
-    if (corrections > 0) reasons.push('row carries operator correction history');
+    if (refs.corrections > 0) reasons.push('row carries operator correction history');
+    if (refs.exclusions > 0) reasons.push('row is referenced by the learning-corpus exclusion registry');
     if (photoCount > 1) reasons.push('row holds more than the single capture photo');
     return {
       ok: reasons.length === 0, reasons,
@@ -2116,5 +2132,33 @@ export async function retireTransientDuplicate({ principalId, collectionItemId }
   } catch (e) {
     if (e instanceof collectionMod.NotFoundError) return { retired: false, alreadyGone: true };
     throw e;
+  }
+}
+
+// Is `priorCollectionItemId` a SERVER-PROVEN continuity predecessor of the
+// incoming row? Client assertion alone is never enough: the server must hold a
+// durable operator SAME_COPY decision naming this incoming row and resolving to
+// the asset the prior row is linked to. Returns false otherwise.
+export async function isServerProvenContinuity({ principalId, collectionItemId, priorGkAssetId } = {}) {
+  requireFields({ principalId, collectionItemId, priorGkAssetId }, ['principalId', 'collectionItemId', 'priorGkAssetId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    return !!(await repo.getSameCopyDecisionForIncoming(client, { principalId, collectionItemId, gkAssetId: priorGkAssetId }));
+  } finally {
+    client.release();
+  }
+}
+
+// Is a decision on file that lets this NEW catalogue row be created even though
+// owned look-alikes exist? (an operator ANOTHER_COPY decision for exactly this id)
+export async function hasAnotherCopyDecisionForItem({ principalId, collectionItemId } = {}) {
+  requireFields({ principalId, collectionItemId }, ['principalId', 'collectionItemId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    return !!(await repo.getAnotherCopyDecisionForItem(client, { principalId, collectionItemId }));
+  } finally {
+    client.release();
   }
 }

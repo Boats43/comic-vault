@@ -878,10 +878,27 @@ export async function getAnotherCopyDecisionForItem(client, { principalId, colle
   return res.rows[0] || null;
 }
 
-export async function countOperatorCorrectionsForItem(client, { principalId, collectionItemId }) {
-  const res = await client.query(
+// Protected durable references to a catalogue row that forbid retiring it.
+export async function countProtectedReferencesForItem(client, { principalId, collectionItemId }) {
+  const c = await client.query(
     `SELECT COUNT(*)::int AS n FROM data1_dev.operator_correction_event WHERE principal_id = $1 AND collection_item_id = $2`,
     [principalId, collectionItemId]
   );
-  return res.rows[0].n;
+  const x = await client.query(
+    `SELECT COUNT(*)::int AS n FROM data1_dev.learning_corpus_exclusion WHERE source_collection_item_id = $1`,
+    [collectionItemId]
+  );
+  return { corrections: c.rows[0].n, exclusions: x.rows[0].n };
+}
+
+// A durable operator SAME_COPY decision naming THIS incoming row and resolving
+// to this asset — the only server-side proof of continuity.
+export async function getSameCopyDecisionForIncoming(client, { principalId, collectionItemId, gkAssetId }) {
+  const res = await client.query(
+    `SELECT id FROM data1_dev.physical_copy_decision_event
+      WHERE principal_id = $1 AND incoming_collection_item_id = $2 AND choice = 'SAME_COPY' AND resulting_gk_asset_id = $3
+      LIMIT 1`,
+    [principalId, collectionItemId, gkAssetId]
+  );
+  return res.rows[0] || null;
 }

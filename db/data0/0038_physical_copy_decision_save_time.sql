@@ -8,6 +8,9 @@
 -- the SERVER-claimed grade receipt, never client-supplied) -- model_prediction_event itself stays
 -- immutable and untouched. incoming_retired records a capture-time SAME_COPY that retired a
 -- transient unlinked duplicate row (only when every retirement condition held).
+-- Constraint-existence guards are scoped to THIS table (conrelid): pg_constraint names are not
+-- unique database-wide, and an unscoped guard would silently skip a constraint whenever another
+-- schema (e.g. a scratch proof) already holds one of the same name.
 -- Append-only triggers are row-level; this DDL touches no existing row (constant defaults are
 -- metadata-only). Rerunnable.
 -- =====================================================================
@@ -25,20 +28,20 @@ ALTER TABLE physical_copy_decision_event ADD COLUMN IF NOT EXISTS incoming_retir
 
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'physical_copy_decision_surface_chk') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'physical_copy_decision_surface_chk' AND conrelid = 'physical_copy_decision_event'::regclass) THEN
     ALTER TABLE physical_copy_decision_event ADD CONSTRAINT physical_copy_decision_surface_chk
       CHECK (surface IN ('SAVE','CAPTURE'));
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'physical_copy_decision_incoming_chk') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'physical_copy_decision_incoming_chk' AND conrelid = 'physical_copy_decision_event'::regclass) THEN
     -- A missing incoming row is only valid for a SAVE-time SAME_COPY (nothing durable was created).
     ALTER TABLE physical_copy_decision_event ADD CONSTRAINT physical_copy_decision_incoming_chk
       CHECK (incoming_collection_item_id IS NOT NULL OR (surface = 'SAVE' AND choice = 'SAME_COPY'));
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'physical_copy_decision_result_chk') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'physical_copy_decision_result_chk' AND conrelid = 'physical_copy_decision_event'::regclass) THEN
     ALTER TABLE physical_copy_decision_event ADD CONSTRAINT physical_copy_decision_result_chk
       CHECK (resulting_gk_asset_id IS NOT NULL OR (surface = 'SAVE' AND choice = 'ANOTHER_COPY'));
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'physical_copy_decision_prediction_fk') THEN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'physical_copy_decision_prediction_fk' AND conrelid = 'physical_copy_decision_event'::regclass) THEN
     ALTER TABLE physical_copy_decision_event ADD CONSTRAINT physical_copy_decision_prediction_fk
       FOREIGN KEY (principal_id, related_prediction_event_id) REFERENCES model_prediction_event (principal_id, id);
   END IF;

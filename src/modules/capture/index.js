@@ -8,7 +8,7 @@
 //
 // See docs/adr/DATA-1-CAPTURE-INTEGRATION.md for the full design.
 
-export { captureFromScan, listSaveTimeCopyCandidates, confirmSameCopyAtSave, recordAnotherCopyAtSave } from './service.js';
+export { captureFromScan, listSaveTimeCopyCandidates, confirmSameCopyAtSave, recordAnotherCopyAtSave, assertPhysicalCopySaveAllowed } from './service.js';
 
 export {
   AssetServiceError,
@@ -19,4 +19,7 @@ export {
   ValidationFailedError,
   AuthorizationFailedError,
   PhysicalCopyDecisionRequiredError,
+  PhysicalCopyCandidateCheckUnavailableError,
 } from '../assets/index.js';
+
+export { __setCandidateCheckFaultForTests } from '../assets/index.js';

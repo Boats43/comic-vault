@@ -24,6 +24,7 @@
 import { verifyToken, InvalidTokenError } from '../modules/auth/index.js';
 import { captureFromScan, PhysicalCopyDecisionRequiredError, ValidationFailedError, ConflictError, NotFoundError, AuthorizationFailedError, IdempotencyConflictError } from '../modules/capture/index.js';
 import { checkRateLimit } from '../../api/rate-limit.js';
+import { respondPhysicalCopyError } from './physicalCopyErrors.js';
 
 function extractBearerToken(req) {
   const header = req.headers?.authorization || req.headers?.Authorization;
@@ -61,11 +62,8 @@ export async function handleCaptureScan(req, res) {
     const result = await captureFromScan({ principalId, scanPayload, photos, idempotencyKey, assetClass, copyDisposition });
     return res.status(200).json(result);
   } catch (e) {
-    if (e instanceof PhysicalCopyDecisionRequiredError) {
-      // GK-279 — nothing was minted; the operator must choose SAME_COPY /
-      // ANOTHER_COPY and resubmit with the same idempotencyKey.
-      return res.status(409).json({ error: 'PHYSICAL_COPY_DECISION_REQUIRED', detail: e.message, candidates: e.candidates });
-    }
+    // GK-279 — 409 decision-required (nothing minted) or 503 candidate-check-unavailable (fail-closed).
+    if (respondPhysicalCopyError(res, e, { principalId, handler: 'capture-scan', req })) return;
     if (e instanceof ValidationFailedError) {
       return res.status(400).json({ error: e.message });
     }
