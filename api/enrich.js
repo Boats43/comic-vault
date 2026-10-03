@@ -13698,6 +13698,7 @@ export default async function handler(req, res) {
     console.error('[enrich-error] stack:', err?.stack || 'no stack');
     console.error('[enrich-error] name:', err?.name || 'unknown');
     console.error('[enrich-error] isPolybagPricing:', typeof isPolybagPricing !== 'undefined' ? isPolybagPricing : 'out of scope');
-    res.status(500).json({ error: err?.message || "Server error", stack: err?.stack });
+    // The stack trace is logged above (server-side only); it is never returned to the caller.
+    res.status(500).json({ error: err?.message || "Server error" });
   }
 }

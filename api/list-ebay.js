@@ -102,16 +102,6 @@ const parsePriceNumber = (p) => {
 // eBay's authoritative category condition policy, see src/lib/ebayListingMetadata.js. For category
 // 259104 the condition is optional and is omitted.)
 
-// Match the frontend showKeyIssue() check.
-const showKeyIssue = (k) => {
-  if (!k) return false;
-  const s = k.toLowerCase().trim();
-  if (["no", "n/a", "none", "false", "not a key",
-    "non-key", "non key", "not key"]
-    .some((x) => s.includes(x))) return false;
-  return s.length > 2;
-};
-
 const NO_TITLE_VARIANTS = [
   'corner box', 'masterpieces', 'design variant',
   'cover a', 'cover b', 'cover c', 'cover d', 'headshot',
@@ -139,28 +129,6 @@ const eraFromYear = (y) => {
   if (n <= 1984) return "Bronze Age";
   if (n <= 1991) return "Copper Age";
   return "Modern Age";
-};
-
-// T1-1: Era for Item Specifics (eBay-friendly labels)
-const getEra = (y) => {
-  const n = parseInt(y, 10);
-  if (!n || isNaN(n)) return "Modern Age";
-  if (n < 1938) return "Victorian/Platinum Age";
-  if (n < 1956) return "Golden Age";
-  if (n < 1970) return "Silver Age";
-  if (n < 1985) return "Bronze Age";
-  if (n < 1991) return "Copper Age";
-  if (n < 2000) return "Modern Age (1991-1999)";
-  return "Modern Age";
-};
-
-// T1-1: Extract character for Item Specifics
-const extractCharacter = (item) => {
-  return (
-    item.firstAppearanceCharacters?.[0] ||
-    item.comicVine?.characterCredits?.[0]?.name ||
-    null
-  );
 };
 
 const buildBundleTitle = (rawItems) => {

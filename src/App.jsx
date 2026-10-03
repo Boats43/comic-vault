@@ -4401,6 +4401,7 @@ export function CollectionDetail({
   onBack,
   onDelete,
   onList,
+  onSyncEbay,
   onRefreshMarket,
   onReIdentify,
   onManualCorrect,
@@ -10000,7 +10001,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
         setLatestResponse("Not enough comics for a bundle.");
         return;
       }
-      setSelectionMode(true);
+      setSelectionType('bundle');
       setSelectedIds(new Set(validIds));
       const titles = validIds
         .map((id) => catalogue.find((c) => c.id === id)?.title)
