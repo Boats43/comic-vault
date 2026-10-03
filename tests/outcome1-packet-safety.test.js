@@ -93,7 +93,7 @@ console.log('\n=== BOUNDARY / structure ===');
 ok(!/USPSMedia/.test(strip(src).slice(strip(src).indexOf('const buildXml'), strip(src).indexOf('export const __dryRunBuildListingXml'))), 'the single-listing packet builder contains no hard-coded USPSMedia token');
 ok(/plan\.bestOffer === true/.test(strip(src)) && !/BestOfferEnabled>true<\/BestOfferEnabled>\s*\n\s*<\/BestOfferDetails>\s*\n\s*<ListingDetails>\s*\n.*\n.*\n\s*<\/ListingDetails>\s*\n  <\/Item>/.test(strip(src).replace(/plan\.bestOffer === true \? `/, 'X')), 'M. Best Offer is emitted only on explicit opt-in (default OFF)');
 ok(!/\bitem\.reason\b/.test(strip(src)), 'T. raw item.reason remains absent from api/list-ebay.js');
-ok(src.indexOf('assertQ41PriceBinding') < src.indexOf('uploadSiteHostedPicture(img, singleHeaders)') && src.indexOf('resolveDomesticShippingService({') < src.indexOf('uploadSiteHostedPicture(img, singleHeaders)') && src.indexOf('assertPublishPhotos({') < src.indexOf('const xml = buildXml(item, pictureUrls, listingPlan)'), 'ordering: price binding + shipping resolution precede any picture upload; the photo guard precedes AddFixedPriceItem construction');
+ok(src.indexOf('assertQ41PriceBinding') < src.indexOf('uploadImageViaMediaApi({ bytes: photo.bytes') && src.indexOf('resolveDomesticShippingService({') < src.indexOf('uploadImageViaMediaApi({ bytes: photo.bytes') && src.indexOf('assertPublishPhotos({') < src.indexOf('const xml = buildXml(item, pictureUrls, listingPlan)'), 'ordering: price binding + shipping resolution precede any picture upload; the photo guard precedes AddFixedPriceItem construction');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

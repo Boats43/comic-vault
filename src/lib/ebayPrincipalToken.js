@@ -122,9 +122,10 @@ export async function resolveEbayUserAccessToken({ principalId } = {}) {
   }
 
   let accessToken;
+  const effectiveScopes = Array.isArray(grantedScopes) && grantedScopes.length ? grantedScopes : CONNECT_SCOPES;
   try {
     ({ accessToken } = await refreshUserAccessToken(refreshCredential, {
-      scopes: Array.isArray(grantedScopes) && grantedScopes.length ? grantedScopes : CONNECT_SCOPES,
+      scopes: effectiveScopes,
     }));
   } catch (e) {
     const classification = classifyRefreshExchangeError(e);
@@ -148,5 +149,7 @@ export async function resolveEbayUserAccessToken({ principalId } = {}) {
     throw new EbayTemporaryFailureError(`eBay was temporarily unavailable while refreshing the access token: ${e?.message || e}`);
   }
 
-  return { accessToken, providerUserId: metadata.providerUserId };
+  // `scopes` = the exact set the refresh token was consented/requested with (additive field; lets callers fail closed
+  // BEFORE a call that needs a scope this connection never granted).
+  return { accessToken, providerUserId: metadata.providerUserId, scopes: effectiveScopes };
 }

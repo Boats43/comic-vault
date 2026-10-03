@@ -63,9 +63,13 @@ export const REQUIRED_SCOPES = Object.freeze([
 // below is untouched, unused by Phase 2, and keeps its own REQUIRED_SCOPES
 // default; Phase 3 should pass CONNECT_SCOPES explicitly once it starts
 // refreshing a per-principal connection's own access token.
+// 2026-10-03 (eBay Media API cutover): sell.inventory is the single scope eBay's Media API spec defines for
+// create_image_from_file / getImage. A refresh token's scopes are FIXED at consent, so a connection created before this
+// line existed does NOT have it and must be reconnected (api/list-ebay.js fails closed with EBAY_MEDIA_PERMISSION_REQUIRED).
 export const CONNECT_SCOPES = Object.freeze([
   'https://api.ebay.com/oauth/api_scope',
   ...REQUIRED_SCOPES,
+  'https://api.ebay.com/oauth/api_scope/sell.inventory',
 ]);
 
 // attemptRemoteRevocationBestEffort — GK-264, DISCLOSED GAP, NOT A REAL

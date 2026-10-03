@@ -41,7 +41,8 @@ import { toBuyerSafeListingFacts, buildGovernedListingTitle } from "../src/lib/b
 import { getMyCollectionItem, NotFoundError as CollectionNotFoundError } from "../src/modules/collection/index.js";
 import { toCents, assertQ41PriceBinding, assertListActionPriceBinding, PriceBindingError } from "../src/lib/listingPriceBinding.js";
 import { getAspectMetadata, getItemConditionPolicy, buildItemSpecificsFromMetadata, resolveDomesticShippingService } from "../src/lib/ebayListingMetadata.js";
-import { assertPublishPhotos, PhotoGuardError } from "../src/lib/listingPhotoGuard.js";
+import { assertPublishPhotos, assertSourceImages, PhotoGuardError } from "../src/lib/listingPhotoGuard.js";
+import { uploadImageViaMediaApi, MediaApiError, hasMediaScope } from "../src/lib/ebayMediaApi.js";
 
 // Outcome #1 — OPTIONAL, ADDITIVE GrailKey linkage. Neither import below
 // changes this endpoint's existing, still-mandatory behavior for a
@@ -1078,6 +1079,31 @@ export default async function handler(req, res) {
       return;
     }
 
+    // EBAY MEDIA API CUTOVER — SOURCE MEDIA VALIDATION, before ANY eBay network call (reads included).
+    // Every photo must be a real image data URL, in a format the Media API accepts, whose bytes match its declared
+    // format and hash to a media row of THIS gkAssetId. Invalid source => PUBLISH_BLOCKED_NO_PHOTO with ZERO eBay calls.
+    // T2-1: up to 12 images; only upload them all when confidence is not LOW.
+    const shouldUploadMultiple =
+      item.matchConfidence?.tier !== 'LOW' &&
+      item.claudeCheck?.confidence !== 'LOW';
+    const imagesToUpload = shouldUploadMultiple
+      ? (item.images || []).filter(Boolean).slice(0, 12)
+      : [(item.images?.[0] || item.image || null)].filter(Boolean);
+    let assetMediaHashes, sourcePhotos;
+    try {
+      assetMediaHashes = await getAssetMediaContentHashes({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId });
+      sourcePhotos = assertSourceImages({ images: imagesToUpload, assetMediaHashes });
+    } catch (e) {
+      if (e instanceof PhotoGuardError) {
+        console.error(`[ebay] source media refused (${e.reason}) — aborting before any eBay call`);
+        res.status(400).json({ error: 'PUBLISH_BLOCKED_NO_PHOTO', reason: e.reason, message: e.message });
+        return;
+      }
+      console.error('[ebay] source media validation failed unexpectedly — aborting before any eBay call:', e?.message || e);
+      res.status(400).json({ error: 'PUBLISH_BLOCKED_NO_PHOTO', reason: 'source-validation-error', message: 'PUBLISH BLOCKED — NO VALID EBAY PHOTO (the photo could not be verified against this asset).' });
+      return;
+    }
+
     // OUTCOME #1 — AUTHORITATIVE MARKETPLACE METADATA (before any eBay write). Aspect enums and the
     // category condition policy come from eBay's own selling metadata; unavailable => fail closed.
     let aspectMeta, conditionPolicy;
@@ -1100,80 +1126,62 @@ export default async function handler(req, res) {
       shippingService: null,
     };
 
-    // T2-1: Multi-image upload for singles (up to 12 images)
-    // Gate: only upload all images when confidence is not LOW
-    const shouldUploadMultiple =
-      item.matchConfidence?.tier !== 'LOW' &&
-      item.claudeCheck?.confidence !== 'LOW';
-
-    const imagesToUpload = shouldUploadMultiple
-      ? (item.images || []).filter(Boolean).slice(0, 12)
-      : [(item.images?.[0] || item.image || null)].filter(Boolean);
-
-    // GK-265 PHASE 3 — the authenticated, ownership-verified principal's
-    // own eBay User access token (src/lib/ebayPrincipalToken.js).
-    // grailkeyPrincipalId is guaranteed non-null and already verified to
-    // own item.gkAssetId by the linkage/Inventory Authority gates above
-    // — this is never any other seller's credential, and there is no
-    // global EBAY_AUTH_TOKEN fallback if resolution fails. Only resolved
-    // when there's actually at least one image to upload — a zero-photo
-    // request is about to be rejected by the GK-208 gate below
-    // regardless, so this avoids a real, wasted OAuth refresh call on a
-    // request that was never going to reach eBay either way.
-    let singleHeaders = ebayHeaders;
-    if (imagesToUpload.length > 0) {
-      let singleAccessToken;
-      try {
-        ({ accessToken: singleAccessToken } = await resolveEbayUserAccessToken({ principalId: grailkeyPrincipalId }));
-      } catch (e) {
-        respondEbayTokenError(res, e, 'publishing this listing');
-        return;
-      }
-      singleHeaders = { ...ebayHeaders, "X-EBAY-API-IAF-TOKEN": singleAccessToken };
+    // GK-265 PHASE 3 — the authenticated, ownership-verified principal's own eBay User access token
+    // (src/lib/ebayPrincipalToken.js); no global fallback. Source media is already validated (>=1 owned photo).
+    // The Media API needs the sell.inventory scope. A refresh token's scopes are fixed at consent, so a connection
+    // made before that scope was requested is refused HERE, before any eBay write, with reconnect guidance.
+    let singleAccessToken, singleScopes;
+    try {
+      ({ accessToken: singleAccessToken, scopes: singleScopes } = await resolveEbayUserAccessToken({ principalId: grailkeyPrincipalId }));
+    } catch (e) {
+      respondEbayTokenError(res, e, 'publishing this listing');
+      return;
     }
+    if (!hasMediaScope(singleScopes)) {
+      console.error('[ebay] seller connection lacks the sell.inventory scope required by the Media API — aborting before any eBay write');
+      res.status(409).json({ error: 'EBAY_MEDIA_PERMISSION_REQUIRED', message: 'Your eBay connection predates image-upload permission. Reconnect eBay to grant it, then try again. Nothing was listed.' });
+      return;
+    }
+    const singleHeaders = { ...ebayHeaders, "X-EBAY-API-IAF-TOKEN": singleAccessToken };
 
     // OUTCOME #1 — domestic shipping service resolved from eBay's own GeteBayDetails (authoritative);
     // Media Mail is never selectable. Unresolvable => fail closed BEFORE any picture upload.
-    if (imagesToUpload.length > 0) {
+    try {
+      listingPlan.shippingService = await resolveDomesticShippingService({ headers: singleHeaders });
+    } catch (e) {
+      console.error('[ebay] shipping service resolution failed — aborting before any eBay write:', e?.message || e);
+    }
+    if (!listingPlan.shippingService) {
+      res.status(409).json({ error: 'SHIPPING_SERVICE_UNRESOLVED', message: 'An eligible shipping service could not be verified with eBay (Media Mail is not permitted), so nothing was listed.' });
+      return;
+    }
+
+    // EBAY MEDIA API (createImageFromFile) — the ONLY single-listing upload path; there is no fallback to
+    // UploadSiteHostedPictures. All-or-nothing: any failed or malformed upload aborts the publish BEFORE
+    // verifySellerAccount / AddFixedPriceItem (a listing with fewer photos than the operator sent is never created silently).
+    const pictureUrls = [];
+    const uploadedPhotos = []; // { bytes, url } — fed to the last-mile photo guard
+    for (const photo of sourcePhotos) {
       try {
-        listingPlan.shippingService = await resolveDomesticShippingService({ headers: singleHeaders });
-      } catch (e) {
-        console.error('[ebay] shipping service resolution failed — aborting before any eBay write:', e?.message || e);
-      }
-      if (!listingPlan.shippingService) {
-        res.status(409).json({ error: 'SHIPPING_SERVICE_UNRESOLVED', message: 'An eligible shipping service could not be verified with eBay (Media Mail is not permitted), so nothing was listed.' });
+        const url = await uploadImageViaMediaApi({ bytes: photo.bytes, mimeType: photo.mimeType, accessToken: singleAccessToken });
+        pictureUrls.push(url);
+        uploadedPhotos.push({ bytes: photo.bytes, url });
+      } catch (mediaErr) {
+        if (mediaErr instanceof MediaApiError && mediaErr.code === 'MEDIA_PERMISSION') {
+          console.error('[ebay] Media API refused the seller token — aborting before AddFixedPriceItem:', mediaErr.message);
+          res.status(409).json({ error: 'EBAY_MEDIA_PERMISSION_REQUIRED', message: 'eBay refused image upload for this connection. Reconnect eBay to grant image-upload permission, then try again. Nothing was listed.' });
+          return;
+        }
+        const reason = mediaErr instanceof MediaApiError && mediaErr.code === 'MEDIA_RESPONSE_MALFORMED' ? 'media-response-malformed' : 'media-upload-failed';
+        console.error(`[ebay] Media API upload failed (${reason}) — aborting before AddFixedPriceItem:`, mediaErr?.message || mediaErr);
+        res.status(502).json({ error: 'PUBLISH_BLOCKED_NO_PHOTO', reason, message: 'PUBLISH BLOCKED — NO VALID EBAY PHOTO. eBay did not accept the photo upload, so nothing was listed. Please retry.' });
         return;
       }
     }
 
-    const pictureUrls = [];
-    const uploadedPhotos = []; // { bytes, url } — fed to the last-mile photo guard
-    for (const img of imagesToUpload) {
-      try {
-        const url = await uploadSiteHostedPicture(img, singleHeaders);
-        if (url) { pictureUrls.push(url); uploadedPhotos.push({ bytes: decodeDataUrl(img).bytes, url }); }
-      } catch (imgErr) {
-        // Don't hard-fail the whole listing on image upload issues — log and continue without.
-        console.error("Picture upload failed:", imgErr.message);
-      }
-    }
-
-    // GK-208 ZERO-PHOTO PRECALL GATE — eBay's own Trading API hard-
-    // requires at least one PictureURL (ErrorCode 21919136, "eBay
-    // requires at least one photo") and rejects AddFixedPriceItem
-    // outright otherwise. Previously this handler always attempted the
-    // real eBay call regardless, letting eBay itself reject a doomed
-    // listing (a real 502 was hit this way when the client sent no
-    // usable `images` array — GK-208). Fail closed HERE instead: if,
-    // after every upload attempt above, zero usable eBay-hosted picture
-    // URLs exist, abort BEFORE verifySellerAccount/AddFixedPriceItem —
-    // no eBay call is made, and the operator sees an actionable reason
-    // instead of an opaque eBay error surfaced through a generic 502.
-    if (pictureUrls.length === 0) {
-      res.status(400).json({
-        error: 'PUBLISH_BLOCKED_NO_PHOTO',
-        message: 'PUBLISH BLOCKED — NO VALID EBAY PHOTO. No usable photo could be uploaded to eBay for this listing (0 of ' + imagesToUpload.length + ' attempted image(s) produced a hosted URL). Add or re-check a photo before publishing.',
-      });
+    // ZERO-PHOTO PRECALL GATE (GK-208) — unreachable with validated sources, kept as a defensive invariant.
+    if (pictureUrls.length === 0 || pictureUrls.length !== sourcePhotos.length) {
+      res.status(400).json({ error: 'PUBLISH_BLOCKED_NO_PHOTO', reason: 'no-hosted-url', message: 'PUBLISH BLOCKED — NO VALID EBAY PHOTO.' });
       return;
     }
 
@@ -1181,7 +1189,6 @@ export default async function handler(req, res) {
     // (a) hash to a media row belonging to THIS gkAssetId, (b) be an https, approved-host,
     // non-placeholder URL, (c) be reachable and serve image/*. Anything else => PUBLISH_BLOCKED_NO_PHOTO.
     try {
-      const assetMediaHashes = await getAssetMediaContentHashes({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId });
       await assertPublishPhotos({ sourceImages: uploadedPhotos, assetMediaHashes });
     } catch (e) {
       if (e instanceof PhotoGuardError) {

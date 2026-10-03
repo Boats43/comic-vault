@@ -54,3 +54,36 @@ export async function assertPublishPhotos({ sourceImages, assetMediaHashes, fetc
   }
   return { count: sourceImages.length };
 }
+
+// ── SOURCE-MEDIA VALIDATION (runs BEFORE any eBay network call, incl. reads) ──────────────────────────────────────
+// Every source photo must be a real base64 image data URL whose bytes (a) are non-empty, (b) are a format the eBay
+// Media API accepts, (c) actually start with that format's magic bytes, and (d) hash to a media row of THIS gkAssetId.
+// Returns [{ bytes, mimeType, sha256 }]. Throws PhotoGuardError (code PUBLISH_BLOCKED_NO_PHOTO) otherwise.
+const MEDIA_API_MIMES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/bmp', 'image/tiff', 'image/avif', 'image/heic', 'image/webp']);
+const startsWith = (b, sig, off = 0) => sig.every((v, i) => b[off + i] === v);
+function magicMatches(mime, b) {
+  if (mime === 'image/jpeg' || mime === 'image/jpg') return startsWith(b, [0xff, 0xd8, 0xff]);
+  if (mime === 'image/png') return startsWith(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (mime === 'image/gif') return startsWith(b, [0x47, 0x49, 0x46, 0x38]);
+  if (mime === 'image/bmp') return startsWith(b, [0x42, 0x4d]);
+  if (mime === 'image/tiff') return startsWith(b, [0x49, 0x49, 0x2a, 0x00]) || startsWith(b, [0x4d, 0x4d, 0x00, 0x2a]);
+  if (mime === 'image/webp') return startsWith(b, [0x52, 0x49, 0x46, 0x46]) && startsWith(b, [0x57, 0x45, 0x42, 0x50], 8);
+  if (mime === 'image/avif' || mime === 'image/heic') return startsWith(b, [0x66, 0x74, 0x79, 0x70], 4); // ISO-BMFF "ftyp"
+  return false;
+}
+export function assertSourceImages({ images, assetMediaHashes }) {
+  if (!Array.isArray(images) || images.length === 0) throw new PhotoGuardError('no-photo');
+  const owned = new Set(assetMediaHashes || []);
+  return images.map((img) => {
+    const m = typeof img === 'string' ? img.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\s]*)$/) : null;
+    if (!m) throw new PhotoGuardError('source-not-an-image-data-url');
+    const mimeType = m[1].toLowerCase();
+    if (!MEDIA_API_MIMES.has(mimeType)) throw new PhotoGuardError('source-format-unsupported', mimeType);
+    const bytes = Buffer.from(m[2], 'base64');
+    if (bytes.length === 0) throw new PhotoGuardError('source-empty');
+    if (!magicMatches(mimeType, bytes)) throw new PhotoGuardError('source-bytes-not-the-declared-format', mimeType);
+    const sha = sha256Hex(bytes);
+    if (!owned.has(sha)) throw new PhotoGuardError('media-not-for-this-asset');
+    return { bytes, mimeType, sha256: sha };
+  });
+}

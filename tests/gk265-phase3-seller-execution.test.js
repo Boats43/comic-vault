@@ -30,7 +30,7 @@ import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { metaFetch, shippingResponse } from './helpers/ebayPacketMocks.js';
+import { metaFetch, shippingResponse, mockState } from './helpers/ebayPacketMocks.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -94,7 +94,7 @@ const TINY_PNG_DATA_URL =
 
 global.fetch = async (url, opts = {}) => {
   const urlStr = String(url);
-  const __m = metaFetch(urlStr); if (__m) return __m;
+  const __m = metaFetch(urlStr, opts); if (__m) return __m;
 
   if (urlStr.includes('identity/v1/oauth2/token')) {
     const params = new URLSearchParams(String(opts.body || ''));

@@ -32,10 +32,28 @@ export const SHIPPING_XML = `<?xml version="1.0"?><GeteBayDetailsResponse><Ack>S
 </GeteBayDetailsResponse>`;
 
 // Mutable behavior switches a test may flip.
-export const mockState = { picture: 'ok', metaDown: false, shippingFails: false };
+// media: 'ok' | 'forbidden' | 'fail' | 'no-location' | 'bad-location' | 'malformed' | 'expired'
+//   (eBay Media API createImageFromFile / getImage mock; mediaCalls records 'create' / 'get' so tests can assert
+//   ZERO Media API calls on refusals and that the legacy Trading UploadSiteHostedPictures is never used).
+export const mockState = { picture: 'ok', metaDown: false, shippingFails: false, media: 'ok', mediaImageUrl: null, mediaCalls: [] };
+export const MEDIA_IMAGE_LOCATION = 'https://apim.ebay.com/commerce/media/v1_beta/image/test-image-id-1';
 
 // Returns a fetch-like response for REST metadata + the hosted picture URL, or null if not handled.
-export function metaFetch(urlStr) {
+export function metaFetch(urlStr, opts) {
+  if (urlStr.startsWith('https://apim.ebay.com/commerce/media/v1_beta/')) {
+    const isCreate = urlStr.endsWith('/image/create_image_from_file');
+    mockState.mediaCalls.push(isCreate ? 'create' : 'get');
+    if (isCreate) {
+      if (mockState.media === 'forbidden') return { ok: false, status: 403, headers: { get: () => null }, json: async () => ({ errors: [{ errorId: 190013, message: 'unauthorized' }] }) };
+      if (mockState.media === 'fail') return { ok: false, status: 500, headers: { get: () => null }, json: async () => ({ errors: [{ errorId: 190000, message: 'internal' }] }) };
+      if (mockState.media === 'no-location') return { ok: true, status: 201, headers: { get: () => null }, json: async () => ({}) };
+      if (mockState.media === 'bad-location') return { ok: true, status: 201, headers: { get: (h) => (String(h).toLowerCase() === 'location' ? 'https://evil.example/steal-the-token' : null) }, json: async () => ({}) };
+      return { ok: true, status: 201, headers: { get: (h) => (String(h).toLowerCase() === 'location' ? MEDIA_IMAGE_LOCATION : null) }, json: async () => ({}) };
+    }
+    if (mockState.media === 'malformed') return { ok: true, status: 200, json: async () => ({ notImageUrl: true }) };
+    if (mockState.media === 'expired') return { ok: true, status: 200, json: async () => ({ imageUrl: mockState.mediaImageUrl || HOSTED_PICTURE_URL, expirationDate: '2020-01-01T00:00:00.000Z' }) };
+    return { ok: true, status: 200, json: async () => ({ imageUrl: mockState.mediaImageUrl || HOSTED_PICTURE_URL, expirationDate: new Date(Date.now() + 86400000 * 30).toISOString() }) };
+  }
   if (urlStr.includes('/sell/metadata/v1/')) return mockState.metaDown ? { ok: false, status: 503, json: async () => ({}) } : { ok: true, status: 200, json: async () => META_CONDITIONS };
   if (urlStr.includes('/commerce/taxonomy/v1/')) return mockState.metaDown ? { ok: false, status: 503, json: async () => ({}) } : { ok: true, status: 200, json: async () => META_ASPECTS };
   if (/^https:\/\/i\.ebayimg\.com\//.test(urlStr)) {

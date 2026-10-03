@@ -25,7 +25,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
-import { metaFetch, shippingResponse } from './helpers/ebayPacketMocks.js';
+import { metaFetch, shippingResponse, mockState } from './helpers/ebayPacketMocks.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -53,15 +53,18 @@ const TINY_PNG_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 const fetchCalls = [];
+const callLog = []; // ordered log of EVERY outbound fetch (Media API / REST URL path, or Trading call name)
 let uploadBehavior = 'success'; // 'success' | 'failure'
 let addFixedPriceItemBehavior = 'success';
 let lastAddFixedPriceItemXml = null;
 const FAKE_ITEM_ID = `test-photo-item-${Date.now()}`;
 const FAKE_HOSTED_URL = 'https://i.ebayimg.com/hosted/fake-picture-1.jpg';
+mockState.mediaImageUrl = FAKE_HOSTED_URL; // eBay Media API getImage returns this EPS URL
 
 global.fetch = async (url, opts) => {
   const urlStr = String(url);
-  const __m = metaFetch(urlStr); if (__m) return __m;
+  callLog.push(urlStr.includes('/identity/v1/oauth2/token') ? 'oauth-refresh' : (opts?.headers?.['X-EBAY-API-CALL-NAME'] ? 'trading:' + opts.headers['X-EBAY-API-CALL-NAME'] : urlStr.replace(/^https:\/\//, '').split('?')[0]));
+  const __m = metaFetch(urlStr, opts); if (__m) return __m;
   if (urlStr.includes('identity/v1/oauth2/token')) {
     fetchCalls.push('refresh-exchange');
     return { ok: true, status: 200, json: async () => ({ access_token: `access-for-jimmy-photo-${Date.now()}`, expires_in: 7200 }) };
@@ -213,7 +216,7 @@ console.log('\n=== api/list-ebay.js -- GK-208 photo handoff, real handler proof 
 
 console.log('-- REGRESSION PROOF (the exact real bug): images array present, matchConfidence NOT LOW (the common case) -> uploads, AddFixedPriceItem receives a real PictureURL --\n');
 {
-  fetchCalls.length = 0;
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0;
   lastAddFixedPriceItemXml = null;
   uploadBehavior = 'success';
   addFixedPriceItemBehavior = 'success';
@@ -230,7 +233,7 @@ console.log('-- REGRESSION PROOF (the exact real bug): images array present, mat
   const res = mockRes();
   await handler(req, res);
 
-  assertTrue(fetchCalls.includes('UploadSiteHostedPictures'), 'UploadSiteHostedPictures WAS called (the real frontend photo representation reached the handler and was uploaded)');
+  assertTrue(mockState.mediaCalls.includes('create') && !fetchCalls.includes('UploadSiteHostedPictures'), 'the Media API create_image_from_file WAS called (the real frontend photo representation reached the handler and was uploaded)');
   assertTrue(res.statusCode === 200, `real listing succeeds -> 200 (got ${res.statusCode})`);
   assertTrue(res.body?.pictureCount === 1, `exactly 1 valid eBay-hosted URL produced (got ${res.body?.pictureCount})`);
   assertTrue(typeof lastAddFixedPriceItemXml === 'string' && lastAddFixedPriceItemXml.includes(`<PictureURL>${FAKE_HOSTED_URL}</PictureURL>`), 'AddFixedPriceItem\'s own request XML contains the real hosted PictureURL');
@@ -242,7 +245,7 @@ console.log('-- REGRESSION PROOF (the exact real bug): images array present, mat
 
 console.log('\n-- THE ORIGINAL BUG, reproduced exactly: only a singular `image` field sent (no `images` array), matchConfidence NOT LOW -> zero images uploaded, BLOCKED before AddFixedPriceItem --\n');
 {
-  fetchCalls.length = 0;
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0;
   lastAddFixedPriceItemXml = null;
   const req = {
     method: 'POST',
@@ -255,7 +258,7 @@ console.log('\n-- THE ORIGINAL BUG, reproduced exactly: only a singular `image` 
   const res = mockRes();
   await handler(req, res);
 
-  assertTrue(!fetchCalls.includes('UploadSiteHostedPictures'), 'UploadSiteHostedPictures was NEVER called (item.images was empty -- the exact real root cause)');
+  assertTrue(mockState.mediaCalls.length === 0 && !fetchCalls.includes('UploadSiteHostedPictures'), 'no eBay image upload (Media API or legacy) was ever called (item.images was empty -- the exact real root cause)');
   assertTrue(res.statusCode === 400, `blocked before any eBay call -> 400 PUBLISH_BLOCKED_NO_PHOTO (got ${res.statusCode})`);
   assertTrue(res.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO', 'error code = PUBLISH_BLOCKED_NO_PHOTO');
   assertTrue(/PUBLISH BLOCKED — NO VALID EBAY PHOTO/.test(res.body?.message || ''), 'operator-facing message states PUBLISH BLOCKED — NO VALID EBAY PHOTO');
@@ -264,7 +267,7 @@ console.log('\n-- THE ORIGINAL BUG, reproduced exactly: only a singular `image` 
 
 console.log('\n-- ZERO-PHOTO PRECALL GATE: no image field at all -> blocked before any eBay call --\n');
 {
-  fetchCalls.length = 0;
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0;
   const req = {
     method: 'POST',
     headers: authHeaders,
@@ -279,8 +282,8 @@ console.log('\n-- ZERO-PHOTO PRECALL GATE: no image field at all -> blocked befo
 
 console.log('\n-- ZERO-PHOTO PRECALL GATE: an images array is present but every upload fails -> blocked before AddFixedPriceItem, never a doomed eBay call --\n');
 {
-  fetchCalls.length = 0;
-  uploadBehavior = 'failure';
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0;
+  uploadBehavior = 'failure'; mockState.media = 'fail';
   const req = {
     method: 'POST',
     headers: authHeaders,
@@ -289,10 +292,77 @@ console.log('\n-- ZERO-PHOTO PRECALL GATE: an images array is present but every 
   const res = mockRes();
   await handler(req, res);
 
-  assertTrue(fetchCalls.includes('UploadSiteHostedPictures'), 'the upload WAS attempted');
-  assertTrue(res.statusCode === 400 && res.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO', `every upload failing -> still 400 PUBLISH_BLOCKED_NO_PHOTO, never a doomed AddFixedPriceItem call (got ${res.statusCode})`);
+  assertTrue(mockState.mediaCalls.includes('create') && !fetchCalls.includes('UploadSiteHostedPictures'), 'the Media API upload WAS attempted (and never the legacy Trading upload)');
+  assertTrue(res.statusCode === 502 && res.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO', `Media API failing -> 502 PUBLISH_BLOCKED_NO_PHOTO, never a doomed AddFixedPriceItem call (got ${res.statusCode})`);
   assertTrue(!fetchCalls.includes('AddFixedPriceItem'), 'AddFixedPriceItem was NEVER called');
-  uploadBehavior = 'success';
+  uploadBehavior = 'success'; mockState.media = 'ok';
+}
+
+console.log('\n== EBAY MEDIA API CUTOVER: ordering, zero-call refusals, failure matrix, consent scope ==\n');
+{
+  const MEDIA_CREATE = 'apim.ebay.com/commerce/media/v1_beta/image/create_image_from_file';
+  const MEDIA_GET = 'apim.ebay.com/commerce/media/v1_beta/image/test-image-id-1';
+  const reset = () => { fetchCalls.length = 0; callLog.length = 0; mockState.mediaCalls.length = 0; lastAddFixedPriceItemXml = null; mockState.media = 'ok'; };
+  const run = async (body) => { const res = mockRes(); await handler({ method: 'POST', headers: authHeaders, body }, res); return res; };
+  const pngBytes = Buffer.from(TINY_PNG_DATA_URL.split(',')[1], 'base64');
+
+  // -- ordering on the real success path --
+  reset();
+  const okKey = `list-ebay-photo-handoff-${Date.now()}-media-order`;
+  let r = await run(baseItem({ images: [TINY_PNG_DATA_URL], matchConfidence: { tier: 'HIGH' }, outcomeIdempotencyKey: okKey }));
+  const ix = (n) => callLog.findIndex((c) => c === n);
+  assertTrue(r.statusCode === 200, `media-order scenario lists successfully (got ${r.statusCode})`);
+  assertTrue(ix('trading:GeteBayDetails') >= 0 && ix('trading:GeteBayDetails') < ix(MEDIA_CREATE) && ix(MEDIA_CREATE) < ix(MEDIA_GET) && ix(MEDIA_GET) < ix('trading:GetUser') && ix('trading:GetUser') < ix('trading:AddFixedPriceItem'), 'ORDER: shipping resolution -> Media create_image_from_file -> Media image lookup -> GetUser -> AddFixedPriceItem');
+  assertTrue(!callLog.includes('trading:UploadSiteHostedPictures'), 'the legacy Trading UploadSiteHostedPictures is NEVER called on the single-list path');
+  assertTrue(lastAddFixedPriceItemXml.includes(`<PictureURL>${FAKE_HOSTED_URL}</PictureURL>`), 'AddFixedPriceItem carries the EPS URL returned by the Media API lookup');
+  await cleanupOutcome(dbClient, okKey);
+
+  // -- invalid SOURCE media => ZERO outbound calls of any kind (no OAuth refresh, no metadata, no Media API) --
+  const badSources = [
+    ['bytes are not the declared PNG', 'data:image/png;base64,' + Buffer.from('definitely not a png').toString('base64'), 'source-bytes-not-the-declared-format'],
+    ['not an image data URL (remote URL)', 'https://example.com/photo.jpg', 'source-not-an-image-data-url'],
+    ['unsupported format', 'data:image/svg+xml;base64,' + Buffer.from('<svg/>').toString('base64'), 'source-format-unsupported'],
+    ['empty payload', 'data:image/png;base64,', 'source-empty'],
+    ['valid PNG that is NOT this asset\'s photo', 'data:image/png;base64,' + Buffer.concat([pngBytes, Buffer.from('x')]).toString('base64'), 'media-not-for-this-asset'],
+  ];
+  for (const [label, img, reason] of badSources) {
+    reset();
+    r = await run(baseItem({ images: [img], matchConfidence: { tier: 'HIGH' } }));
+    assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && r.body?.reason === reason, `invalid source (${label}) -> 400 PUBLISH_BLOCKED_NO_PHOTO/${reason} (got ${r.statusCode}/${r.body?.reason})`);
+    assertTrue(callLog.length === 0, `invalid source (${label}) -> ZERO outbound eBay calls of any kind (saw ${JSON.stringify(callLog)})`);
+  }
+  reset();
+  r = await run(baseItem({ images: [TINY_PNG_DATA_URL, 'data:image/png;base64,' + Buffer.from('second photo is junk').toString('base64')], matchConfidence: { tier: 'HIGH' } }));
+  assertTrue(r.statusCode === 400 && callLog.length === 0, 'one valid + one invalid source photo -> whole publish refused with ZERO outbound calls');
+
+  // -- Media API failure / malformed response => AddFixedPriceItem and GetUser are never reached --
+  const matrix = [
+    ['forbidden', 409, 'EBAY_MEDIA_PERMISSION_REQUIRED', 1],
+    ['fail', 502, 'PUBLISH_BLOCKED_NO_PHOTO', 1],
+    ['no-location', 502, 'PUBLISH_BLOCKED_NO_PHOTO', 1],
+    ['bad-location', 502, 'PUBLISH_BLOCKED_NO_PHOTO', 1],
+    ['malformed', 502, 'PUBLISH_BLOCKED_NO_PHOTO', 2],
+    ['expired', 502, 'PUBLISH_BLOCKED_NO_PHOTO', 2],
+  ];
+  for (const [mode, status, code, mediaCallCount] of matrix) {
+    reset(); mockState.media = mode;
+    r = await run(baseItem({ images: [TINY_PNG_DATA_URL], matchConfidence: { tier: 'HIGH' } }));
+    assertTrue(r.statusCode === status && r.body?.error === code, `Media API '${mode}' -> ${status} ${code} (got ${r.statusCode} ${r.body?.error})`);
+    assertTrue(!callLog.includes('trading:AddFixedPriceItem') && !callLog.includes('trading:GetUser') && !callLog.includes('trading:UploadSiteHostedPictures'), `Media API '${mode}' -> no GetUser, no AddFixedPriceItem, no legacy-upload fallback`);
+    assertTrue(mockState.mediaCalls.length === mediaCallCount, `Media API '${mode}' -> exactly ${mediaCallCount} Media call(s) made (got ${mockState.mediaCalls.length})`);
+    assertTrue(!callLog.some((c) => c.includes('evil.example')), `Media API '${mode}' -> the seller token is never sent to a non-eBay Location`);
+  }
+  reset();
+
+  // -- consent: a connection made BEFORE sell.inventory was requested must be refused BEFORE any upload --
+  const OLD_SCOPES = ['https://api.ebay.com/oauth/api_scope', 'https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly', 'https://api.ebay.com/oauth/api_scope/sell.finances'];
+  await upsertMarketplaceConnection({ principalId: JIMMY, provider: 'EBAY', providerUserId: 'jimmy-test-ebay-identity', refreshCredential: JIMMY_EBAY_REFRESH_CREDENTIAL, grantedScopes: OLD_SCOPES });
+  r = await run(baseItem({ images: [TINY_PNG_DATA_URL], matchConfidence: { tier: 'HIGH' } }));
+  assertTrue(r.statusCode === 409 && r.body?.error === 'EBAY_MEDIA_PERMISSION_REQUIRED', `pre-cutover consent (no sell.inventory) -> 409 EBAY_MEDIA_PERMISSION_REQUIRED with reconnect guidance (got ${r.statusCode} ${r.body?.error})`);
+  assertTrue(mockState.mediaCalls.length === 0 && !callLog.includes('trading:AddFixedPriceItem') && !callLog.includes('trading:GeteBayDetails'), 'pre-cutover consent -> no Media API call, no shipping lookup, no listing');
+  assertTrue(/Reconnect eBay/i.test(r.body?.message || ''), 'the refusal tells the operator to reconnect eBay');
+  await upsertMarketplaceConnection({ principalId: JIMMY, provider: 'EBAY', providerUserId: 'jimmy-test-ebay-identity', refreshCredential: JIMMY_EBAY_REFRESH_CREDENTIAL, grantedScopes: [] });
+  reset();
 }
 
 // Restore Creepy to UNMANAGED, exactly as found before this test ran.

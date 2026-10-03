@@ -68,12 +68,13 @@ const FAKE_ITEM_ID = `test-item-${Date.now()}`;
 // standard, non-sensitive 1x1 transparent PNG data URL -- never a real
 // photo, never printed.
 const FAKE_HOSTED_PICTURE_URL = 'https://i.ebayimg.com/hosted/outcome1-smoke.jpg';
+mockState.mediaImageUrl = FAKE_HOSTED_PICTURE_URL; // eBay Media API getImage returns this EPS URL
 const TINY_PNG_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 global.fetch = async (url, opts) => {
   const urlStr = String(url);
-  const __m = metaFetch(urlStr); if (__m) return __m;
+  const __m = metaFetch(urlStr, opts); if (__m) return __m;
   if (urlStr.includes('identity/v1/oauth2/token')) {
     fetchCalls.push('refresh-exchange');
     return { ok: true, status: 200, json: async () => ({ access_token: `access-for-jimmy-${Date.now()}`, expires_in: 7200 }) };
@@ -232,7 +233,7 @@ console.log('  (test setup) transient governed canonical rows created for Creepy
 
 console.log('-- real success: valid token + gkAssetId + decisionEventId + LIST operatorActionEventId --\n');
 {
-  fetchCalls.length = 0;
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0;
   addFixedPriceItemBehavior = 'success';
   const idempotencyKey = `list-ebay-outcome1-smoke-${Date.now()}-a`;
   const req = {
@@ -293,7 +294,7 @@ console.log('-- BUYER-FACING SANITATION: internal reasoning injected into the it
     ['G json diagnostics', '{"trace":"SECRET_JSON_TRACE","pricingSource":"pc_internal","blockers":["x"]}'],
   ];
   for (const [label, injected] of injections) {
-    fetchCalls.length = 0;
+    fetchCalls.length = 0; mockState.mediaCalls.length = 0;
     addFixedPriceItemBehavior = 'success';
     lastAddFixedPriceItemBody = '';
     const idempotencyKey = `list-ebay-sanitation-${Date.now()}-${label[0]}`;
@@ -338,7 +339,7 @@ console.log('-- BUYER-FACING SANITATION: internal reasoning injected into the it
 
 console.log('-- BUYER-FACING SANITATION (bundle): per-book internal reasoning never reaches the real bundle packet --\n');
 {
-  fetchCalls.length = 0;
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0;
   addFixedPriceItemBehavior = 'success';
   lastAddFixedPriceItemBody = '';
   const mk = (title, issue, reason, extra = {}) => ({
@@ -371,14 +372,14 @@ console.log('-- BUYER-FACING SANITATION (bundle): per-book internal reasoning ne
 console.log('-- GOVERNED FACTS fail-closed: no resolvable durable canonical row -> NOTHING reaches eBay --\n');
 {
   await client.query(`DELETE FROM data1_dev.collection_item WHERE id = ANY($1) AND principal_id = $2`, [CREEPY_LINK_IDS, JIMMY]);
-  fetchCalls.length = 0; lastAddFixedPriceItemBody = '';
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0; lastAddFixedPriceItemBody = '';
   const res = mockRes();
   await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body: baseItem({
     gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID,
     outcomeIdempotencyKey: `list-ebay-governed-failclosed-${Date.now()}`,
   }) }, res);
   assertTrue(res.statusCode === 409 && res.body?.error === 'LISTING_FACTS_UNAVAILABLE', `missing governed facts -> 409 LISTING_FACTS_UNAVAILABLE (got ${res.statusCode} ${res.body?.error})`);
-  assertTrue(!fetchCalls.includes('AddFixedPriceItem') && !fetchCalls.includes('UploadSiteHostedPictures') && lastAddFixedPriceItemBody === '', 'no picture upload and no AddFixedPriceItem attempted — never lists on client-supplied facts');
+  assertTrue(!fetchCalls.includes('AddFixedPriceItem') && mockState.mediaCalls.length === 0 && !fetchCalls.includes('UploadSiteHostedPictures') && lastAddFixedPriceItemBody === '', 'no picture upload and no AddFixedPriceItem attempted — never lists on client-supplied facts');
   for (const id of CREEPY_LINK_IDS) await createCollectionItem({ principalId: JIMMY, id, assetCategory: 'comic', attributes: { ...CREEPY_GOVERNED } });
 }
 
@@ -388,12 +389,12 @@ console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-
     gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID,
     outcomeIdempotencyKey: `list-ebay-packet-safety-${Date.now()}-${Math.random().toString(36).slice(2)}`, ...over,
   });
-  const run = async (body) => { fetchCalls.length = 0; lastAddFixedPriceItemBody = ''; const r = mockRes(); await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body }, r); return r; };
+  const run = async (body) => { fetchCalls.length = 0; mockState.mediaCalls.length = 0; lastAddFixedPriceItemBody = ''; const r = mockRes(); await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body }, r); return r; };
   const noEbayWrite = () => !fetchCalls.includes('AddFixedPriceItem');
 
   // --- PRICE (B/C: ack != packet) ---
   let r = await run(base({ price: '$61.42' })); // Q41 ack 61.41, packet 61.42
-  assertTrue(r.statusCode === 409 && r.body?.error === 'MANUAL_PRICE_ACK_MISMATCH' && noEbayWrite() && !fetchCalls.includes('UploadSiteHostedPictures'), `Q41 $61.41 + packet $61.42 -> 409 MANUAL_PRICE_ACK_MISMATCH before any eBay call (got ${r.statusCode} ${r.body?.error})`);
+  assertTrue(r.statusCode === 409 && r.body?.error === 'MANUAL_PRICE_ACK_MISMATCH' && noEbayWrite() && mockState.mediaCalls.length === 0 && !fetchCalls.includes('UploadSiteHostedPictures'), `Q41 $61.41 + packet $61.42 -> 409 MANUAL_PRICE_ACK_MISMATCH before any eBay call (got ${r.statusCode} ${r.body?.error})`);
   r = await run(base({ price: '$360.59', priceHigh: '$414.68' }));
   assertTrue(r.statusCode === 409 && r.body?.error === 'MANUAL_PRICE_ACK_MISMATCH' && noEbayWrite(), 'Q41 $61.41 + the legacy catalogue price ($360.59-style) -> refused, nothing sent');
   r = await run(base({ price: '$61.409' }));
@@ -413,7 +414,7 @@ console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-
   mockState.shippingFails = true;
   r = await run(base());
   mockState.shippingFails = false;
-  assertTrue(r.statusCode === 409 && r.body?.error === 'SHIPPING_SERVICE_UNRESOLVED' && noEbayWrite() && !fetchCalls.includes('UploadSiteHostedPictures'), 'authoritative shipping metadata unavailable -> 409 SHIPPING_SERVICE_UNRESOLVED before any picture upload / eBay write; no Media Mail fallback');
+  assertTrue(r.statusCode === 409 && r.body?.error === 'SHIPPING_SERVICE_UNRESOLVED' && noEbayWrite() && mockState.mediaCalls.length === 0 && !fetchCalls.includes('UploadSiteHostedPictures'), 'authoritative shipping metadata unavailable -> 409 SHIPPING_SERVICE_UNRESOLVED before any picture upload / eBay write; no Media Mail fallback');
   resetMetadataCaches(); // module-level caches would otherwise mask the outage
   mockState.metaDown = true;
   r = await run(base());
@@ -424,14 +425,14 @@ console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-
   // --- PHOTO last-mile (N/O/P/Q/R/S) ---
   r = await run(base({ images: [], image: null }));
   assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'N. missing photo -> PUBLISH_BLOCKED_NO_PHOTO');
-  uploadUrlOverride = 'https://i.ebayimg.example/PLACEHOLDER-picture.jpg';
+  mockState.mediaImageUrl = 'https://i.ebayimg.example/PLACEHOLDER-picture.jpg';
   r = await run(base());
-  uploadUrlOverride = null;
-  assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'O. placeholder / non-approved-host hosted URL -> PUBLISH_BLOCKED_NO_PHOTO');
-  uploadUrlOverride = 'http://i.ebayimg.com/insecure.jpg';
+  mockState.mediaImageUrl = FAKE_HOSTED_PICTURE_URL;
+  assertTrue(r.statusCode === 502 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'O. Media API returns a placeholder / non-approved-host image URL -> 502 PUBLISH_BLOCKED_NO_PHOTO (media-response-malformed), no listing');
+  mockState.mediaImageUrl = 'http://i.ebayimg.com/insecure.jpg';
   r = await run(base());
-  uploadUrlOverride = null;
-  assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'non-HTTPS hosted URL -> PUBLISH_BLOCKED_NO_PHOTO');
+  mockState.mediaImageUrl = FAKE_HOSTED_PICTURE_URL;
+  assertTrue(r.statusCode === 502 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'Media API returns a non-HTTPS image URL -> 502 PUBLISH_BLOCKED_NO_PHOTO, no listing');
   mockState.picture = 'unreachable';
   r = await run(base());
   assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'P. unreachable hosted URL -> PUBLISH_BLOCKED_NO_PHOTO');
@@ -459,7 +460,7 @@ console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-
 
 console.log('-- PRE-PUBLISH HARDENING: attaching to the HOLD row (not LIST) must be rejected BEFORE any eBay call is ever made --\n');
 {
-  fetchCalls.length = 0;
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0;
   addFixedPriceItemBehavior = 'success';
   const idempotencyKey = `list-ebay-outcome1-smoke-${Date.now()}-b`;
   const req = {
@@ -487,7 +488,7 @@ console.log('-- PRE-PUBLISH HARDENING: attaching to the HOLD row (not LIST) must
 
 console.log('\n-- PRE-PUBLISH HARDENING: GrailKey linkage attempted but Authorization header missing -> aborts BEFORE any eBay call --\n');
 {
-  fetchCalls.length = 0;
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0;
   addFixedPriceItemBehavior = 'success';
   const idempotencyKey = `list-ebay-outcome1-smoke-${Date.now()}-c`;
   const req = {
@@ -513,7 +514,7 @@ console.log('\n-- PRE-PUBLISH HARDENING: GrailKey linkage attempted but Authoriz
 
 console.log('\n-- PRE-PUBLISH HARDENING: PARTIAL linkage (gkAssetId present, decisionEventId/operatorActionEventId missing) -> aborts BEFORE any eBay call --\n');
 {
-  fetchCalls.length = 0;
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0;
   addFixedPriceItemBehavior = 'success';
   const req = {
     method: 'POST',
@@ -530,7 +531,7 @@ console.log('\n-- PRE-PUBLISH HARDENING: PARTIAL linkage (gkAssetId present, dec
 
 console.log('\n-- GK-207 CORRECTION: the legacy no-linkage fallback is REMOVED -- ZERO GrailKey fields at all now BLOCKS before any eBay call, never publishes --\n');
 {
-  fetchCalls.length = 0;
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0;
   addFixedPriceItemBehavior = 'success';
   const req = {
     method: 'POST',
@@ -548,7 +549,7 @@ console.log('\n-- GK-207 CORRECTION: the legacy no-linkage fallback is REMOVED -
 
 console.log('\n-- AddFixedPriceItem itself fails (no ItemID) -> 502, and NO LISTED row is ever fabricated --\n');
 {
-  fetchCalls.length = 0;
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0;
   addFixedPriceItemBehavior = 'failure';
   const idempotencyKey = `list-ebay-outcome1-smoke-${Date.now()}-d`;
   const req = {
@@ -574,7 +575,7 @@ console.log('\n-- AddFixedPriceItem itself fails (no ItemID) -> 502, and NO LIST
 
 console.log('\n-- idempotent replay: the SAME idempotencyKey twice returns the SAME outcomeEventId, zero duplicate row --\n');
 {
-  fetchCalls.length = 0;
+  fetchCalls.length = 0; mockState.mediaCalls.length = 0;
   addFixedPriceItemBehavior = 'success';
   const idempotencyKey = `list-ebay-outcome1-smoke-${Date.now()}-e`;
   const req1 = {
