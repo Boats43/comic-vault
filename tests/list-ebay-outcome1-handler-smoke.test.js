@@ -28,6 +28,8 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { metaFetch, shippingResponse, mockState, TINY_PNG_B64 } from './helpers/ebayPacketMocks.js';
+import { __resetMetadataCachesForTests as resetMetadataCaches } from '../src/lib/ebayListingMetadata.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -55,7 +57,8 @@ const JIMMY_EBAY_REFRESH_CREDENTIAL = `fake-refresh-jimmy-${Date.now()}`;
 // GetUser safety check must run before AddFixedPriceItem). ──
 const fetchCalls = [];
 let addFixedPriceItemBehavior = 'success'; // 'success' | 'failure'
-let lastAddFixedPriceItemBody = ''; // GK buyer-facing sanitation: the REAL outbound eBay packet
+let lastAddFixedPriceItemBody = '';
+let uploadUrlOverride = null; // GK buyer-facing sanitation: the REAL outbound eBay packet
 const FAKE_ITEM_ID = `test-item-${Date.now()}`;
 
 // GK-208 — the zero-photo precall gate now blocks before any eBay call
@@ -64,18 +67,20 @@ const FAKE_ITEM_ID = `test-item-${Date.now()}`;
 // real image and a working UploadSiteHostedPictures mock. A real,
 // standard, non-sensitive 1x1 transparent PNG data URL -- never a real
 // photo, never printed.
-const FAKE_HOSTED_PICTURE_URL = 'https://i.ebayimg.example/hosted/outcome1-smoke.jpg';
+const FAKE_HOSTED_PICTURE_URL = 'https://i.ebayimg.com/hosted/outcome1-smoke.jpg';
 const TINY_PNG_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 global.fetch = async (url, opts) => {
   const urlStr = String(url);
+  const __m = metaFetch(urlStr); if (__m) return __m;
   if (urlStr.includes('identity/v1/oauth2/token')) {
     fetchCalls.push('refresh-exchange');
     return { ok: true, status: 200, json: async () => ({ access_token: `access-for-jimmy-${Date.now()}`, expires_in: 7200 }) };
   }
   const callName = opts?.headers?.['X-EBAY-API-CALL-NAME'] || '(unknown)';
   fetchCalls.push(callName);
+  if (callName === 'GeteBayDetails') return shippingResponse();
   if (callName === 'GetUser') {
     return {
       status: 200,
@@ -85,7 +90,7 @@ global.fetch = async (url, opts) => {
   if (callName === 'UploadSiteHostedPictures') {
     return {
       status: 200,
-      text: async () => `<?xml version="1.0"?><UploadSiteHostedPicturesResponse><Ack>Success</Ack><SiteHostedPictureDetails><FullURL>${FAKE_HOSTED_PICTURE_URL}</FullURL></SiteHostedPictureDetails></UploadSiteHostedPicturesResponse>`,
+      text: async () => `<?xml version="1.0"?><UploadSiteHostedPicturesResponse><Ack>Success</Ack><SiteHostedPictureDetails><FullURL>${uploadUrlOverride || FAKE_HOSTED_PICTURE_URL}</FullURL></SiteHostedPictureDetails></UploadSiteHostedPicturesResponse>`,
     };
   }
   if (callName === 'AddFixedPriceItem') {
@@ -128,7 +133,7 @@ const CHAIN2_DECISION_EVENT_ID = '01a0895e-f93b-708d-9530-3a58555bf75c';
 // (confirmed live-queried immediately before writing this test — see
 // GK-202 for the HOLD row's own prior disclosure; the LIST row is the
 // real, later human action this dispatch's own audit found).
-const CREEPY_LIST_OPERATOR_ACTION_EVENT_ID = '01a097a1-6e78-71c9-9309-1ed9344c40db';
+let CREEPY_LIST_OPERATOR_ACTION_EVENT_ID = '01a097a1-6e78-71c9-9309-1ed9344c40db'; // replaced below by a PRICED LIST action (Outcome #1 price binding)
 const CREEPY_HOLD_OPERATOR_ACTION_EVENT_ID = '01a09767-3179-7f93-ad0e-8d251f3a80ba';
 
 function mintTestToken(principalId) {
@@ -213,6 +218,17 @@ const CREEPY_LINK_IDS = ['cv_1789188155734_itagfk', 'cv_1789271538761_1hsflc'];
 const CREEPY_GOVERNED = { title: 'creepy', issue: '1', year: '1964', publisher: 'Warren Publishing' };
 for (const id of CREEPY_LINK_IDS) await createCollectionItem({ principalId: JIMMY, id, assetCategory: 'comic', attributes: { ...CREEPY_GOVERNED } });
 console.log('  (test setup) transient governed canonical rows created for Creepy\'s links, deleted in cleanup\n');
+
+// OUTCOME #1 — price binding + photo guard fixtures. The durable LIST action must record the approved price
+// ($61.41, matching baseItem's Q41 price) and the photo sent must hash to a media row of THIS asset. Both are
+// idempotent single appends on the Development Creepy asset.
+{
+  const assetsMod = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+  await assetsMod.attachMedia({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, bytes: Buffer.from(TINY_PNG_DATA_URL.split(',')[1], 'base64'), contentType: 'image/png', captureRole: 'capture-photo', idempotencyKey: 'list-ebay-smoke-tinypng-evidence-v1' });
+  const priced = await assetsMod.recordOperatorAction({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, actionCode: 'LIST', actionValueAmount: 61.41, source: 'test-fixture', idempotencyKey: 'list-ebay-smoke-priced-list-v1' });
+  CREEPY_LIST_OPERATOR_ACTION_EVENT_ID = priced.operatorActionEventId;
+  console.log('  (test setup) priced LIST action + asset-owned photo evidence ensured (idempotent)\n');
+}
 
 console.log('-- real success: valid token + gkAssetId + decisionEventId + LIST operatorActionEventId --\n');
 {
@@ -311,7 +327,10 @@ console.log('-- BUYER-FACING SANITATION: internal reasoning injected into the it
     assertTrue(body.includes('Condition: See photos for condition details.') && !body.includes('Grade:'), `[${label}] ungoverned (client/model) grade NOT published; fixed factual condition sentence used`);
     assertTrue(!/Key Issue|Market value|MARKET DATA|Recent verified|DEMAND|CGC census|demand ·/.test(body), `[${label}] no key-issue claim, market-value, sold-sales, demand or census block`);
     assertTrue(body.includes('<StartPrice currencyID="USD">61.41</StartPrice>') && body.includes('<Name>Issue Number</Name>') && body.includes('<Value>Creepy</Value>') && body.includes('<Name>Publication Year</Name>'), `[${label}] price intact; item specifics from governed facts (incl. issue + year)`);
-    assertTrue(body.includes('<ConditionID>4000</ConditionID>') && !body.includes('<ConditionID>2750</ConditionID>'), `[${label}] a raw copy does not inherit the 'Graded' ConditionID from a client/model grade string`);
+    assertTrue(!body.includes('<ConditionID>'), `[${label}] NO ConditionID emitted (category 259104 condition is optional; never derived from a client/model grade string; any value must come from the authoritative condition policy)`);
+    assertTrue(body.includes('<ShippingService>USPSParcel</ShippingService>') && !body.includes('USPSMedia') && !body.includes('Media Mail'), `[${label}] shipping = the token authoritatively resolved from GeteBayDetails (USPS Ground Advantage); Media Mail absent`);
+    assertTrue(!body.includes('<BestOfferDetails>') && !body.includes('BestOfferAutoAcceptPrice') && !body.includes('MinimumBestOfferPrice'), `[${label}] Best Offer OFF by default`);
+    assertTrue(!body.includes('Grade Certification') && !body.includes('<Name>Language</Name>') && body.includes('<Value>Silver Age (1956-69)</Value>') && body.includes('<Value>Single Issue</Value>'), `[${label}] item specifics: eBay-enum Era resolved from the governed year, enum-valid Format, no invented 'Grade Certification' / Language`);
     await cleanup(client, idempotencyKey);
   }
   console.log('  (test-artifact outcome_event rows deleted)\n');
@@ -361,6 +380,81 @@ console.log('-- GOVERNED FACTS fail-closed: no resolvable durable canonical row 
   assertTrue(res.statusCode === 409 && res.body?.error === 'LISTING_FACTS_UNAVAILABLE', `missing governed facts -> 409 LISTING_FACTS_UNAVAILABLE (got ${res.statusCode} ${res.body?.error})`);
   assertTrue(!fetchCalls.includes('AddFixedPriceItem') && !fetchCalls.includes('UploadSiteHostedPictures') && lastAddFixedPriceItemBody === '', 'no picture upload and no AddFixedPriceItem attempted — never lists on client-supplied facts');
   for (const id of CREEPY_LINK_IDS) await createCollectionItem({ principalId: JIMMY, id, assetCategory: 'comic', attributes: { ...CREEPY_GOVERNED } });
+}
+
+console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-mile — all refuse BEFORE AddFixedPriceItem --\n');
+{
+  const base = (over = {}) => baseItem({
+    gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID,
+    outcomeIdempotencyKey: `list-ebay-packet-safety-${Date.now()}-${Math.random().toString(36).slice(2)}`, ...over,
+  });
+  const run = async (body) => { fetchCalls.length = 0; lastAddFixedPriceItemBody = ''; const r = mockRes(); await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body }, r); return r; };
+  const noEbayWrite = () => !fetchCalls.includes('AddFixedPriceItem');
+
+  // --- PRICE (B/C: ack != packet) ---
+  let r = await run(base({ price: '$61.42' })); // Q41 ack 61.41, packet 61.42
+  assertTrue(r.statusCode === 409 && r.body?.error === 'MANUAL_PRICE_ACK_MISMATCH' && noEbayWrite() && !fetchCalls.includes('UploadSiteHostedPictures'), `Q41 $61.41 + packet $61.42 -> 409 MANUAL_PRICE_ACK_MISMATCH before any eBay call (got ${r.statusCode} ${r.body?.error})`);
+  r = await run(base({ price: '$360.59', priceHigh: '$414.68' }));
+  assertTrue(r.statusCode === 409 && r.body?.error === 'MANUAL_PRICE_ACK_MISMATCH' && noEbayWrite(), 'Q41 $61.41 + the legacy catalogue price ($360.59-style) -> refused, nothing sent');
+  r = await run(base({ price: '$61.409' }));
+  assertTrue(r.statusCode === 400 && r.body?.error === 'LIST_PRICE_INVALID' && noEbayWrite(), 'a sub-cent price is not a valid USD amount -> 400 LIST_PRICE_INVALID before any eBay call (never silently rounded)');
+  // --- PRICE (D: REVIEW without Q41) ---
+  r = await run(base({ q41Override: null }));
+  assertTrue(r.statusCode === 403 && r.body?.error === 'ACTION_AUTHORITY_NOT_READY' && noEbayWrite(), 'standing REVIEW without a Q41 acknowledgement -> 403 ACTION_AUTHORITY_NOT_READY (unchanged)');
+  // --- PRICE: durable LIST action cannot be substituted ---
+  const unpriced = await (await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href)).recordOperatorAction({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, actionCode: 'LIST', source: 'test-fixture', idempotencyKey: 'list-ebay-packet-safety-unpriced-list-v1' });
+  r = await run(base({ operatorActionEventId: unpriced.operatorActionEventId }));
+  assertTrue(r.statusCode === 409 && r.body?.error === 'LIST_ACTION_PRICE_NOT_RECORDED' && noEbayWrite(), 'a LIST action that recorded NO approved price cannot back a Q41 listing -> LIST_ACTION_PRICE_NOT_RECORDED');
+  const other = await (await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href)).recordOperatorAction({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, actionCode: 'LIST', actionValueAmount: 99.99, source: 'test-fixture', idempotencyKey: 'list-ebay-packet-safety-priced-9999-v1' });
+  r = await run(base({ operatorActionEventId: other.operatorActionEventId }));
+  assertTrue(r.statusCode === 409 && r.body?.error === 'LIST_ACTION_PRICE_MISMATCH' && noEbayWrite(), 'a LIST action that approved a DIFFERENT price ($99.99) cannot be used to list at $61.41 -> LIST_ACTION_PRICE_MISMATCH');
+
+  // --- SHIPPING (E/F) ---
+  mockState.shippingFails = true;
+  r = await run(base());
+  mockState.shippingFails = false;
+  assertTrue(r.statusCode === 409 && r.body?.error === 'SHIPPING_SERVICE_UNRESOLVED' && noEbayWrite() && !fetchCalls.includes('UploadSiteHostedPictures'), 'authoritative shipping metadata unavailable -> 409 SHIPPING_SERVICE_UNRESOLVED before any picture upload / eBay write; no Media Mail fallback');
+  resetMetadataCaches(); // module-level caches would otherwise mask the outage
+  mockState.metaDown = true;
+  r = await run(base());
+  mockState.metaDown = false;
+  resetMetadataCaches();
+  assertTrue(r.statusCode === 503 && r.body?.error === 'LISTING_METADATA_UNAVAILABLE' && noEbayWrite(), 'authoritative aspect/condition metadata unavailable -> 503 LISTING_METADATA_UNAVAILABLE (fail-closed)');
+
+  // --- PHOTO last-mile (N/O/P/Q/R/S) ---
+  r = await run(base({ images: [], image: null }));
+  assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'N. missing photo -> PUBLISH_BLOCKED_NO_PHOTO');
+  uploadUrlOverride = 'https://i.ebayimg.example/PLACEHOLDER-picture.jpg';
+  r = await run(base());
+  uploadUrlOverride = null;
+  assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'O. placeholder / non-approved-host hosted URL -> PUBLISH_BLOCKED_NO_PHOTO');
+  uploadUrlOverride = 'http://i.ebayimg.com/insecure.jpg';
+  r = await run(base());
+  uploadUrlOverride = null;
+  assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'non-HTTPS hosted URL -> PUBLISH_BLOCKED_NO_PHOTO');
+  mockState.picture = 'unreachable';
+  r = await run(base());
+  assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'P. unreachable hosted URL -> PUBLISH_BLOCKED_NO_PHOTO');
+  mockState.picture = 'not-image';
+  r = await run(base());
+  assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'Q. non-image content-type -> PUBLISH_BLOCKED_NO_PHOTO');
+  mockState.picture = 'ok';
+  const otherPng = 'data:image/png;base64,' + Buffer.from('not-this-assets-photo-' + Date.now()).toString('base64');
+  r = await run(base({ images: [otherPng], image: otherPng }));
+  assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'R. a photo that does NOT hash to a media row of this gkAssetId -> PUBLISH_BLOCKED_NO_PHOTO');
+  r = await run(base());
+  assertTrue(r.statusCode === 200 && lastAddFixedPriceItemBody.includes('<PictureURL>https://i.ebayimg.com/hosted/outcome1-smoke.jpg</PictureURL>'), 'S. a valid hosted image of THIS asset proceeds to AddFixedPriceItem');
+  // eBay-write packet: exact price-bound, Best Offer opt-in works but is OFF by default
+  assertTrue(lastAddFixedPriceItemBody.includes('<StartPrice currencyID="USD">61.41</StartPrice>') && !lastAddFixedPriceItemBody.includes('<BestOfferDetails>'), 'packet price == acknowledged price == durable LIST price; Best Offer absent');
+  // a listing for this asset is now (test-)active; clear it so the opt-in run is not blocked by the duplicate-listing preflight
+  await client.query(`DELETE FROM data1_dev.outcome_event WHERE gk_asset_id = $1 AND external_listing_id = $2 AND outcome_type = 'LISTED' AND occurred_at > now() - interval '5 minutes'`, [CREEPY_ASSET_ID, FAKE_ITEM_ID]);
+  r = await run(base({ bestOffer: true }));
+  assertTrue(r.statusCode === 200 && lastAddFixedPriceItemBody.includes('<BestOfferEnabled>true</BestOfferEnabled>'), 'Best Offer remains available as an EXPLICIT opt-in (functionality not removed)');
+  // outcome rows written by the two successful runs are test artifacts — remove them
+  const stale = await client.query(`SELECT id FROM data1_dev.outcome_event WHERE gk_asset_id = $1 AND external_listing_id = $2 AND outcome_type = 'LISTED' AND occurred_at > now() - interval '5 minutes'`, [CREEPY_ASSET_ID, FAKE_ITEM_ID]);
+  for (const row of stale.rows) await client.query('DELETE FROM data1_dev.outcome_event WHERE id = $1', [row.id]);
+  await client.query(`DELETE FROM data1_dev.idempotency_key WHERE operation = 'recordOutcomeEvent' AND idempotency_key LIKE 'list-ebay-packet-safety-%'`);
+  console.log('  (test-artifact outcome rows deleted)\n');
 }
 
 console.log('-- PRE-PUBLISH HARDENING: attaching to the HOLD row (not LIST) must be rejected BEFORE any eBay call is ever made --\n');

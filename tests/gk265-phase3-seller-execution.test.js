@@ -30,6 +30,7 @@ import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { metaFetch, shippingResponse } from './helpers/ebayPacketMocks.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -87,12 +88,13 @@ let itemIdCounter = 0;
 const nextItemId = () => `gk265-item-${Date.now()}-${++itemIdCounter}`;
 const refreshBehavior = {}; // refreshCredential -> 'success' | 'invalid_grant' | 'temporary'
 let addFixedPriceItemBehavior = 'success';
-const FAKE_HOSTED_URL = 'https://i.ebayimg.example/hosted/gk265-picture.jpg';
+const FAKE_HOSTED_URL = 'https://i.ebayimg.com/hosted/gk265-picture.jpg';
 const TINY_PNG_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 global.fetch = async (url, opts = {}) => {
   const urlStr = String(url);
+  const __m = metaFetch(urlStr); if (__m) return __m;
 
   if (urlStr.includes('identity/v1/oauth2/token')) {
     const params = new URLSearchParams(String(opts.body || ''));
@@ -112,6 +114,7 @@ global.fetch = async (url, opts = {}) => {
   if (callName) {
     const iafToken = opts.headers['X-EBAY-API-IAF-TOKEN'] || null;
     fetchCalls.push({ type: 'trading', callName, iafToken });
+    if (callName === 'GeteBayDetails') return shippingResponse();
     if (callName === 'GetUser') {
       return { status: 200, text: async () => `<?xml version="1.0"?><GetUserResponse><Ack>Success</Ack><User><UserID>test-seller</UserID><Site>US</Site></User></GetUserResponse>` };
     }
@@ -150,7 +153,7 @@ global.fetch = async (url, opts = {}) => {
 const { issueToken } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'auth', 'token.js')).href);
 const { upsertMarketplaceConnection } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'marketplace', 'index.js')).href);
 const { CONNECT_SCOPES } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'ebayUserOAuth.js')).href);
-const { createPhysicalAsset, recordDecision, recordOperatorAction, recordOutcomeEvent, linkCollectionItem } =
+const { createPhysicalAsset, recordDecision, recordOperatorAction, recordOutcomeEvent, linkCollectionItem, attachMedia } =
   await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
 const { enrollAsset } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'inventory', 'index.js')).href);
 const { createCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
@@ -185,8 +188,11 @@ async function mintListableAsset(principalId, label) {
   const { decisionEventId } = await recordDecision({
     principalId, gkAssetId, recommendation: 'LIST_NOW', idempotencyKey: `${n}-decision`,
   });
+  // OUTCOME #1 — price binding: the durable LIST action records the approved price (listReqFor lists at $25.00);
+  // photo guard: the photo sent must hash to a media row of THIS asset.
+  await attachMedia({ principalId, gkAssetId, bytes: Buffer.from(TINY_PNG_DATA_URL.split(',')[1], 'base64'), contentType: 'image/png', captureRole: 'capture-photo', idempotencyKey: `${n}-photo` });
   const { operatorActionEventId } = await recordOperatorAction({
-    principalId, gkAssetId, decisionEventId, actionCode: 'LIST', source: 'test-fixture', idempotencyKey: `${n}-action`,
+    principalId, gkAssetId, decisionEventId, actionCode: 'LIST', actionValueAmount: 25, source: 'test-fixture', idempotencyKey: `${n}-action`,
   });
   return { gkAssetId, decisionEventId, operatorActionEventId };
 }

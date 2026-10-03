@@ -902,3 +902,19 @@ export async function getSameCopyDecisionForIncoming(client, { principalId, coll
   );
   return res.rows[0] || null;
 }
+
+// Outcome #1 — the durable approved price recorded on an operator action, and the
+// content hashes of the media that belong to an asset (photo last-mile guard).
+export async function getOperatorActionPrice(client, { gkAssetId, operatorActionEventId }) {
+  const res = await client.query(
+    `SELECT action_code, action_value_amount::text AS action_value_amount, action_value_currency
+       FROM data1_dev.operator_action_event WHERE id = $1 AND gk_asset_id = $2`,
+    [operatorActionEventId, gkAssetId]
+  );
+  return res.rows[0] || null;
+}
+
+export async function listAssetMediaContentHashes(client, { gkAssetId }) {
+  const res = await client.query(`SELECT content_hash FROM data1_dev.media WHERE asset_id = $1`, [gkAssetId]);
+  return res.rows.map((r) => r.content_hash);
+}

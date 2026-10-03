@@ -2179,3 +2179,32 @@ export async function hasAnotherCopyDecisionForItem({ principalId, collectionIte
     client.release();
   }
 }
+
+// Outcome #1 — read-only, ownership-checked accessors for the publish preflight.
+export async function getOperatorActionForListing({ principalId, gkAssetId, operatorActionEventId } = {}) {
+  requireFields({ principalId, gkAssetId, operatorActionEventId }, ['principalId', 'gkAssetId', 'operatorActionEventId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertAssetExists(client, gkAssetId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    const row = await repo.getOperatorActionPrice(client, { gkAssetId, operatorActionEventId });
+    if (!row) throw new NotFoundError(`operator_action_event ${operatorActionEventId} does not exist for this asset`);
+    return { actionCode: row.action_code, actionValueAmount: row.action_value_amount, actionValueCurrency: row.action_value_currency };
+  } finally {
+    client.release();
+  }
+}
+
+export async function getAssetMediaContentHashes({ principalId, gkAssetId } = {}) {
+  requireFields({ principalId, gkAssetId }, ['principalId', 'gkAssetId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertAssetExists(client, gkAssetId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    return await repo.listAssetMediaContentHashes(client, { gkAssetId });
+  } finally {
+    client.release();
+  }
+}

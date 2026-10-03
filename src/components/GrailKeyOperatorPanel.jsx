@@ -414,7 +414,12 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
       const res = await authFetch("/api/operator-action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ gkAssetId, decisionEventId, actionCode, idempotencyKey: pending.idempotencyKey }),
+        // Outcome #1 — a LIST records the operator's APPROVED list price (the Q41-acknowledged price)
+        // durably on the action, so the later marketplace write can be bound to it exactly.
+        body: JSON.stringify({
+          gkAssetId, decisionEventId, actionCode, idempotencyKey: pending.idempotencyKey,
+          ...(actionCode === "LIST" && Number(item?.q41Ack?.price) > 0 ? { actionValueAmount: Number(item.q41Ack.price).toFixed(2), actionValueCurrency: "USD" } : {}),
+        }),
         signal: controller.signal,
       });
       if (!res) {

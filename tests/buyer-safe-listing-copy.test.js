@@ -74,7 +74,7 @@ ok(m.includes('Publisher: Marvel') && m.includes('Condition: See photos for cond
 console.log('\n=== structural: the eBay builders cannot see the raw item ===');
 const src = readFileSync(path.join(repoRoot, 'api', 'list-ebay.js'), 'utf8');
 const strip = (x) => x.replace(/\/\/.*$/gm, '');
-const descBody = strip(src.slice(src.indexOf('const buildDescription = (rawItem)'), src.indexOf('// Extract the first occurrence of a simple')));
+const descBody = strip(src.slice(src.indexOf('const buildDescription = (rawItem'), src.indexOf('// Extract the first occurrence of a simple')));
 ok(/toBuyerSafeListingFacts\(rawItem\)/.test(descBody) && !/\brawItem\.\w+/.test(descBody.replace(/toBuyerSafeListingFacts\(rawItem\)/, '')), 'buildDescription reads ONLY the projection');
 ok(!/Recent verified|Market value|MARKET DATA|DEMAND|census|CGC census|priceBands|demandSignals|comicVine|keyIssue|\.reason/.test(descBody), 'buildDescription contains no market/sold/demand/census/key-claim/reason code path');
 const titleDef = strip(src.slice(src.indexOf('const buildTitle ='), src.indexOf('const eraFromYear')));
@@ -82,7 +82,7 @@ ok(/buildGovernedListingTitle\(toBuyerSafeListingFacts\(rawItem\)\)/.test(titleD
 const bundleBody = strip(src.slice(src.indexOf('const buildBundleDescription'), src.indexOf('const buildBundleXml')));
 ok(/toBuyerSafeListingFacts\(rawIt\)/.test(bundleBody) && !/\.reason\b|keyIssue|market value|18% off/.test(bundleBody), 'bundle description uses the same projection; no reason/key/market claim');
 ok(strip(src).split('\n').filter((l) => /\b(item|it)\.reason\b/.test(l)).length === 0, 'api/list-ebay.js contains NO executable item.reason / it.reason reference');
-ok(/getCanonicalCollectionItemIdForAsset/.test(src) && /LISTING_FACTS_UNAVAILABLE/.test(src) && src.indexOf('LISTING_FACTS_UNAVAILABLE') < src.indexOf('const xml = buildXml(item, pictureUrls);'), 'governed durable facts are resolved (fail-closed) BEFORE the real packet is built');
+ok(/getCanonicalCollectionItemIdForAsset/.test(src) && /LISTING_FACTS_UNAVAILABLE/.test(src) && src.indexOf('LISTING_FACTS_UNAVAILABLE') < src.indexOf('const xml = buildXml(item, pictureUrls, listingPlan);'), 'governed durable facts are resolved (fail-closed) BEFORE the real packet is built');
 ok(!/\.\.\.(item|decision|contract)\b/.test(strip(readFileSync(path.join(repoRoot, 'src', 'lib', 'buyerSafeListingCopy.js'), 'utf8'))), 'projection module never spreads item/decision/contract');
 const pk = readFileSync(path.join(repoRoot, 'src', 'lib', 'marketplacePackets.js'), 'utf8');
 ok(pk.split('\n').filter((l) => /item\.reason/.test(l) && !l.trim().startsWith('//')).length === 0, 'marketplacePackets.js contains NO executable item.reason reference');

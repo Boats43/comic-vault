@@ -25,6 +25,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { metaFetch, shippingResponse } from './helpers/ebayPacketMocks.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -56,16 +57,18 @@ let uploadBehavior = 'success'; // 'success' | 'failure'
 let addFixedPriceItemBehavior = 'success';
 let lastAddFixedPriceItemXml = null;
 const FAKE_ITEM_ID = `test-photo-item-${Date.now()}`;
-const FAKE_HOSTED_URL = 'https://i.ebayimg.example/hosted/fake-picture-1.jpg';
+const FAKE_HOSTED_URL = 'https://i.ebayimg.com/hosted/fake-picture-1.jpg';
 
 global.fetch = async (url, opts) => {
   const urlStr = String(url);
+  const __m = metaFetch(urlStr); if (__m) return __m;
   if (urlStr.includes('identity/v1/oauth2/token')) {
     fetchCalls.push('refresh-exchange');
     return { ok: true, status: 200, json: async () => ({ access_token: `access-for-jimmy-photo-${Date.now()}`, expires_in: 7200 }) };
   }
   const callName = opts?.headers?.['X-EBAY-API-CALL-NAME'] || '(unknown)';
   fetchCalls.push(callName);
+  if (callName === 'GeteBayDetails') return shippingResponse();
   if (callName === 'GetUser') {
     return {
       status: 200,
@@ -120,7 +123,7 @@ function mockRes() {
 const JIMMY = '01a0283a-b1b6-7f90-9b41-9c06bee6ecba';
 const CREEPY_ASSET_ID = '01a02d23-1acb-72e8-aae3-8f851308e9cf';
 const CHAIN2_DECISION_EVENT_ID = '01a0895e-f93b-708d-9530-3a58555bf75c';
-const CREEPY_LIST_OPERATOR_ACTION_EVENT_ID = '01a097a1-6e78-71c9-9309-1ed9344c40db';
+let CREEPY_LIST_OPERATOR_ACTION_EVENT_ID = '01a097a1-6e78-71c9-9309-1ed9344c40db'; // replaced below by a PRICED LIST action
 
 function mintTestToken(principalId) {
   const secret = process.env.GRAILKEY_SESSION_SECRET;
@@ -197,6 +200,13 @@ console.log('  (test setup) Creepy enrolled in Inventory Authority: UNMANAGED ->
 // canonical rows are created here and deleted in cleanup.
 const { createCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
 const CREEPY_LINK_IDS = ['cv_1789188155734_itagfk', 'cv_1789271538761_1hsflc'];
+{
+  // OUTCOME #1 — price binding + photo guard fixtures (idempotent): priced LIST action + asset-owned photo.
+  const assetsMod = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+  await assetsMod.attachMedia({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, bytes: Buffer.from(TINY_PNG_DATA_URL.split(',')[1], 'base64'), contentType: 'image/png', captureRole: 'capture-photo', idempotencyKey: 'list-ebay-smoke-tinypng-evidence-v1' });
+  const priced = await assetsMod.recordOperatorAction({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, actionCode: 'LIST', actionValueAmount: 61.41, source: 'test-fixture', idempotencyKey: 'list-ebay-photo-handoff-priced-list-v2' });
+  CREEPY_LIST_OPERATOR_ACTION_EVENT_ID = priced.operatorActionEventId;
+}
 for (const id of CREEPY_LINK_IDS) await createCollectionItem({ principalId: JIMMY, id, assetCategory: 'comic', attributes: { title: 'creepy', issue: '1', year: '1964', publisher: 'Warren Publishing' } });
 
 console.log('\n=== api/list-ebay.js -- GK-208 photo handoff, real handler proof ===\n');

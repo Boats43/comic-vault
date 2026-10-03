@@ -39,6 +39,8 @@ export {
   assertCollectionItemLinkable,
   resolveCollectionItemLink,
   getCanonicalCollectionItemIdForAsset,
+  getOperatorActionForListing,
+  getAssetMediaContentHashes,
   listPhysicalOrphans,
   listMissingProjections,
   getLiveIdentityAssignment,

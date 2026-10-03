@@ -39,6 +39,9 @@ import { deriveLocks } from "../src/lib/responseContract.js";
 import { deriveActionAuthority } from "../src/lib/actionAuthority.js";
 import { toBuyerSafeListingFacts, buildGovernedListingTitle } from "../src/lib/buyerSafeListingCopy.js";
 import { getMyCollectionItem, NotFoundError as CollectionNotFoundError } from "../src/modules/collection/index.js";
+import { toCents, assertQ41PriceBinding, assertListActionPriceBinding, PriceBindingError } from "../src/lib/listingPriceBinding.js";
+import { getAspectMetadata, getItemConditionPolicy, buildItemSpecificsFromMetadata, resolveDomesticShippingService } from "../src/lib/ebayListingMetadata.js";
+import { assertPublishPhotos, PhotoGuardError } from "../src/lib/listingPhotoGuard.js";
 
 // Outcome #1 — OPTIONAL, ADDITIVE GrailKey linkage. Neither import below
 // changes this endpoint's existing, still-mandatory behavior for a
@@ -48,7 +51,7 @@ import { getMyCollectionItem, NotFoundError as CollectionNotFoundError } from ".
 // endpoint has no mandatory GrailKey auth today, and this dispatch does
 // not add one).
 import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
-import { recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, getCanonicalCollectionItemIdForAsset, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
+import { recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, getCanonicalCollectionItemIdForAsset, getOperatorActionForListing, getAssetMediaContentHashes, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
 import { attemptListedOutcome } from "../src/lib/marketplaceOutcomeBridge.js";
 import { assertListingAuthorized, ListingPreflightFailedError } from "../src/lib/inventoryListingPreflight.js";
 // GK-265 PHASE 3 -- principal-scoped eBay seller execution. Every real
@@ -79,16 +82,25 @@ const xmlEscape = (s) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
 
+// The ONE definition of the outbound list price (buildXml AND the Q41 price-binding preflight
+// both use it, so the acknowledged amount is compared to exactly what would be sent).
+const resolveOutgoingPrice = (item) => {
+  for (const c of [item.price, item.priceHigh, item.priceLow]) {
+    const n = parsePriceNumber(c);
+    if (n != null) return n;
+  }
+  return null;
+};
+
 const parsePriceNumber = (p) => {
   if (p == null) return null;
   const m = String(p).replace(/,/g, "").match(/[\d.]+/);
   return m ? parseFloat(m[0]) : null;
 };
 
-// Map CGC grade → eBay ConditionID.
-// eBay Comics condition IDs: 2750 = Graded, 4000 = Very Good, 5000 = Good, etc.
-// Safest for a graded book is 2750 (Graded). Raw/ungraded → 4000.
-const conditionIdFor = (grade) => (grade ? "2750" : "4000");
+// (ConditionID is no longer derived from a grade string: it is emitted only when validated against
+// eBay's authoritative category condition policy, see src/lib/ebayListingMetadata.js. For category
+// 259104 the condition is optional and is omitted.)
 
 // Match the frontend showKeyIssue() check.
 const showKeyIssue = (k) => {
@@ -205,7 +217,7 @@ const buildBundleXml = (items, pictureUrls) => {
   }, 0);
   const price = Math.round(sum * 0.82 * 100) / 100;
   if (price <= 0) throw new Error("No valid bundle price — cannot list");
-  const conditionId = items.every((it) => it.isGraded === true) ? "2750" : "4000";
+  // ConditionID omitted (category 259104 condition is optional; no grade-derived enum).
   const pictureBlock = (pictureUrls && pictureUrls.length)
     ? `    <PictureDetails>\n${pictureUrls
         .map((u) => `      <PictureURL>${xmlEscape(u)}</PictureURL>`)
@@ -222,7 +234,6 @@ const buildBundleXml = (items, pictureUrls) => {
       <CategoryID>${CATEGORY_ID}</CategoryID>
     </PrimaryCategory>
     <StartPrice currencyID="USD">${price.toFixed(2)}</StartPrice>
-    <ConditionID>${conditionId}</ConditionID>
     <Location>Phoenix, AZ</Location>
     <Country>US</Country>
     <PostalCode>85033</PostalCode>
@@ -252,7 +263,7 @@ ${pictureBlock}    <ShipToLocations>US</ShipToLocations>
 </AddFixedPriceItemRequest>`;
 };
 
-const buildDescription = (rawItem) => {
+const buildDescription = (rawItem, shippingDescription = 'USPS Ground Advantage') => {
   // BUYER-FACING COPY (Outcome #1 V1): built ONLY from the explicit buyer-safe
   // projection of GOVERNED catalogue facts. Allowed: identity facts, a GOVERNED
   // public grade, the fixed condition/photo sentence, approved shipping/returns.
@@ -276,7 +287,7 @@ const buildDescription = (rawItem) => {
   lines.push("<p><strong>SHIPPING</strong></p>");
   lines.push(
     "<p>Packed in Gemini mailer with cardboard backing and top loader for protection. " +
-    "Ships within 3 business days via USPS Media Mail. Combined shipping available.</p>"
+    `Ships within 3 business days via ${shippingDescription}. Combined shipping available.</p>`
   );
   lines.push("<p><strong>RETURNS</strong></p>");
   lines.push("<p>30-day returns accepted. Professional grading available.</p>");
@@ -376,16 +387,20 @@ const uploadSiteHostedPicture = async (base64Image, headers) => {
   return fullUrl;
 };
 
-const buildXml = (item, pictureUrls) => {
+// plan = { shippingService:{token,description}, specifics:[{name,value}], conditionId:null|string, bestOffer:boolean }
+// — every marketplace enum/value in it was resolved from authoritative eBay metadata (see
+// src/lib/ebayListingMetadata.js); there are NO hard-coded shipping tokens, condition ids or aspect enums here.
+const buildXml = (item, pictureUrls, plan) => {
+  if (!plan?.shippingService?.token) throw new Error('No authoritatively resolved shipping service — cannot list');
   const title = buildTitle(item);
-  const description = buildDescription(item);
-  const price = parsePriceNumber(item.price) ?? parsePriceNumber(item.priceHigh) ?? parsePriceNumber(item.priceLow);
+  const description = buildDescription(item, plan.shippingService.description);
+  const price = resolveOutgoingPrice(item);
   if (price == null || price <= 0) {
     throw new Error("No valid price on item — cannot list");
   }
-  // Condition is governed too: 2750 (Graded) ONLY for an operator-confirmed slab; a raw copy never
-  // inherits 'Graded' from a legacy/model grade string.
-  const conditionId = conditionIdFor(toBuyerSafeListingFacts(item).isSlab ? 'slab' : null);
+  // ConditionID is emitted ONLY when plan.conditionId was validated against the authoritative category
+  // condition policy (never derived from a grade string; never a remembered enum).
+  const conditionId = plan.conditionId || null;
 
   // T2-1: Multi-image support
   const pictureBlock = (pictureUrls && pictureUrls.length > 0)
@@ -409,17 +424,16 @@ ${pictureUrls.map(url => `      <PictureURL>${xmlEscape(url)}</PictureURL>`).joi
   const autoAcceptPrice = (price * 0.95).toFixed(2);
   const minBestOfferPrice = (price * 0.75).toFixed(2);
 
-  // T1-1: Item Specifics — explicit GOVERNED catalogue facts only; unknown -> omitted
-  // (no 'Unknown' placeholders, no guessed values).
-  const sf = toBuyerSafeListingFacts(item);
-  const spec = (name, value) => (value ? `      <NameValueList>
-        <Name>${xmlEscape(name)}</Name>
-        <Value>${xmlEscape(value)}</Value>
+  // Item specifics: ONLY entries that passed provenance classification (src/lib/ebayListingMetadata.js
+  // buildItemSpecificsFromMetadata) — governed catalogue facts or eBay-enum-validated values; anything
+  // unprovable was already omitted there.
+  const itemSpecifics = plan.specifics.length ? `    <ItemSpecifics>
+${plan.specifics.map((x) => `      <NameValueList>
+        <Name>${xmlEscape(x.name)}</Name>
+        <Value>${xmlEscape(x.value)}</Value>
       </NameValueList>
-` : '');
-  const itemSpecifics = `    <ItemSpecifics>
-${spec('Publisher', sf.publisher)}${spec('Series Title', sf.title)}${spec('Issue Number', sf.issue)}${spec('Publication Year', sf.year)}${spec('Era', sf.year ? getEra(sf.year) : '')}${spec('Grade Certification', sf.isSlab ? 'CGC' : 'Raw/Ungraded')}${spec('Numeric Grade', sf.isSlab && sf.numericGrade != null ? String(sf.numericGrade) : '')}${spec('Format', item.isTPB ? 'Trade Paperback' : item.isMagazine ? 'Magazine' : 'Single Issue')}${spec('Language', 'English')}${spec('Variant', sf.variant)}    </ItemSpecifics>
-`;
+`).join('')}    </ItemSpecifics>
+` : '';
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -432,8 +446,7 @@ ${spec('Publisher', sf.publisher)}${spec('Series Title', sf.title)}${spec('Issue
       <CategoryID>${categoryId}</CategoryID>
     </PrimaryCategory>
     <StartPrice currencyID="USD">${price.toFixed(2)}</StartPrice>
-    <ConditionID>${conditionId}</ConditionID>
-    <Location>Phoenix, AZ</Location>
+${conditionId ? `    <ConditionID>${xmlEscape(conditionId)}</ConditionID>\n` : ''}    <Location>Phoenix, AZ</Location>
     <Country>US</Country>
     <PostalCode>85033</PostalCode>
     <Currency>USD</Currency>
@@ -447,7 +460,7 @@ ${pictureBlock}    <ShipToLocations>US</ShipToLocations>
       <ShippingType>Flat</ShippingType>
       <ShippingServiceOptions>
         <ShippingServicePriority>1</ShippingServicePriority>
-        <ShippingService>USPSMedia</ShippingService>
+        <ShippingService>${xmlEscape(plan.shippingService.token)}</ShippingService>
         <ShippingServiceCost>${shippingCost}</ShippingServiceCost>
         <FreeShipping>${freeShippingFlag}</FreeShipping>
       </ShippingServiceOptions>
@@ -458,14 +471,14 @@ ${pictureBlock}    <ShipToLocations>US</ShipToLocations>
       <ReturnsWithinOption>Days_30</ReturnsWithinOption>
       <ShippingCostPaidByOption>Seller</ShippingCostPaidByOption>
     </ReturnPolicy>
-${itemSpecifics}    <BestOfferDetails>
+${itemSpecifics}${plan.bestOffer === true ? `    <BestOfferDetails>
       <BestOfferEnabled>true</BestOfferEnabled>
     </BestOfferDetails>
     <ListingDetails>
       <BestOfferAutoAcceptPrice>${autoAcceptPrice}</BestOfferAutoAcceptPrice>
       <MinimumBestOfferPrice>${minBestOfferPrice}</MinimumBestOfferPrice>
     </ListingDetails>
-  </Item>
+` : ''}  </Item>
 </AddFixedPriceItemRequest>`;
 };
 
@@ -620,7 +633,7 @@ const respondEbayTokenError = (res, e, context) => {
 // Outcome #1 readiness: lets a dry-run construct the REAL outbound AddFixedPriceItem
 // XML for review WITHOUT invoking the handler (no auth, no eBay call, no DB write).
 // The handler calls these exact same builders.
-export const __dryRunBuildListingXml = (item, pictureUrls) => buildXml(item, pictureUrls);
+export const __dryRunBuildListingXml = (item, pictureUrls, plan) => buildXml(item, pictureUrls, plan);
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -1073,6 +1086,52 @@ export default async function handler(req, res) {
       }
     }
 
+    // OUTCOME #1 — PRICE BINDING (before any picture upload / eBay call). On the Q41 path the
+    // operator-acknowledged price must EXACTLY equal the price about to be listed, and the durable
+    // LIST action must record that same approved price (a later write cannot substitute another).
+    // Q41 stays execution-only: no valuation is written or changed here.
+    const outgoingPrice = resolveOutgoingPrice(item);
+    if (outgoingPrice == null || !(outgoingPrice > 0) || toCents(outgoingPrice) === null) {
+      res.status(400).json({ error: 'LIST_PRICE_INVALID', message: 'No valid list price — nothing was listed.' });
+      return;
+    }
+    try {
+      if (!serverReady) assertQ41PriceBinding({ q41Override: item.q41Override, outgoingPrice });
+      const listAction = await getOperatorActionForListing({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId, operatorActionEventId: item.operatorActionEventId });
+      assertListActionPriceBinding({ actionValueAmount: listAction.actionValueAmount, outgoingPrice, requireRecorded: !serverReady });
+    } catch (e) {
+      if (e instanceof PriceBindingError) {
+        console.error(`[ebay] price binding refused (${e.code}) — aborting before any eBay call`);
+        res.status(409).json({ error: e.code, message: e.message });
+        return;
+      }
+      console.error('[ebay] price-binding preflight failed unexpectedly — aborting before any eBay call:', e?.message || e);
+      res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Price-binding check failed unexpectedly; nothing was listed.' });
+      return;
+    }
+
+    // OUTCOME #1 — AUTHORITATIVE MARKETPLACE METADATA (before any eBay write). Aspect enums and the
+    // category condition policy come from eBay's own selling metadata; unavailable => fail closed.
+    let aspectMeta, conditionPolicy;
+    try {
+      [aspectMeta, conditionPolicy] = await Promise.all([getAspectMetadata(CATEGORY_ID), getItemConditionPolicy(CATEGORY_ID)]);
+    } catch (e) {
+      console.error('[ebay] authoritative listing metadata unavailable — aborting before any eBay write:', e?.message || e);
+      res.status(503).json({ error: 'LISTING_METADATA_UNAVAILABLE', message: 'eBay listing metadata could not be verified, so nothing was listed. Please retry.' });
+      return;
+    }
+    if (conditionPolicy.itemConditionRequired === true) {
+      // A condition is mandatory for this category and no governed mapping exists — operator ruling needed.
+      res.status(409).json({ error: 'CONDITION_RULING_REQUIRED', message: 'This category requires a condition and no authoritative governed mapping exists — nothing was listed.', conditions: conditionPolicy.itemConditions });
+      return;
+    }
+    const listingPlan = {
+      conditionId: null, // required=false for 259104: omitted; never derived from a grade string
+      bestOffer: item.bestOffer === true, // explicit opt-in only; default OFF
+      specifics: buildItemSpecificsFromMetadata(toBuyerSafeListingFacts(item), aspectMeta, { isTPB: item.isTPB === true, isMagazine: item.isMagazine === true }),
+      shippingService: null,
+    };
+
     // T2-1: Multi-image upload for singles (up to 12 images)
     // Gate: only upload all images when confidence is not LOW
     const shouldUploadMultiple =
@@ -1105,11 +1164,26 @@ export default async function handler(req, res) {
       singleHeaders = { ...ebayHeaders, "X-EBAY-API-IAF-TOKEN": singleAccessToken };
     }
 
+    // OUTCOME #1 — domestic shipping service resolved from eBay's own GeteBayDetails (authoritative);
+    // Media Mail is never selectable. Unresolvable => fail closed BEFORE any picture upload.
+    if (imagesToUpload.length > 0) {
+      try {
+        listingPlan.shippingService = await resolveDomesticShippingService({ headers: singleHeaders });
+      } catch (e) {
+        console.error('[ebay] shipping service resolution failed — aborting before any eBay write:', e?.message || e);
+      }
+      if (!listingPlan.shippingService) {
+        res.status(409).json({ error: 'SHIPPING_SERVICE_UNRESOLVED', message: 'An eligible shipping service could not be verified with eBay (Media Mail is not permitted), so nothing was listed.' });
+        return;
+      }
+    }
+
     const pictureUrls = [];
+    const uploadedPhotos = []; // { bytes, url } — fed to the last-mile photo guard
     for (const img of imagesToUpload) {
       try {
         const url = await uploadSiteHostedPicture(img, singleHeaders);
-        if (url) pictureUrls.push(url);
+        if (url) { pictureUrls.push(url); uploadedPhotos.push({ bytes: decodeDataUrl(img).bytes, url }); }
       } catch (imgErr) {
         // Don't hard-fail the whole listing on image upload issues — log and continue without.
         console.error("Picture upload failed:", imgErr.message);
@@ -1135,6 +1209,23 @@ export default async function handler(req, res) {
       return;
     }
 
+    // OUTCOME #1 — LAST-MILE PHOTO GUARD (immediately before the eBay write): every photo must
+    // (a) hash to a media row belonging to THIS gkAssetId, (b) be an https, approved-host,
+    // non-placeholder URL, (c) be reachable and serve image/*. Anything else => PUBLISH_BLOCKED_NO_PHOTO.
+    try {
+      const assetMediaHashes = await getAssetMediaContentHashes({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId });
+      await assertPublishPhotos({ sourceImages: uploadedPhotos, assetMediaHashes });
+    } catch (e) {
+      if (e instanceof PhotoGuardError) {
+        console.error(`[ebay] photo guard refused (${e.reason}) — aborting before AddFixedPriceItem`);
+        res.status(400).json({ error: 'PUBLISH_BLOCKED_NO_PHOTO', message: e.message });
+        return;
+      }
+      console.error('[ebay] photo guard failed unexpectedly — aborting before AddFixedPriceItem:', e?.message || e);
+      res.status(400).json({ error: 'PUBLISH_BLOCKED_NO_PHOTO', message: 'PUBLISH BLOCKED — NO VALID EBAY PHOTO (the photo could not be verified against this asset).' });
+      return;
+    }
+
     // EBAY PUBLISH SAFETY — read-only account/token validity check,
     // immediately before the real AddFixedPriceItem call below. Throws
     // (and this handler's outer catch turns it into a 500) if the token
@@ -1143,7 +1234,7 @@ export default async function handler(req, res) {
     await verifySellerAccount(singleHeaders);
 
     // Step 2: create the listing, including the hosted picture URLs.
-    const xml = buildXml(item, pictureUrls);
+    const xml = buildXml(item, pictureUrls, listingPlan);
     console.log("[ebay] AddFixedPriceItem request XML:\n" + redactToken(xml));
 
     const ebayRes = await fetch(EBAY_ENDPOINT, {
