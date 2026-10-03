@@ -55,6 +55,7 @@ const JIMMY_EBAY_REFRESH_CREDENTIAL = `fake-refresh-jimmy-${Date.now()}`;
 // GetUser safety check must run before AddFixedPriceItem). ──
 const fetchCalls = [];
 let addFixedPriceItemBehavior = 'success'; // 'success' | 'failure'
+let lastAddFixedPriceItemBody = ''; // GK buyer-facing sanitation: the REAL outbound eBay packet
 const FAKE_ITEM_ID = `test-item-${Date.now()}`;
 
 // GK-208 — the zero-photo precall gate now blocks before any eBay call
@@ -88,6 +89,7 @@ global.fetch = async (url, opts) => {
     };
   }
   if (callName === 'AddFixedPriceItem') {
+    lastAddFixedPriceItemBody = String(opts?.body ?? '');
     if (addFixedPriceItemBehavior === 'failure') {
       return {
         status: 200,
@@ -246,6 +248,90 @@ console.log('-- real success: valid token + gkAssetId + decisionEventId + LIST o
 
   await cleanup(client, idempotencyKey);
   console.log('  (test-artifact outcome_event row deleted -- this proves the CODE PATH works, it is not a genuine marketplace outcome)\n');
+}
+
+console.log('-- BUYER-FACING SANITATION: internal reasoning injected into the item NEVER reaches the real outbound eBay packet --\n');
+{
+  // INTERNAL DECISION REASONING != BUYER-FACING MARKETPLACE COPY. Each injected
+  // value goes through the REAL handler -> real buildXml -> the exact
+  // AddFixedPriceItem body (captured at the mocked fetch boundary). Raw
+  // item.reason, claudeCheck.flags and the pricing-pipeline source label are all
+  // internal; none may appear in ANY buyer-facing field.
+  const injections = [
+    ['A internal marker', 'INTERNAL_TEST_DO_NOT_SHOW_TO_BUYER'],
+    ['B authority language', 'REFUSED because price authority missing'],
+    ['C internal ids', 'gkAssetId=SECRET_TEST_ID decisionEventId=SECRET_DECISION_ID'],
+    ['D model-style text', 'Model said user should list because the comp pool looked strong'],
+    ['E html/script', '<script>alert(1)</script><img src=x onerror=alert(2)>'],
+    ['F multiline/control', 'line one\nline two\r\n\ttabbed\u0007bell SECRET_CTRL_LINE'],
+    ['G json diagnostics', '{"trace":"SECRET_JSON_TRACE","pricingSource":"pc_internal","blockers":["x"]}'],
+  ];
+  for (const [label, injected] of injections) {
+    fetchCalls.length = 0;
+    addFixedPriceItemBehavior = 'success';
+    lastAddFixedPriceItemBody = '';
+    const idempotencyKey = `list-ebay-sanitation-${Date.now()}-${label[0]}`;
+    const req = {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+      body: baseItem({
+        gkAssetId: CREEPY_ASSET_ID,
+        decisionEventId: CHAIN2_DECISION_EVENT_ID,
+        operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID,
+        outcomeIdempotencyKey: idempotencyKey,
+        reason: injected,
+        claudeCheck: { flags: [`INTERNAL_FLAG_DIAG ${injected}`] },
+        priceBands: { quick: 50, stretch: 70, market: 61.41, count: 4, source: 'INTERNAL_SOURCE_TOKEN_pc_sold' },
+        keyIssue: 'First appearance of a test character',
+      }),
+    };
+    const res = mockRes();
+    await handler(req, res);
+    const body = lastAddFixedPriceItemBody;
+    assertTrue(res.statusCode === 200 && body.includes('<AddFixedPriceItemRequest'), `[${label}] real handler reached the real AddFixedPriceItem construction (status ${res.statusCode})`);
+    const needles = [injected, ...injected.split(/[\n\r]+/).filter((x) => x.length > 6), 'INTERNAL_FLAG_DIAG', 'INTERNAL_SOURCE_TOKEN', 'SECRET_', 'INTERNAL_TEST_DO_NOT_SHOW'];
+    const leaked = needles.filter((n) => body.includes(n) || body.includes(n.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')));
+    assertTrue(leaked.length === 0, `[${label}] NO injected internal text in any buyer-facing field of the outbound packet${leaked.length ? ' — LEAKED: ' + JSON.stringify(leaked).slice(0, 160) : ''}`);
+    assertTrue(!/<NOTES>|<strong>NOTES<\/strong>/.test(body), `[${label}] no AI-verification "NOTES" block`);
+    // ordinary safe fields stay intact
+    assertTrue(body.includes('<Title>Creepy #1') && body.includes('Warren Publishing') && body.includes('<h2>Creepy #1</h2>'), `[${label}] ordinary title/publisher fields intact`);
+    assertTrue(body.includes('Grade: <strong>VG</strong>') && body.includes('Key Issue: First appearance of a test character'), `[${label}] grade + key issue intact`);
+    assertTrue(body.includes('Market value: $61.41') && !body.includes('Market value: $61.41 ('), `[${label}] market figure intact, pipeline source label dropped`);
+    assertTrue(body.includes('<StartPrice currencyID="USD">61.41</StartPrice>') && body.includes('<ItemSpecifics>'), `[${label}] price + item specifics intact`);
+    await cleanup(client, idempotencyKey);
+  }
+  console.log('  (test-artifact outcome_event rows deleted)\n');
+}
+
+console.log('-- BUYER-FACING SANITATION (bundle): per-book internal reasoning never reaches the real bundle packet --\n');
+{
+  fetchCalls.length = 0;
+  addFixedPriceItemBehavior = 'success';
+  lastAddFixedPriceItemBody = '';
+  const mk = (title, issue, reason, extra = {}) => ({
+    title, issue, year: '1975', publisher: 'Test Pub', price: '$20.00', grade: 'VF', images: [TINY_PNG_DATA_URL],
+    reason, claudeCheck: { flags: ['INTERNAL_FLAG_DIAG bundle'] }, keyIssue: 'No', ...extra,
+  });
+  const req = {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}` },
+    body: {
+      bundle: true,
+      items: [
+        mk('Sanitation Series', '1', 'INTERNAL_TEST_DO_NOT_SHOW_TO_BUYER REFUSED because price authority missing', { keyIssue: 'First appearance of Test Hero' }),
+        mk('Sanitation Series', '2', 'gkAssetId=SECRET_TEST_ID <script>alert(1)</script>\nSECRET_CTRL_LINE'),
+      ],
+    },
+  };
+  const res = mockRes();
+  await handler(req, res);
+  const body = lastAddFixedPriceItemBody;
+  assertTrue(res.statusCode === 200 && body.includes('<AddFixedPriceItemRequest'), `real handler reached the real BUNDLE AddFixedPriceItem construction (status ${res.statusCode})`);
+  const leaked = ['INTERNAL_TEST_DO_NOT_SHOW', 'REFUSED because', 'SECRET_', 'INTERNAL_FLAG_DIAG', '<script>', '&lt;script&gt;'].filter((n) => body.includes(n));
+  assertTrue(leaked.length === 0, `bundle: NO per-book internal reason / flag / id / script text in any buyer-facing bundle field${leaked.length ? ' — LEAKED: ' + JSON.stringify(leaked) : ''}`);
+  assertTrue(body.includes('<h2>Sanitation Series — 2-Book Lot</h2>') && body.includes('<strong>Sanitation Series #1</strong>') && body.includes('<strong>Sanitation Series #2</strong>'), 'bundle: ordinary header + per-book title/issue lines intact');
+  assertTrue(body.includes('KEY: First appearance of Test Hero') && body.includes('(1975) — VF'), 'bundle: key note, year and grade intact');
+  assertTrue(body.includes('<Title>Sanitation Series #1 #2 Lot'), 'bundle: ordinary bundle title intact');
 }
 
 console.log('-- PRE-PUBLISH HARDENING: attaching to the HOLD row (not LIST) must be rejected BEFORE any eBay call is ever made --\n');

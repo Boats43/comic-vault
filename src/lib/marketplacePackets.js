@@ -130,10 +130,9 @@ export const getMercariDescription = (item) => {
   const grade = formatGrade(item);
   const keyNote = showKeyIssue(item.keyIssue) ? `\nKey: ${item.keyIssue}` : '';
 
-  // Condition summary (2 sentences max)
-  const condition = item.reason
-    ? String(item.reason).split('.').slice(0, 2).join('.') + (item.reason.includes('.') ? '' : '.')
-    : 'See photos for condition details.';
+  // BUYER-FACING: item.reason is internal grader/model rationale and is NEVER
+  // projected into public copy. Condition text is the fixed public sentence.
+  const condition = 'See photos for condition details.';
 
   return `${title} ${issue} ${year}
 Publisher: ${publisher}
@@ -151,9 +150,8 @@ export const getFacebookDescription = (item) => {
   const grade = formatGrade(item);
   const keyNote = showKeyIssue(item.keyIssue) ? `\n${item.keyIssue}` : '';
 
-  const condition = item.reason
-    ? String(item.reason).split('.').slice(0, 2).join('.') + '.'
-    : 'See photos for condition.';
+  // BUYER-FACING: item.reason is internal rationale — never projected.
+  const condition = 'See photos for condition.';
 
   return `Selling ${title} ${issue} from ${year}.
 Grade: ${grade} — ${condition}${keyNote}
@@ -185,9 +183,8 @@ export const getWhatnotDescription = (item) => {
   const year = item.year || '';
   const publisher = item.publisher || '';
 
-  const condition = item.reason
-    ? String(item.reason).split('.')[0] + '.'
-    : 'See photos.';
+  // BUYER-FACING: item.reason is internal rationale — never projected.
+  const condition = 'See photos.';
 
   return `🔥 ${title} ${issue} — ${grade}${keyNote}
 ${year} | ${publisher}

@@ -37,6 +37,7 @@
 // api/enrich.js's finalizeResponse already uses at enrich time.
 import { deriveLocks } from "../src/lib/responseContract.js";
 import { deriveActionAuthority } from "../src/lib/actionAuthority.js";
+import { toBuyerSafeListingFacts } from "../src/lib/buyerSafeListingCopy.js";
 
 // Outcome #1 — OPTIONAL, ADDITIVE GrailKey linkage. Neither import below
 // changes this endpoint's existing, still-mandatory behavior for a
@@ -206,17 +207,20 @@ const buildBundleDescription = (items) => {
   lines.push(`<h2>${xmlEscape(header)}</h2>`);
   lines.push(`<p><strong>Contents (${items.length} books):</strong></p>`);
   lines.push("<ul>");
-  for (const it of items) {
+  // Each bundled book goes through the SAME buyer-safe projection as a single
+  // listing. No raw item (and therefore no item.reason / decision reasoning /
+  // routing rationale) is ever in scope here.
+  for (const rawIt of items) {
+    const it = toBuyerSafeListingFacts(rawIt);
     const gradeStr =
       it.isGraded === true && it.numericGrade != null
         ? `CGC ${it.numericGrade}`
         : it.grade || "Raw";
     const issuePart = it.issue ? ` #${it.issue}` : "";
     const yearPart = it.year ? ` (${it.year})` : "";
-    const keyPart = showKeyIssue(it.keyIssue) ? ` — KEY: ${xmlEscape(it.keyIssue)}` : "";
-    const notePart = it.reason ? ` — ${xmlEscape(String(it.reason).slice(0, 160))}` : "";
+    const keyPart = it.keyIssue ? ` — KEY: ${xmlEscape(it.keyIssue)}` : "";
     lines.push(
-      `<li><strong>${xmlEscape(it.title || "Comic")}${issuePart}</strong>${yearPart} — ${xmlEscape(gradeStr)}${keyPart}${notePart}</li>`
+      `<li><strong>${xmlEscape(it.title || "Comic")}${issuePart}</strong>${yearPart} — ${xmlEscape(gradeStr)}${keyPart}</li>`
     );
   }
   lines.push("</ul>");
@@ -281,43 +285,37 @@ ${pictureBlock}    <ShipToLocations>US</ShipToLocations>
 </AddFixedPriceItemRequest>`;
 };
 
-const buildDescription = (item) => {
+const buildDescription = (rawItem) => {
+  // BUYER-FACING COPY: built ONLY from the explicit buyer-safe projection. The raw
+  // item (reason, claudeCheck flags, decision/contract, pricing-source labels,
+  // IDs) is deliberately out of scope for this function.
+  const f = toBuyerSafeListingFacts(rawItem);
   const lines = [];
 
-  // T3-3: Flags disclosure (if any)
-  if (item.claudeCheck?.flags && item.claudeCheck.flags.length > 0) {
-    lines.push("<p><strong>NOTES</strong></p>");
-    item.claudeCheck.flags.forEach(flag => {
-      lines.push(`<p>• ${xmlEscape(flag)}</p>`);
-    });
-    lines.push("<br>");
-  }
-
-  if (item.title) lines.push(`<h2>${xmlEscape(item.title)}</h2>`);
-  const meta = [item.publisher, item.year].filter(Boolean).join(" · ");
+  if (f.title) lines.push(`<h2>${xmlEscape(f.title)}</h2>`);
+  const meta = [f.publisher, f.year].filter(Boolean).join(" · ");
   if (meta) lines.push(`<p><strong>${xmlEscape(meta)}</strong></p>`);
 
-  if (item.grade) {
+  if (f.grade) {
     const gradeLabel =
-      item.isGraded === true && item.numericGrade != null
-        ? `CGC ${xmlEscape(item.grade)}`
-        : xmlEscape(item.grade);
+      f.isGraded === true && f.numericGrade != null
+        ? `CGC ${xmlEscape(f.grade)}`
+        : xmlEscape(f.grade);
     lines.push(`<p>Grade: <strong>${gradeLabel}</strong></p>`);
   }
 
-  if (item.keyIssue) lines.push(`<p>Key Issue: ${xmlEscape(item.keyIssue)}</p>`);
-  if (item.reason) lines.push(`<p>${xmlEscape(item.reason)}</p>`);
+  if (f.keyIssue) lines.push(`<p>Key Issue: ${xmlEscape(f.keyIssue)}</p>`);
 
   // T2-2: Story (expanded from 500 to 1000 chars)
-  if (item.comicVine?.description) {
-    const storyText = String(item.comicVine.description).substring(0, 1000);
+  if (f.story) {
+    const storyText = String(f.story).substring(0, 1000);
     lines.push(`<p><strong>STORY</strong></p>`);
     lines.push(`<div>${storyText}</div>`);
   }
 
   // T2-2: Creators section
-  if (item.comicVine?.personCredits && item.comicVine.personCredits.length > 0) {
-    const creatorList = item.comicVine.personCredits
+  if (f.creators.length > 0) {
+    const creatorList = f.creators
       .map(p => `${xmlEscape(p.name)}${p.role ? ` (${xmlEscape(p.role)})` : ''}`)
       .join(', ');
     lines.push(`<p><strong>CREATORS</strong></p>`);
@@ -325,46 +323,35 @@ const buildDescription = (item) => {
   }
 
   // T2-2: Characters section
-  if (item.comicVine?.characterCredits && item.comicVine.characterCredits.length > 0) {
-    const characterList = item.comicVine.characterCredits
-      .slice(0, 5)
-      .map(c => xmlEscape(c.name))
-      .join(', ');
+  if (f.characters.length > 0) {
+    const characterList = f.characters.slice(0, 5).map(c => xmlEscape(c)).join(', ');
     lines.push(`<p><strong>CHARACTERS</strong></p>`);
     lines.push(`<p>${characterList}</p>`);
   }
 
   // Legacy first appearance field (keep if no characterCredits)
-  if (Array.isArray(item.comicVine?.firstAppearanceCharacters) &&
-      item.comicVine.firstAppearanceCharacters.length > 0 &&
-      (!item.comicVine?.characterCredits || item.comicVine.characterCredits.length === 0)) {
-    lines.push(
-      `<p><strong>First appearance:</strong> ${xmlEscape(item.comicVine.firstAppearanceCharacters.join(", "))}</p>`
-    );
+  if (f.firstAppearance.length > 0 && f.characters.length === 0) {
+    lines.push(`<p><strong>First appearance:</strong> ${xmlEscape(f.firstAppearance.join(", "))}</p>`);
   }
 
-  // T1-3: Market proof section
-  if (item.priceBands) {
+  // T1-3: Market proof section (figures only; the pipeline's source label is not projected)
+  if (f.hasMarketBlock) {
     lines.push(`<p><strong>MARKET DATA</strong></p>`);
-    const pb = item.priceBands;
-    if (pb.quick && pb.stretch && pb.market) {
+    if (f.market) {
       lines.push(
-        `<p>Recent verified sales: $${pb.quick.toFixed(2)}–$${pb.stretch.toFixed(2)} ` +
-        `(${pb.count || 0} comps)</p>`
+        `<p>Recent verified sales: $${f.market.quick.toFixed(2)}–$${f.market.stretch.toFixed(2)} ` +
+        `(${f.market.count} comps)</p>`
       );
-      lines.push(
-        `<p>Market value: $${pb.market.toFixed(2)} ` +
-        `(${xmlEscape(pb.source || 'estimated')})</p>`
-      );
+      lines.push(`<p>Market value: $${f.market.market.toFixed(2)}</p>`);
     }
-    if (item.pop?.total > 0) {
-      lines.push(`<p>CGC census: ${item.pop.total} copies graded</p>`);
+    if (f.popTotal > 0) {
+      lines.push(`<p>CGC census: ${f.popTotal} copies graded</p>`);
     }
   }
 
   // T2-2: Demand section
-  if (item.demandSignals) {
-    const ds = item.demandSignals;
+  if (f.demand) {
+    const ds = f.demand;
     const demandEmoji = ds.demandLevel === 'HIGH' ? '🔥' : ds.demandLevel === 'LOW' ? '📉' : '➡️';
     const trendIcon = ds.trend === 'RISING' ? '↑' : ds.trend === 'DECLINING' ? '↓' : '→';
     lines.push(`<p><strong>DEMAND</strong></p>`);
