@@ -782,6 +782,23 @@ export async function linkCollectionItem({ principalId, collectionItemId, gkAsse
 // DATA-1D, T2: a link resolving to an asset the CALLER doesn't own
 // returns null (as if the link didn't exist) rather than leaking "this
 // collectionItemId belongs to someone's real asset" cross-principal.
+// Outcome #1 V1 — the durable canonical catalogue row for an OWNED asset (the
+// governed source of buyer-facing identity facts). Ownership-checked; null if
+// the asset has no canonical link.
+export async function getCanonicalCollectionItemIdForAsset({ principalId, gkAssetId } = {}) {
+  requireFields({ principalId, gkAssetId }, ['principalId', 'gkAssetId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertAssetExists(client, gkAssetId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    const link = await repo.getCollectionItemLinkByAssetId(client, { gkAssetId });
+    return link ? link.collection_item_id : null;
+  } finally {
+    client.release();
+  }
+}
+
 export async function resolveCollectionItemLink({ principalId, collectionItemId } = {}) {
   requireFields({ principalId, collectionItemId }, ['principalId', 'collectionItemId']);
   const client = await acquireConnection();

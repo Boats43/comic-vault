@@ -192,6 +192,12 @@ const { enrollAsset, closePool: closeInventoryPool } = await import(pathToFileUR
 const inventoryEnrollKey = `list-ebay-photo-handoff-inventory-enroll-${crypto.randomUUID()}`;
 await enrollAsset({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, idempotencyKey: inventoryEnrollKey });
 console.log('  (test setup) Creepy enrolled in Inventory Authority: UNMANAGED -> AVAILABLE, real write, restored in cleanup\n');
+// OUTCOME #1 V1 — buyer-facing facts come from the DURABLE canonical catalogue row of the owned asset
+// (fail-closed otherwise). Creepy's Development links point at rows that no longer exist, so transient
+// canonical rows are created here and deleted in cleanup.
+const { createCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
+const CREEPY_LINK_IDS = ['cv_1789188155734_itagfk', 'cv_1789271538761_1hsflc'];
+for (const id of CREEPY_LINK_IDS) await createCollectionItem({ principalId: JIMMY, id, assetCategory: 'comic', attributes: { title: 'creepy', issue: '1', year: '1964', publisher: 'Warren Publishing' } });
 
 console.log('\n=== api/list-ebay.js -- GK-208 photo handoff, real handler proof ===\n');
 
@@ -284,6 +290,7 @@ await dbClient.query('DELETE FROM data1_dev.inventory_current_state WHERE gk_ass
 await dbClient.query('DELETE FROM data1_dev.inventory_transition_event WHERE gk_asset_id = $1', [CREEPY_ASSET_ID]);
 await dbClient.query(`DELETE FROM data1_dev.idempotency_key WHERE operation = 'enrollAsset' AND idempotency_key = $1`, [inventoryEnrollKey]);
 console.log('  (test cleanup) Creepy restored to UNMANAGED in Inventory Authority');
+await dbClient.query(`DELETE FROM data1_dev.collection_item WHERE id = ANY($1) AND principal_id = $2`, [CREEPY_LINK_IDS, JIMMY]);
 await closeInventoryPool();
 
 await dbClient.query(`DELETE FROM data1_dev.marketplace_connection WHERE principal_id = $1 AND provider = 'EBAY'`, [JIMMY]);

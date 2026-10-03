@@ -38,6 +38,7 @@ export {
   linkCollectionItem,
   assertCollectionItemLinkable,
   resolveCollectionItemLink,
+  getCanonicalCollectionItemIdForAsset,
   listPhysicalOrphans,
   listMissingProjections,
   getLiveIdentityAssignment,

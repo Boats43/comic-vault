@@ -204,6 +204,16 @@ const { upsertMarketplaceConnection } = await import(pathToFileURL(path.join(rep
 await upsertMarketplaceConnection({ principalId: JIMMY, provider: 'EBAY', providerUserId: 'jimmy-test-ebay-identity', refreshCredential: JIMMY_EBAY_REFRESH_CREDENTIAL, grantedScopes: [] });
 console.log('  (test setup) real transient EBAY marketplace_connection written for JIMMY, deleted in cleanup\n');
 
+// OUTCOME #1 V1 — buyer-facing identity facts are GOVERNED: the handler reads them from the DURABLE
+// canonical catalogue row of the owned asset (fail-closed 409 LISTING_FACTS_UNAVAILABLE otherwise).
+// Creepy's Development links point at rows that no longer exist, so transient canonical rows are
+// created here (both link ids) and deleted in cleanup.
+const { createCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
+const CREEPY_LINK_IDS = ['cv_1789188155734_itagfk', 'cv_1789271538761_1hsflc'];
+const CREEPY_GOVERNED = { title: 'creepy', issue: '1', year: '1964', publisher: 'Warren Publishing' };
+for (const id of CREEPY_LINK_IDS) await createCollectionItem({ principalId: JIMMY, id, assetCategory: 'comic', attributes: { ...CREEPY_GOVERNED } });
+console.log('  (test setup) transient governed canonical rows created for Creepy\'s links, deleted in cleanup\n');
+
 console.log('-- real success: valid token + gkAssetId + decisionEventId + LIST operatorActionEventId --\n');
 {
   fetchCalls.length = 0;
@@ -280,7 +290,9 @@ console.log('-- BUYER-FACING SANITATION: internal reasoning injected into the it
         operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID,
         outcomeIdempotencyKey: idempotencyKey,
         reason: injected,
-        claudeCheck: { flags: [`INTERNAL_FLAG_DIAG ${injected}`] },
+        // client-supplied identity/grade/title text is NOT authoritative — governed durable facts win
+        title: 'CLIENT_FORGED_TITLE_DO_NOT_USE', publisher: 'FORGED_PUBLISHER', grade: 'NM 9.8 FORGED_GRADE',
+        claudeCheck: { flags: [`INTERNAL_FLAG_DIAG ${injected}`], confidence: 'HIGH', suggestedListingTitle: 'AI_SUGGESTED_TITLE_DO_NOT_USE' },
         priceBands: { quick: 50, stretch: 70, market: 61.41, count: 4, source: 'INTERNAL_SOURCE_TOKEN_pc_sold' },
         keyIssue: 'First appearance of a test character',
       }),
@@ -289,15 +301,17 @@ console.log('-- BUYER-FACING SANITATION: internal reasoning injected into the it
     await handler(req, res);
     const body = lastAddFixedPriceItemBody;
     assertTrue(res.statusCode === 200 && body.includes('<AddFixedPriceItemRequest'), `[${label}] real handler reached the real AddFixedPriceItem construction (status ${res.statusCode})`);
-    const needles = [injected, ...injected.split(/[\n\r]+/).filter((x) => x.length > 6), 'INTERNAL_FLAG_DIAG', 'INTERNAL_SOURCE_TOKEN', 'SECRET_', 'INTERNAL_TEST_DO_NOT_SHOW'];
+    const needles = [injected, ...injected.split(/[\n\r]+/).filter((x) => x.length > 6), 'INTERNAL_FLAG_DIAG', 'INTERNAL_SOURCE_TOKEN', 'SECRET_', 'INTERNAL_TEST_DO_NOT_SHOW', 'CLIENT_FORGED_TITLE', 'FORGED_PUBLISHER', 'FORGED_GRADE', 'AI_SUGGESTED_TITLE'];
     const leaked = needles.filter((n) => body.includes(n) || body.includes(n.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')));
     assertTrue(leaked.length === 0, `[${label}] NO injected internal text in any buyer-facing field of the outbound packet${leaked.length ? ' — LEAKED: ' + JSON.stringify(leaked).slice(0, 160) : ''}`);
     assertTrue(!/<NOTES>|<strong>NOTES<\/strong>/.test(body), `[${label}] no AI-verification "NOTES" block`);
     // ordinary safe fields stay intact
-    assertTrue(body.includes('<Title>Creepy #1') && body.includes('Warren Publishing') && body.includes('<h2>Creepy #1</h2>'), `[${label}] ordinary title/publisher fields intact`);
-    assertTrue(body.includes('Grade: <strong>VG</strong>') && body.includes('Key Issue: First appearance of a test character'), `[${label}] grade + key issue intact`);
-    assertTrue(body.includes('Market value: $61.41') && !body.includes('Market value: $61.41 ('), `[${label}] market figure intact, pipeline source label dropped`);
-    assertTrue(body.includes('<StartPrice currencyID="USD">61.41</StartPrice>') && body.includes('<ItemSpecifics>'), `[${label}] price + item specifics intact`);
+    assertTrue(body.includes('<Title>Creepy #1 Warren Publishing 1964</Title>'), `[${label}] DETERMINISTIC governed title from the durable canonical row (not client text, not the AI-suggested title)`);
+    assertTrue(body.includes('<h2>Creepy #1</h2>') && body.includes('Warren Publishing · 1964'), `[${label}] governed identity facts in the description`);
+    assertTrue(body.includes('Condition: See photos for condition details.') && !body.includes('Grade:'), `[${label}] ungoverned (client/model) grade NOT published; fixed factual condition sentence used`);
+    assertTrue(!/Key Issue|Market value|MARKET DATA|Recent verified|DEMAND|CGC census|demand ·/.test(body), `[${label}] no key-issue claim, market-value, sold-sales, demand or census block`);
+    assertTrue(body.includes('<StartPrice currencyID="USD">61.41</StartPrice>') && body.includes('<Name>Issue Number</Name>') && body.includes('<Value>Creepy</Value>') && body.includes('<Name>Publication Year</Name>'), `[${label}] price intact; item specifics from governed facts (incl. issue + year)`);
+    assertTrue(body.includes('<ConditionID>4000</ConditionID>') && !body.includes('<ConditionID>2750</ConditionID>'), `[${label}] a raw copy does not inherit the 'Graded' ConditionID from a client/model grade string`);
     await cleanup(client, idempotencyKey);
   }
   console.log('  (test-artifact outcome_event rows deleted)\n');
@@ -330,8 +344,23 @@ console.log('-- BUYER-FACING SANITATION (bundle): per-book internal reasoning ne
   const leaked = ['INTERNAL_TEST_DO_NOT_SHOW', 'REFUSED because', 'SECRET_', 'INTERNAL_FLAG_DIAG', '<script>', '&lt;script&gt;'].filter((n) => body.includes(n));
   assertTrue(leaked.length === 0, `bundle: NO per-book internal reason / flag / id / script text in any buyer-facing bundle field${leaked.length ? ' — LEAKED: ' + JSON.stringify(leaked) : ''}`);
   assertTrue(body.includes('<h2>Sanitation Series — 2-Book Lot</h2>') && body.includes('<strong>Sanitation Series #1</strong>') && body.includes('<strong>Sanitation Series #2</strong>'), 'bundle: ordinary header + per-book title/issue lines intact');
-  assertTrue(body.includes('KEY: First appearance of Test Hero') && body.includes('(1975) — VF'), 'bundle: key note, year and grade intact');
+  assertTrue(!body.includes('KEY:') && !body.includes('First appearance of Test Hero') && body.includes('(1975)</li>') && !body.includes('— VF'), 'bundle: no unverified key-issue/grade claim per book; year intact');
+  assertTrue(!/combined market value|18% off/.test(body), 'bundle: no market-value pricing claim in buyer text');
   assertTrue(body.includes('<Title>Sanitation Series #1 #2 Lot'), 'bundle: ordinary bundle title intact');
+}
+
+console.log('-- GOVERNED FACTS fail-closed: no resolvable durable canonical row -> NOTHING reaches eBay --\n');
+{
+  await client.query(`DELETE FROM data1_dev.collection_item WHERE id = ANY($1) AND principal_id = $2`, [CREEPY_LINK_IDS, JIMMY]);
+  fetchCalls.length = 0; lastAddFixedPriceItemBody = '';
+  const res = mockRes();
+  await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body: baseItem({
+    gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID,
+    outcomeIdempotencyKey: `list-ebay-governed-failclosed-${Date.now()}`,
+  }) }, res);
+  assertTrue(res.statusCode === 409 && res.body?.error === 'LISTING_FACTS_UNAVAILABLE', `missing governed facts -> 409 LISTING_FACTS_UNAVAILABLE (got ${res.statusCode} ${res.body?.error})`);
+  assertTrue(!fetchCalls.includes('AddFixedPriceItem') && !fetchCalls.includes('UploadSiteHostedPictures') && lastAddFixedPriceItemBody === '', 'no picture upload and no AddFixedPriceItem attempted — never lists on client-supplied facts');
+  for (const id of CREEPY_LINK_IDS) await createCollectionItem({ principalId: JIMMY, id, assetCategory: 'comic', attributes: { ...CREEPY_GOVERNED } });
 }
 
 console.log('-- PRE-PUBLISH HARDENING: attaching to the HOLD row (not LIST) must be rejected BEFORE any eBay call is ever made --\n');
@@ -478,6 +507,7 @@ await client.query('DELETE FROM data1_dev.inventory_current_state WHERE gk_asset
 await client.query('DELETE FROM data1_dev.inventory_transition_event WHERE gk_asset_id = $1', [CREEPY_ASSET_ID]);
 await client.query(`DELETE FROM data1_dev.idempotency_key WHERE operation = 'enrollAsset' AND idempotency_key = $1`, [inventoryEnrollKey]);
 console.log('  (test cleanup) Creepy restored to UNMANAGED in Inventory Authority');
+await client.query(`DELETE FROM data1_dev.collection_item WHERE id = ANY($1) AND principal_id = $2`, [CREEPY_LINK_IDS, JIMMY]);
 await closeInventoryPool();
 
 await client.query(`DELETE FROM data1_dev.marketplace_connection WHERE principal_id = $1 AND provider = 'EBAY'`, [JIMMY]);

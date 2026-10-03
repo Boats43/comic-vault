@@ -37,7 +37,8 @@
 // api/enrich.js's finalizeResponse already uses at enrich time.
 import { deriveLocks } from "../src/lib/responseContract.js";
 import { deriveActionAuthority } from "../src/lib/actionAuthority.js";
-import { toBuyerSafeListingFacts } from "../src/lib/buyerSafeListingCopy.js";
+import { toBuyerSafeListingFacts, buildGovernedListingTitle } from "../src/lib/buyerSafeListingCopy.js";
+import { getMyCollectionItem, NotFoundError as CollectionNotFoundError } from "../src/modules/collection/index.js";
 
 // Outcome #1 — OPTIONAL, ADDITIVE GrailKey linkage. Neither import below
 // changes this endpoint's existing, still-mandatory behavior for a
@@ -47,7 +48,7 @@ import { toBuyerSafeListingFacts } from "../src/lib/buyerSafeListingCopy.js";
 // endpoint has no mandatory GrailKey auth today, and this dispatch does
 // not add one).
 import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
-import { recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
+import { recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, getCanonicalCollectionItemIdForAsset, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
 import { attemptListedOutcome } from "../src/lib/marketplaceOutcomeBridge.js";
 import { assertListingAuthorized, ListingPreflightFailedError } from "../src/lib/inventoryListingPreflight.js";
 // GK-265 PHASE 3 -- principal-scoped eBay seller execution. Every real
@@ -112,31 +113,11 @@ const variantForTitle = (variant) => {
   return v;
 };
 
-const buildTitle = (item) => {
-  // T1-2: Use Claude's suggested title if HIGH confidence
-  if (item.claudeCheck?.confidence === 'HIGH' &&
-      item.claudeCheck?.suggestedListingTitle) {
-    return item.claudeCheck.suggestedListingTitle.substring(0, 80);
-  }
-
-  // Fallback to existing logic
-  const gradeStr =
-    item.isGraded === true && item.numericGrade != null
-      ? `CGC ${item.numericGrade}`
-      : item.grade || "";
-  const parts = [
-    item.title,
-    item.issue ? `#${item.issue}` : null,
-    variantForTitle(item.variant),
-    gradeStr,
-    item.publisher,
-    item.year,
-    showKeyIssue(item.keyIssue) ? "KEY" : null,
-  ].filter(Boolean);
-  const joined = parts.join(" ").trim();
-  // eBay title hard limit: 80 chars.
-  return joined.length > 80 ? joined.slice(0, 80) : joined || "Comic Book";
-};
+// OUTCOME #1 V1 — the eBay title is built DETERMINISTICALLY from governed
+// catalogue facts only (src/lib/buyerSafeListingCopy.js). The model-suggested
+// claudeCheck.suggestedListingTitle is NOT authoritative public copy and is never
+// used; there is no key-issue marketing token and no unverified grade.
+const buildTitle = (rawItem) => buildGovernedListingTitle(toBuyerSafeListingFacts(rawItem));
 
 const eraFromYear = (y) => {
   const n = parseInt(y, 10);
@@ -170,11 +151,9 @@ const extractCharacter = (item) => {
   );
 };
 
-const buildBundleTitle = (items) => {
-  const issues = items
-    .map((it) => it.issue)
-    .filter(Boolean)
-    .map((v) => `#${v}`);
+const buildBundleTitle = (rawItems) => {
+  const items = rawItems.map((it) => toBuyerSafeListingFacts(it));
+  const issues = items.map((it) => it.issue).filter(Boolean).map((v) => `#${v}`);
   const titles = [...new Set(items.map((it) => it.title).filter(Boolean))];
   const series = titles.length === 1 ? titles[0] : "Comic";
   const variants = [...new Set(items.map((it) => variantForTitle(it.variant)).filter(Boolean))];
@@ -184,22 +163,14 @@ const buildBundleTitle = (items) => {
   const publishers = [...new Set(items.map((it) => it.publisher).filter(Boolean))];
   const pub = publishers.length === 1 ? publishers[0] : "";
   const era = minYear ? eraFromYear(minYear) : "";
-  const parts = [
-    series,
-    issues.join(" "),
-    variantStr,
-    "Lot",
-    minYear || "",
-    pub,
-    era,
-  ].filter(Boolean);
+  const parts = [series, issues.join(" "), variantStr, "Lot", minYear || "", pub, era].filter(Boolean);
   const joined = parts.join(" ").trim();
   return joined.length > 80 ? joined.slice(0, 80).trim() : joined || "Comic Book Lot";
 };
 
 const buildBundleDescription = (items) => {
   const lines = [];
-  const titles = [...new Set(items.map((it) => it.title).filter(Boolean))];
+  const titles = [...new Set(items.map((it) => toBuyerSafeListingFacts(it).title).filter(Boolean))];
   const header =
     titles.length === 1
       ? `${titles[0]} — ${items.length}-Book Lot`
@@ -212,19 +183,15 @@ const buildBundleDescription = (items) => {
   // routing rationale) is ever in scope here.
   for (const rawIt of items) {
     const it = toBuyerSafeListingFacts(rawIt);
-    const gradeStr =
-      it.isGraded === true && it.numericGrade != null
-        ? `CGC ${it.numericGrade}`
-        : it.grade || "Raw";
     const issuePart = it.issue ? ` #${it.issue}` : "";
     const yearPart = it.year ? ` (${it.year})` : "";
-    const keyPart = it.keyIssue ? ` — KEY: ${xmlEscape(it.keyIssue)}` : "";
+    const gradePart = it.publicGrade ? ` — ${xmlEscape(it.publicGrade)}` : "";
     lines.push(
-      `<li><strong>${xmlEscape(it.title || "Comic")}${issuePart}</strong>${yearPart} — ${xmlEscape(gradeStr)}${keyPart}</li>`
+      `<li><strong>${xmlEscape(it.title || "Comic")}${issuePart}</strong>${yearPart}${gradePart}</li>`
     );
   }
   lines.push("</ul>");
-  lines.push("<p>Bundle priced at 18% off combined market value.</p>");
+  lines.push("<p>See photos for condition details.</p>");
   lines.push("<p>Ships via USPS Media Mail. 30-day returns accepted.</p>");
   return lines.join("\n");
 };
@@ -286,83 +253,26 @@ ${pictureBlock}    <ShipToLocations>US</ShipToLocations>
 };
 
 const buildDescription = (rawItem) => {
-  // BUYER-FACING COPY: built ONLY from the explicit buyer-safe projection. The raw
-  // item (reason, claudeCheck flags, decision/contract, pricing-source labels,
-  // IDs) is deliberately out of scope for this function.
+  // BUYER-FACING COPY (Outcome #1 V1): built ONLY from the explicit buyer-safe
+  // projection of GOVERNED catalogue facts. Allowed: identity facts, a GOVERNED
+  // public grade, the fixed condition/photo sentence, approved shipping/returns.
+  // NOT allowed (and structurally unreachable here): reason / model rationale /
+  // decision rationale / IDs / authority status / market-value, "recent verified
+  // sales", demand, census, pricing-source labels / promotional claims.
   const f = toBuyerSafeListingFacts(rawItem);
   const lines = [];
 
-  if (f.title) lines.push(`<h2>${xmlEscape(f.title)}</h2>`);
+  if (f.title) lines.push(`<h2>${xmlEscape(f.title)}${f.issue ? ` #${xmlEscape(f.issue)}` : ""}</h2>`);
   const meta = [f.publisher, f.year].filter(Boolean).join(" · ");
   if (meta) lines.push(`<p><strong>${xmlEscape(meta)}</strong></p>`);
+  if (f.variant) lines.push(`<p>Variant: ${xmlEscape(f.variant)}</p>`);
 
-  if (f.grade) {
-    const gradeLabel =
-      f.isGraded === true && f.numericGrade != null
-        ? `CGC ${xmlEscape(f.grade)}`
-        : xmlEscape(f.grade);
-    lines.push(`<p>Grade: <strong>${gradeLabel}</strong></p>`);
+  if (f.publicGrade) {
+    lines.push(`<p>Grade: <strong>${xmlEscape(f.publicGrade)}</strong></p>`);
+  } else {
+    lines.push(`<p>Condition: See photos for condition details.</p>`);
   }
 
-  if (f.keyIssue) lines.push(`<p>Key Issue: ${xmlEscape(f.keyIssue)}</p>`);
-
-  // T2-2: Story (expanded from 500 to 1000 chars)
-  if (f.story) {
-    const storyText = String(f.story).substring(0, 1000);
-    lines.push(`<p><strong>STORY</strong></p>`);
-    lines.push(`<div>${storyText}</div>`);
-  }
-
-  // T2-2: Creators section
-  if (f.creators.length > 0) {
-    const creatorList = f.creators
-      .map(p => `${xmlEscape(p.name)}${p.role ? ` (${xmlEscape(p.role)})` : ''}`)
-      .join(', ');
-    lines.push(`<p><strong>CREATORS</strong></p>`);
-    lines.push(`<p>${creatorList}</p>`);
-  }
-
-  // T2-2: Characters section
-  if (f.characters.length > 0) {
-    const characterList = f.characters.slice(0, 5).map(c => xmlEscape(c)).join(', ');
-    lines.push(`<p><strong>CHARACTERS</strong></p>`);
-    lines.push(`<p>${characterList}</p>`);
-  }
-
-  // Legacy first appearance field (keep if no characterCredits)
-  if (f.firstAppearance.length > 0 && f.characters.length === 0) {
-    lines.push(`<p><strong>First appearance:</strong> ${xmlEscape(f.firstAppearance.join(", "))}</p>`);
-  }
-
-  // T1-3: Market proof section (figures only; the pipeline's source label is not projected)
-  if (f.hasMarketBlock) {
-    lines.push(`<p><strong>MARKET DATA</strong></p>`);
-    if (f.market) {
-      lines.push(
-        `<p>Recent verified sales: $${f.market.quick.toFixed(2)}–$${f.market.stretch.toFixed(2)} ` +
-        `(${f.market.count} comps)</p>`
-      );
-      lines.push(`<p>Market value: $${f.market.market.toFixed(2)}</p>`);
-    }
-    if (f.popTotal > 0) {
-      lines.push(`<p>CGC census: ${f.popTotal} copies graded</p>`);
-    }
-  }
-
-  // T2-2: Demand section
-  if (f.demand) {
-    const ds = f.demand;
-    const demandEmoji = ds.demandLevel === 'HIGH' ? '🔥' : ds.demandLevel === 'LOW' ? '📉' : '➡️';
-    const trendIcon = ds.trend === 'RISING' ? '↑' : ds.trend === 'DECLINING' ? '↓' : '→';
-    lines.push(`<p><strong>DEMAND</strong></p>`);
-    lines.push(
-      `<p>${demandEmoji} ${xmlEscape(ds.demandLevel || 'NORMAL')} demand · ` +
-      `${trendIcon} ${xmlEscape(ds.trend || 'FLAT')} price trend · ` +
-      `${xmlEscape(ds.liquidity || 'NORMAL')} mover</p>`
-    );
-  }
-
-  // T1-4: Enhanced pack details footer
   lines.push("<p><strong>SHIPPING</strong></p>");
   lines.push(
     "<p>Packed in Gemini mailer with cardboard backing and top loader for protection. " +
@@ -473,7 +383,9 @@ const buildXml = (item, pictureUrls) => {
   if (price == null || price <= 0) {
     throw new Error("No valid price on item — cannot list");
   }
-  const conditionId = conditionIdFor(item.grade);
+  // Condition is governed too: 2750 (Graded) ONLY for an operator-confirmed slab; a raw copy never
+  // inherits 'Graded' from a legacy/model grade string.
+  const conditionId = conditionIdFor(toBuyerSafeListingFacts(item).isSlab ? 'slab' : null);
 
   // T2-1: Multi-image support
   const pictureBlock = (pictureUrls && pictureUrls.length > 0)
@@ -497,50 +409,16 @@ ${pictureUrls.map(url => `      <PictureURL>${xmlEscape(url)}</PictureURL>`).joi
   const autoAcceptPrice = (price * 0.95).toFixed(2);
   const minBestOfferPrice = (price * 0.75).toFixed(2);
 
-  // T1-1: Item Specifics
-  const character = extractCharacter(item);
+  // T1-1: Item Specifics — explicit GOVERNED catalogue facts only; unknown -> omitted
+  // (no 'Unknown' placeholders, no guessed values).
+  const sf = toBuyerSafeListingFacts(item);
+  const spec = (name, value) => (value ? `      <NameValueList>
+        <Name>${xmlEscape(name)}</Name>
+        <Value>${xmlEscape(value)}</Value>
+      </NameValueList>
+` : '');
   const itemSpecifics = `    <ItemSpecifics>
-      <NameValueList>
-        <Name>Publisher</Name>
-        <Value>${xmlEscape(item.publisher || 'Unknown')}</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>Series Title</Name>
-        <Value>${xmlEscape(item.title || 'Unknown')}</Value>
-      </NameValueList>
-${item.issue ? `      <NameValueList>
-        <Name>Issue Number</Name>
-        <Value>${xmlEscape(item.issue)}</Value>
-      </NameValueList>
-` : ''}      <NameValueList>
-        <Name>Era</Name>
-        <Value>${xmlEscape(getEra(item.year))}</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>Grade Certification</Name>
-        <Value>${xmlEscape(item.slabNumber ? (item.slabCompany || 'CGC') : 'Raw/Ungraded')}</Value>
-      </NameValueList>
-${item.numericGrade ? `      <NameValueList>
-        <Name>Numeric Grade</Name>
-        <Value>${xmlEscape(item.numericGrade)}</Value>
-      </NameValueList>
-` : ''}      <NameValueList>
-        <Name>Format</Name>
-        <Value>${xmlEscape(item.isTPB ? 'Trade Paperback' : item.isMagazine ? 'Magazine' : 'Single Issue')}</Value>
-      </NameValueList>
-      <NameValueList>
-        <Name>Language</Name>
-        <Value>English</Value>
-      </NameValueList>
-${character ? `      <NameValueList>
-        <Name>Character</Name>
-        <Value>${xmlEscape(character)}</Value>
-      </NameValueList>
-` : ''}${item.variant ? `      <NameValueList>
-        <Name>Variant</Name>
-        <Value>${xmlEscape(item.variant)}</Value>
-      </NameValueList>
-` : ''}    </ItemSpecifics>
+${spec('Publisher', sf.publisher)}${spec('Series Title', sf.title)}${spec('Issue Number', sf.issue)}${spec('Publication Year', sf.year)}${spec('Era', sf.year ? getEra(sf.year) : '')}${spec('Grade Certification', sf.isSlab ? 'CGC' : 'Raw/Ungraded')}${spec('Numeric Grade', sf.isSlab && sf.numericGrade != null ? String(sf.numericGrade) : '')}${spec('Format', item.isTPB ? 'Trade Paperback' : item.isMagazine ? 'Magazine' : 'Single Issue')}${spec('Language', 'English')}${spec('Variant', sf.variant)}    </ItemSpecifics>
 `;
 
   return `<?xml version="1.0" encoding="utf-8"?>
@@ -738,6 +616,11 @@ const respondEbayTokenError = (res, e, context) => {
   console.error("[ebay] unexpected token-resolution error:", e?.message || e);
   res.status(500).json({ error: "Internal error" });
 };
+
+// Outcome #1 readiness: lets a dry-run construct the REAL outbound AddFixedPriceItem
+// XML for review WITHOUT invoking the handler (no auth, no eBay call, no DB write).
+// The handler calls these exact same builders.
+export const __dryRunBuildListingXml = (item, pictureUrls) => buildXml(item, pictureUrls);
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -1070,6 +953,32 @@ export default async function handler(req, res) {
       res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Inventory Authority check failed unexpectedly.' });
       return;
     }
+
+    // OUTCOME #1 V1 — GOVERNED buyer-facing facts. The listing's identity/grade
+    // facts come from the DURABLE canonical catalogue row of the OWNED asset
+    // (server-held, principal-scoped), never from client-sent title/issue/grade
+    // text. Fail-closed BEFORE any eBay call if they cannot be resolved. Price is
+    // NOT touched here (pricing authority is unchanged).
+    let governedFacts;
+    try {
+      const canonicalId = await getCanonicalCollectionItemIdForAsset({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId });
+      if (!canonicalId) throw new CollectionNotFoundError('asset has no canonical catalogue row');
+      const row = await getMyCollectionItem({ principalId: grailkeyPrincipalId, id: canonicalId });
+      governedFacts = row?.attributes || null;
+      if (!governedFacts || !governedFacts.title) throw new CollectionNotFoundError('canonical row has no title');
+    } catch (e) {
+      console.error('[ebay] governed listing facts unavailable — aborting before any eBay call:', e?.name || e);
+      res.status(409).json({ error: 'LISTING_FACTS_UNAVAILABLE', message: 'The governed catalogue facts for this asset could not be resolved, so nothing was listed.' });
+      return;
+    }
+    // Replace ONLY the buyer-facing identity/grade inputs the builders read with
+    // the governed durable values; every other request field is untouched.
+    Object.assign(item, {
+      title: governedFacts.title, issue: governedFacts.issue ?? null, year: governedFacts.year ?? null,
+      publisher: governedFacts.publisher ?? null, variant: governedFacts.variant ?? null,
+      gradeAuthority: governedFacts.gradeAuthority ?? null, operatorGrade: governedFacts.operatorGrade ?? null,
+      operatorIsGraded: governedFacts.operatorIsGraded ?? null, operatorGradeNumeric: governedFacts.operatorGradeNumeric ?? null,
+    });
 
     // GrailKey Directive Z (GK-95/96) — the transaction-authority gate.
     // Independently RE-DERIVED from raw evidence fields (never a client-

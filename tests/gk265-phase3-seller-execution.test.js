@@ -150,9 +150,10 @@ global.fetch = async (url, opts = {}) => {
 const { issueToken } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'auth', 'token.js')).href);
 const { upsertMarketplaceConnection } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'marketplace', 'index.js')).href);
 const { CONNECT_SCOPES } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'ebayUserOAuth.js')).href);
-const { createPhysicalAsset, recordDecision, recordOperatorAction, recordOutcomeEvent } =
+const { createPhysicalAsset, recordDecision, recordOperatorAction, recordOutcomeEvent, linkCollectionItem } =
   await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
 const { enrollAsset } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'inventory', 'index.js')).href);
+const { createCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
 
 const listHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
 const delistHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'delist-ebay.js')).href)).default;
@@ -177,6 +178,10 @@ async function mintListableAsset(principalId, label) {
     idempotencyKey: `${n}-mint`,
   });
   await enrollAsset({ principalId, gkAssetId, idempotencyKey: `${n}-enroll` });
+  // OUTCOME #1 V1 — governed buyer-facing facts come from the owned asset's durable canonical catalogue row.
+  const canonicalId = `cv_${n}`;
+  await createCollectionItem({ principalId, id: canonicalId, assetCategory: 'comic', attributes: { title: 'GK-265 Test Comic', publisher: 'Test Publisher', year: '1990' } });
+  await linkCollectionItem({ principalId, collectionItemId: canonicalId, gkAssetId, idempotencyKey: `${n}-link` });
   const { decisionEventId } = await recordDecision({
     principalId, gkAssetId, recommendation: 'LIST_NOW', idempotencyKey: `${n}-decision`,
   });

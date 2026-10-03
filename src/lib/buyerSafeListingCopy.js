@@ -1,57 +1,90 @@
 // src/lib/buyerSafeListingCopy.js — INTERNAL DECISION REASONING != BUYER-FACING
-// MARKETPLACE COPY.
+// MARKETPLACE COPY.  (Outcome #1 V1 policy applied.)
 //
-// The ONE explicit projection from a catalogue item to the facts a marketplace
-// description may be built from. It selects named fields only — it NEVER
-// spreads the item, the decision, or the contract — and the description
-// builders (api/list-ebay.js single + bundle) receive ONLY this projection, so
-// they structurally cannot read:
+// The ONE explicit projection from GOVERNED catalogue facts to the facts a
+// marketplace listing may be built from. It selects named fields only — it
+// NEVER spreads the item, the decision, or the contract — and the listing
+// builders (api/list-ebay.js title, description, item specifics) receive ONLY
+// this projection, so they structurally cannot read:
 //   item.reason (grader/model rationale), decision/contract reasoning,
-//   claudeCheck.flags (AI-verification diagnostics), priceBands.source and other
-//   pricing-pipeline labels, internal IDs, error text, authority explanations.
+//   claudeCheck (flags AND the model-suggested title), pricing evidence
+//   (priceBands / sold comps / demand / census), internal IDs, error text,
+//   authority explanations, unverified model grades, free-text key-issue claims.
 // Those stay in GrailKey (operator UI / durable history); they are not deleted,
 // merely not projectable into public copy.
 //
-// Buyer-facing copy may come only from: explicit durable catalogue facts, an
+// Buyer-facing copy may come only from: explicit governed catalogue facts, an
 // explicit operator-entered public note (none exists today — omitted rather than
-// invented), or deliberately generated public copy with known provenance.
+// invented), or deliberately generated public copy with known provenance and an
+// explicit public-copy contract (none today).
+//
+// PUBLIC GRADE: a grade is projected ONLY when governed — an operator-confirmed
+// grade (gradeAuthority === 'OPERATOR_CONFIRMED'). A legacy client/model-predicted
+// grade (modelPredictedGrade / catalogue `grade` without operator authority) is
+// NEVER published as if verified; the listing then carries the fixed factual
+// condition sentence instead.
 
-const str = (v) => (typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : ''));
+const str = (v) => (typeof v === 'string' ? v.trim() : (typeof v === 'number' && Number.isFinite(v) ? String(v) : ''));
 
-// Matches the existing showKeyIssue() semantics (kept identical on purpose).
-export const isShowableKeyIssue = (k) => {
-  if (!k || typeof k !== 'string') return false;
-  const s = k.toLowerCase().trim();
-  if (['no', 'n/a', 'none', 'false', 'not a key', 'non-key', 'non key', 'not key'].some((x) => s.includes(x))) return false;
-  return s.length > 2;
-};
+const SMALL_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'vs']);
 
-export function toBuyerSafeListingFacts(item) {
-  const it = item && typeof item === 'object' ? item : {};
-  const cv = it.comicVine && typeof it.comicVine === 'object' ? it.comicVine : {};
-  const pb = it.priceBands && typeof it.priceBands === 'object' ? it.priceBands : null;
-  const ds = it.demandSignals && typeof it.demandSignals === 'object' ? it.demandSignals : null;
+// Deterministic formatting only (never a content change): an all-lowercase title
+// (a common OCR/Vision artifact) is Title-Cased; a title that already carries
+// any capital letter is preserved verbatim.
+export function formatPublicTitle(title) {
+  const t = str(title).replace(/\s+/g, ' ');
+  if (!t) return '';
+  if (t !== t.toLowerCase()) return t;
+  return t.split(' ').map((w, i) => (i > 0 && SMALL_WORDS.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(' ');
+}
+
+const NO_TITLE_VARIANTS = ['corner box', 'masterpieces', 'design variant', 'cover a', 'cover b', 'cover c', 'cover d', 'headshot'];
+export function variantForPublicTitle(variant) {
+  const v = str(variant);
+  if (!v) return '';
+  if (NO_TITLE_VARIANTS.some((nv) => v.toLowerCase().includes(nv))) return '';
+  return v;
+}
+
+// Governed public grade label, or '' when no governed grade exists.
+export function governedPublicGrade(attrs) {
+  const a = attrs && typeof attrs === 'object' ? attrs : {};
+  if (a.gradeAuthority !== 'OPERATOR_CONFIRMED') return '';
+  const g = str(a.operatorGrade);
+  if (!g) return '';
+  if (a.operatorIsGraded === true && a.operatorGradeNumeric != null && Number.isFinite(Number(a.operatorGradeNumeric))) {
+    return `CGC ${Number(a.operatorGradeNumeric)}`;
+  }
+  return g;
+}
+
+export function toBuyerSafeListingFacts(governedItem) {
+  const it = governedItem && typeof governedItem === 'object' ? governedItem : {};
+  const publicGrade = governedPublicGrade(it);
   return Object.freeze({
-    title: str(it.title),
-    issue: str(it.issue),
+    title: formatPublicTitle(it.title),
+    issue: str(it.issue).replace(/^#\s*/, ''),
     year: str(it.year),
     publisher: str(it.publisher),
-    grade: str(it.grade),
-    isGraded: it.isGraded === true,
-    numericGrade: it.numericGrade ?? null,
-    keyIssue: isShowableKeyIssue(it.keyIssue) ? it.keyIssue : '',
-    story: typeof cv.description === 'string' ? cv.description : '',
-    creators: Array.isArray(cv.personCredits)
-      ? cv.personCredits.map((p) => ({ name: str(p?.name), role: str(p?.role) })).filter((p) => p.name) : [],
-    characters: Array.isArray(cv.characterCredits)
-      ? cv.characterCredits.map((c) => str(c?.name)).filter(Boolean) : [],
-    firstAppearance: Array.isArray(cv.firstAppearanceCharacters)
-      ? cv.firstAppearanceCharacters.map(str).filter(Boolean) : [],
-    // Market figures only — the pipeline's source/label tokens are NOT projected.
-    market: pb && pb.quick && pb.stretch && pb.market
-      ? { quick: Number(pb.quick), stretch: Number(pb.stretch), market: Number(pb.market), count: Number(pb.count) || 0 } : null,
-    hasMarketBlock: !!pb,
-    popTotal: Number(it.pop?.total) > 0 ? Number(it.pop.total) : 0,
-    demand: ds ? { demandLevel: str(ds.demandLevel), trend: str(ds.trend), liquidity: str(ds.liquidity) } : null,
+    variant: str(it.variant),
+    publicGrade,
+    isSlab: it.operatorIsGraded === true && publicGrade.startsWith('CGC '),
+    numericGrade: publicGrade.startsWith('CGC ') ? Number(publicGrade.slice(4)) : null,
   });
+}
+
+// Deterministic eBay title from governed facts ONLY (<= 80 chars). No model
+// suggestion, no key-issue marketing phrase, no unverified grade.
+export function buildGovernedListingTitle(facts) {
+  const f = facts || {};
+  const parts = [
+    f.title,
+    f.issue ? `#${f.issue}` : '',
+    variantForPublicTitle(f.variant),
+    f.publicGrade,
+    f.publisher,
+    f.year,
+  ].filter(Boolean);
+  const joined = parts.join(' ').trim();
+  return joined.length > 80 ? joined.slice(0, 80).trim() : (joined || 'Comic Book');
 }
