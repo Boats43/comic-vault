@@ -413,7 +413,8 @@ console.log('\nFixture 9: correction failure — recoverable / non-actionable\n'
   assertTrue(fnStart > -1 && fnEnd > fnStart, 'located submitManualCorrection function body in current source');
   const fnBody = src.slice(fnStart, fnEnd);
 
-  const fetchIdx = fnBody.indexOf('const enrichRes = await fetch("/api/enrich"');
+  // AUTH RECOVERY (GK-268 addendum): the call site is now apiFetch (401 -> session cleared), same position.
+  const fetchIdx = fnBody.indexOf('const enrichRes = await apiFetch("/api/enrich"');
   const pendingIdx = fnBody.indexOf("listingHardLockReason: 'correction-pending'");
   const buildCorrectedIdx = fnBody.indexOf('finalUpdated = buildCorrectedCatalogueItem(item, enrichData);');
   assertTrue(pendingIdx > -1 && fetchIdx > pendingIdx, 'MIRRORED: within submitManualCorrection, the pending lock is written strictly BEFORE the /api/enrich fetch');

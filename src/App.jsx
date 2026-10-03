@@ -28,7 +28,7 @@ import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE, SCAN_OWNERSHIP_MODE, wasSupersededByCorrection, logStaleScanResponse } from "./lib/scanOwnership.js";
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
-import { isAuthenticated, clearSession, getSession, authFetch } from "./lib/grailkeySession.js";
+import { isAuthenticated, clearSession, getSession, authFetch, apiFetch } from "./lib/grailkeySession.js";
 import { fetchServerCollection, deleteServerCollectionItem } from "./lib/collectionSync.js";
 import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
 import { appendPhysicalMediaEvidence, getOrCreateEvidenceIdempotencyKey, retireEvidenceIdempotencyKey, retryPendingPhysicalMediaAppends } from "./lib/physicalMediaAppend.js";
@@ -3141,7 +3141,7 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude, onClaudeCardCh
     setAiLoading(true);
     setAiResponse(null);
     try {
-      const res = await fetch("/api/chat", {
+      const res = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({ message: query, collection: items, history: [], buyerSessions: getSessionSummary() }),
@@ -9875,7 +9875,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
     if (booted || catalogue.length === 0) return;
     setBooted(true);
     setSending(true);
-    fetch("/api/chat", {
+    apiFetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({
@@ -9942,7 +9942,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
     setHistory(newHistory);
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({
@@ -11083,7 +11083,7 @@ function WatchMode({ onStop }) {
             const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.85));
             if (!blob) return;
             const b64 = await fileToBase64(blob);
-            const res = await fetch("/api/grade", {
+            const res = await apiFetch("/api/grade", {
               method: "POST",
               headers: { "Content-Type": "application/json", ...getVaultHeaders() },
               body: JSON.stringify({ images: [b64], source: 'watch', voiceContext: watchContextRef.current || undefined }),
@@ -11111,7 +11111,7 @@ function WatchMode({ onStop }) {
             }
             setResult({ ...data, issue: issueNum, image: b64, _enriching: true });
 
-            fetch("/api/enrich", {
+            apiFetch("/api/enrich", {
               method: "POST",
               headers: { "Content-Type": "application/json", ...getVaultHeaders() },
               body: JSON.stringify({
@@ -11522,12 +11522,12 @@ export default function App() {
     // valid session always exists on every render that reaches here.
     if (!isAuthenticated()) return;
 
-    fetch('/api/grade', {
+    apiFetch('/api/grade', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getVaultHeaders() },
       body: JSON.stringify({ warmup: true })
     }).catch(() => {});
-    fetch('/api/enrich', {
+    apiFetch('/api/enrich', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getVaultHeaders() },
       body: JSON.stringify({ warmup: true })
@@ -11722,7 +11722,7 @@ export default function App() {
         active++;
         const controller = new AbortController();
         autoRefreshAbortersRef.current.add(controller);
-        fetch("/api/enrich", {
+        apiFetch("/api/enrich", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify({
@@ -12310,7 +12310,7 @@ export default function App() {
         const gradeBody = buyerMode
           ? { images: [b64], source: 'watch', scanId }
           : { images: [b64], scanId };
-        const res = await fetch("/api/grade", {
+        const res = await apiFetch("/api/grade", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify(gradeBody),
@@ -12505,7 +12505,7 @@ export default function App() {
           collectionItemId: savedId, // GK-145 — null when not saved (buyer-mode preview / duplicate not yet confirmed), the item's own id otherwise
         };
         if (!buyerMode) enrichBody.images = [b64];
-        fetch("/api/enrich", {
+        apiFetch("/api/enrich", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify(enrichBody),
@@ -12954,7 +12954,7 @@ export default function App() {
     setResult(null);
     try {
       // Skip Vision entirely - go straight to enrich with barcode
-      const enrichRes = await fetch("/api/enrich", {
+      const enrichRes = await apiFetch("/api/enrich", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({
@@ -13021,7 +13021,7 @@ export default function App() {
         const rawB64 = await fileToBase64(file);
         const b64 = await makeThumbnail(rawB64, 1200, 0.85);
 
-        const res = await fetch("/api/grade", {
+        const res = await apiFetch("/api/grade", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify({ images: [b64] }),
@@ -13120,7 +13120,7 @@ export default function App() {
           }
           // Fire-and-forget enrichment — tracked via bulkEnrichProgress.
           bumpEnrichFired();
-          fetch("/api/enrich", {
+          apiFetch("/api/enrich", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify({
@@ -13534,7 +13534,7 @@ export default function App() {
       );
       if (choice === "1") {
         try {
-          const res = await fetch("/api/delist-ebay", {
+          const res = await apiFetch("/api/delist-ebay", {
             method: "POST",
             headers: { "Content-Type": "application/json", ...getVaultHeaders() },
             body: JSON.stringify({ ebayItemId: item.ebayItemId }),
@@ -13683,7 +13683,7 @@ export default function App() {
       // no GrailKey fields sent, listing proceeds unaffected.
     }
 
-    const res = await fetch("/api/list-ebay", {
+    const res = await apiFetch("/api/list-ebay", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -13811,7 +13811,7 @@ export default function App() {
       reason: it.reason,
       images: [getComicPhotos(it)[0]].filter(Boolean),
     }));
-    const res = await fetch("/api/list-ebay", {
+    const res = await apiFetch("/api/list-ebay", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({ bundle: true, items: payloadItems }),
@@ -13846,7 +13846,7 @@ export default function App() {
     if (!item.ebayItemId) {
       throw new Error("No eBay Item ID — cannot sync status");
     }
-    const res = await fetch("/api/list-ebay", {
+    const res = await apiFetch("/api/list-ebay", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({
@@ -13961,7 +13961,7 @@ export default function App() {
 
     let res;
     try {
-      res = await fetch("/api/enrich", {
+      res = await apiFetch("/api/enrich", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({
@@ -14411,7 +14411,7 @@ export default function App() {
 
     // Step 1: Re-grade with stored image
     // FIX 2: Force regrade bypasses grade lock (user explicitly requested re-identification)
-    const gradeRes = await fetch("/api/grade", {
+    const gradeRes = await apiFetch("/api/grade", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({
@@ -14440,7 +14440,7 @@ export default function App() {
     let enrichError = null;
 
     try {
-      const enrichRes = await fetch("/api/enrich", {
+      const enrichRes = await apiFetch("/api/enrich", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({
@@ -14750,11 +14750,16 @@ export default function App() {
     // hand-built payload the tests only mirror.
     const payload = buildManualCorrectionPayload(item, correctedValues, correctedFields, correctionOwnership.scanId);
 
-    const enrichRes = await fetch("/api/enrich", {
+    const enrichRes = await apiFetch("/api/enrich", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify(payload),
     });
+    if (enrichRes.status === 401) {
+      // apiFetch already cleared the session (login screen takes over). No
+      // correction was applied; do NOT mask auth expiry as a generic failure.
+      throw new Error('Your session expired — please sign in again, then retry.');
+    }
     if (!enrichRes.ok) {
       const errBody = await enrichRes.json().catch(() => ({}));
       throw new Error(errBody.error || `Correction failed: ${enrichRes.status}`);
@@ -14839,7 +14844,7 @@ export default function App() {
     // echoes existingGrade back unchanged (skipReason: 'grade_locked') —
     // the new photo is still appended to `images` below regardless of
     // whether the server skipped Vision.
-    const res = await fetch("/api/grade", {
+    const res = await apiFetch("/api/grade", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({
@@ -15018,7 +15023,7 @@ export default function App() {
     if (catalogue.length === 0) return;
     setAnalyzing(true);
     try {
-      const res = await fetch("/api/manage", {
+      const res = await apiFetch("/api/manage", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({ comics: catalogue }),
@@ -15393,7 +15398,7 @@ export default function App() {
                         setError(null);
                         setShowManualEntry(false);
                         try {
-                          const enrichRes = await fetch('/api/enrich', {
+                          const enrichRes = await apiFetch('/api/enrich', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', ...getVaultHeaders() },
                             body: JSON.stringify({
@@ -15606,7 +15611,7 @@ export default function App() {
                         const sameCopyOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'scan', itemId: existingId };
                         activeScanRef.current = sameCopyOwnership;
                         try {
-                          const res = await fetch("/api/enrich", {
+                          const res = await apiFetch("/api/enrich", {
                             method: "POST",
                             headers: { "Content-Type": "application/json", ...getVaultHeaders() },
                             body: JSON.stringify({
@@ -15745,7 +15750,7 @@ export default function App() {
                         const dupOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'scan', itemId: savedId };
                         activeScanRef.current = dupOwnership;
                         // Fire enrichment for the newly saved copy
-                        fetch("/api/enrich", {
+                        apiFetch("/api/enrich", {
                           method: "POST",
                           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
                           body: JSON.stringify({
@@ -15871,7 +15876,7 @@ export default function App() {
                         const dupOwnership = { scanId: mintScanId(), generation: nextGeneration(scanGenerationRef), kind: 'scan', itemId: savedId };
                         activeScanRef.current = dupOwnership;
                         // Fire enrichment for the newly saved copy
-                        fetch("/api/enrich", {
+                        apiFetch("/api/enrich", {
                           method: "POST",
                           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
                           body: JSON.stringify({

@@ -99,24 +99,69 @@ export function getPrincipalScope() {
   return (payload && typeof payload.principalId === 'string') ? payload.principalId : null;
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// AUTH RECOVERY (GK-268 addendum): SERVER 401 = AUTHENTICATION STATE INVALID.
+//
+// ONE auth-aware path for every authenticated client call:
+//   * the current Bearer token is injected (never silently omitted);
+//   * a locally-expired / missing session is NEVER sent as valid auth — the
+//     request is not made at all, the stale session is cleared (idempotent;
+//     fires the one 'grailkey:session-expired' listener -> login screen), and a
+//     synthetic 401 { error: 'AUTH_EXPIRED', authExpired: true } is returned;
+//   * an HTTP 401 clears the session ONLY IF the token that was sent is still
+//     the current one (a late 401 for an OLD token must not log out a session
+//     the user has since re-established — no login/logout loop);
+//   * 403/409/422/429/503/5xx and network errors NEVER clear the session
+//     (GK-279's 409 PHYSICAL_COPY_DECISION_REQUIRED and 503
+//     PHYSICAL_COPY_CANDIDATE_CHECK_UNAVAILABLE are control flow, not auth);
+//   * NOTHING is ever retried or replayed here — a failed mutating request is
+//     not re-sent (with or without Authorization); the user deliberately retries
+//     after signing in again. No refresh tokens, no silent re-auth.
+// ─────────────────────────────────────────────────────────────────────
+export const AUTH_EXPIRED_ERROR = 'AUTH_EXPIRED';
+
+function authExpiredResponse() {
+  return new Response(JSON.stringify({ error: AUTH_EXPIRED_ERROR, authExpired: true, message: 'Your session expired — please sign in again.' }), {
+    status: 401, headers: { 'Content-Type': 'application/json', 'x-grailkey-auth-expired': '1' },
+  });
+}
+
+export function isAuthExpiredResponse(res) {
+  return !!res && res.status === 401;
+}
+
+function currentToken() {
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+
+// Clears only when `sentToken` is still the session in storage.
+function clearSessionIfStillCurrent(sentToken) {
+  if (currentToken() === sentToken) clearSession();
+}
+
+// apiFetch — for authenticated app calls whose callers expect a Response (they
+// already branch on res.ok / res.status). Never returns null.
+export async function apiFetch(url, options = {}) {
+  const session = getSession(); // clears + emits when locally expired
+  if (!session) {
+    clearSession(); // idempotent; also syncs UI if storage was emptied elsewhere
+    return authExpiredResponse();
+  }
+  const headers = { ...(options.headers || {}), Authorization: `Bearer ${session.token}` };
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) clearSessionIfStillCurrent(session.token);
+  return res;
+}
+
 // authFetch — attaches the Bearer token to every call. Returns null (never
 // throws, never calls fetch) when there is no valid session, so callers can
 // treat "not logged in" and "logged out mid-request" identically without a
-// try/catch at every call site.
-//
-// GK-268 AUTH LAUNCH — a 401 response means the server rejected this exact
-// token (missing/invalid/expired/revoked epoch) regardless of what
-// getSession()'s own local expiry check believed a moment ago. Clearing
-// the session here (which fires 'grailkey:session-expired', see
-// clearSession() above) means every authFetch call site gets "exits stale
-// authenticated state" for free, with zero per-call-site code. The
-// response is still returned (never swallowed) so an existing caller's
-// own error handling/messaging is unaffected.
+// try/catch at every call site. Same 401 semantics as apiFetch.
 export async function authFetch(url, options = {}) {
   const session = getSession();
   if (!session) return null;
   const headers = { ...(options.headers || {}), Authorization: `Bearer ${session.token}` };
   const res = await fetch(url, { ...options, headers });
-  if (res.status === 401) clearSession();
+  if (res.status === 401) clearSessionIfStillCurrent(session.token);
   return res;
 }
