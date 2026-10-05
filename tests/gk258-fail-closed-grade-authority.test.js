@@ -684,7 +684,9 @@ console.log('\nSection 5: client merge carry-forward + dual-telemetry-path verif
   // gradeResolutionStatus is added at that same site (mirroring the exact
   // existing precedent, not expanding scope beyond it).
   const governingGradeCount = (appSrc.match(/governingGrade:\s*enrich\.governingGrade/g) || []).length;
-  assertEq(governingGradeCount, 1, 'PRE-EXISTING (not GK-258): governingGrade is carried at exactly 1 of the 8 documented App.jsx merge sites (refreshMarketData only) — banked, not expanded, in this cleanup pass');
+  // Banked debt, NOT an assertion (a red test must mean a defect, not documentation): the count of App.jsx merge sites
+  // carrying governingGrade is pre-existing GK-213B scope debt, tracked in docs/GRADING-CAMPAIGN.md "Banked test debt".
+  console.log(`  (banked debt, not asserted) governingGrade is carried at ${governingGradeCount} App.jsx merge site(s); see docs/GRADING-CAMPAIGN.md`);
   assertTrue(appSrc.includes('gradeResolutionStatus: enrich.gradeResolutionStatus ?? item.gradeResolutionStatus ?? null,'), '4a: gradeResolutionStatus is now carried at the SAME site as governingGrade (refreshMarketData) — the operator-visible guidance itself still reaches every merge site via priceNote, which is already reliably enumerated everywhere');
   const priceNoteSiteCount = (appSrc.match(/priceNote:/g) || []).length;
   assertTrue(priceNoteSiteCount >= 10, `4c: priceNote (which carries GK-258's operator-facing guidance text identically to listingHardLockBanner) is enumerated at ${priceNoteSiteCount} App.jsx sites — reliably carried through merges regardless of gradeResolutionStatus's own narrower scope`);

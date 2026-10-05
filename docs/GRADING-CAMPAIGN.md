@@ -86,3 +86,9 @@ Each example: `corpus_item_id`, `certifying_body`, `certified_grade`, `certifica
 KNOWN_CERTIFIED_GRADE is the best available anchor, NOT a physical constant (professional grading has inter-grader / re-submission variance). Calibration targets directional bias, band accuracy, stability, severe outliers and reproducibility, NOT zero numeric error against every slab label.
 
 Initial target about 10-20 examples: LOW 0.5-2.5; MID-LOW 3.0-4.5; MID 5.0-6.5; HIGH 7.0-8.5; VERY HIGH 9.0+. Current usable authoritative examples: ZERO.
+
+## Banked test debt
+
+- **gk258 merge-site coverage (GK-213B scope debt):** the old self-labelled PRE-EXISTING assertion expected `governingGrade` at exactly 1 of the 8 `App.jsx` merge sites; the count is now 8, so the stale expectation (not a defect) was removed from the executable assertions and the test only logs the count.
+- **Deleted non-discriminating assertions (mutation proof: they passed with and without the protected behavior):** see the commit message of the release-hygiene commit for the per-assertion coverage statement.
+- **COVERAGE LOSS (disclosed):** the GK-254 `ownedAssetAuthRequired` fail-closed branch inside `api/enrich.js` (owned flow, missing/invalid auth -> refusedToPrice) is no longer reachable over HTTP because the GK-269 access gate refuses first, so no test exercises that internal defense-in-depth branch.
