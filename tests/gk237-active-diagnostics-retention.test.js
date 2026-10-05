@@ -49,6 +49,7 @@
 // Invoke: node tests/gk237-active-diagnostics-retention.test.js
 
 import 'fake-indexeddb/auto';
+import './helpers/installBrowserSession.js';
 import { readFileSync } from 'node:fs';
 import { buildFixture } from '../src/lib/fixtureShape.js';
 import { mergeActivePoolSuspect } from '../src/lib/dataQualityGuard.js';

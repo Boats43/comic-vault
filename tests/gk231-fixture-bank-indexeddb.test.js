@@ -13,6 +13,7 @@
 // Invoke: node tests/gk231-fixture-bank-indexeddb.test.js
 
 import 'fake-indexeddb/auto';
+import './helpers/installBrowserSession.js';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { buildFixture } from '../src/lib/fixtureShape.js';
 
@@ -302,8 +303,8 @@ async function main() {
     const { getFixtureBankDiagnostics, putFixture: putFixtureForDiag } = await import(`../src/db.js?diag=${Date.now()}`);
     await putFixtureForDiag({ traceId: 'trace-diag-1', capturedAt: '2026-09-20T21:00:00.000Z' });
     const diag = await getFixtureBankDiagnostics();
-    assertEq(diag.dbName, 'comic-vault', 'diagnostics report the real DB name');
-    assertEq(diag.dbVersionOpened, 3, 'diagnostics report the real, currently-opened DB version');
+    assertEq(diag.dbName, 'comic-vault--p-test-principal-fixture', 'diagnostics report the real (principal-scoped) DB name');
+    assertEq(diag.dbVersionOpened, 4, 'diagnostics report the real, currently-opened DB version (4 since U4 GK-246; this assertion was stale at 3 before the principal-scoping change)');
     assertTrue(diag.objectStoreNames.includes('fixtureBank'), 'diagnostics report the real object store names, including fixtureBank');
     assertTrue(diag.objectStoreNames.includes('comics'), 'diagnostics report ALL real store names, not just the fixture one');
     assertTrue(diag.fixtureRecordCount >= 1, 'diagnostics report a real fixture record count');

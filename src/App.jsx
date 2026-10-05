@@ -28,7 +28,9 @@ import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE, SCAN_OWNERSHIP_MODE, wasSupersededByCorrection, logStaleScanResponse } from "./lib/scanOwnership.js";
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
-import { isAuthenticated, clearSession, getSession, authFetch, apiFetch } from "./lib/grailkeySession.js";
+import { isAuthenticated, clearSession, getSession, authFetch, apiFetch, getPrincipalScope } from "./lib/grailkeySession.js";
+import { scopedGet, scopedSet } from "./lib/principalStorage.js";
+import { autoClaimProvableLegacy, countUnclaimedLegacy, claimAllLegacy } from "./lib/legacyLocalClaim.js";
 import { fetchServerCollection, deleteServerCollectionItem } from "./lib/collectionSync.js";
 import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
 import { appendPhysicalMediaEvidence, getOrCreateEvidenceIdempotencyKey, retireEvidenceIdempotencyKey, retryPendingPhysicalMediaAppends } from "./lib/physicalMediaAppend.js";
@@ -2569,14 +2571,17 @@ export function ResultCard({ result, enriching }) {
 
 // Session logger — ephemeral buyer history in localStorage
 const SESSIONS_KEY = "cv_buyer_sessions";
-const getSessions = () => { try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) || "[]"); } catch { return []; } };
+// LIVE EXPOSURE CLOSURE (2026-10-04) — every user-owned localStorage key below
+// is principal-scoped (src/lib/principalStorage.js): no session -> empty reads,
+// refused writes; user B can never read or retry user A's buyer data.
+const getSessions = () => { try { return JSON.parse(scopedGet(SESSIONS_KEY) || "[]"); } catch { return []; } };
 const saveSession = (entry) => {
   const sessions = getSessions();
   // Preserve a caller-supplied ts (used as a stable lookup key by
   // recordActualPurchasePrice) instead of always minting a new one.
   sessions.push({ ...entry, ts: entry.ts || Date.now() });
   if (sessions.length > 100) sessions.splice(0, sessions.length - 100);
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  scopedSet(SESSIONS_KEY, JSON.stringify(sessions));
 };
 // Records what the operator actually paid, after the fact, without ever
 // overwriting the original recommendation (maxBuy/netProfit/decision/etc.
@@ -2590,7 +2595,7 @@ const recordActualPurchasePrice = (ts, actualPrice) => {
     actualPurchasePrice: actualPrice,
     actualPurchaseRecordedAt: Date.now(),
   };
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  scopedSet(SESSIONS_KEY, JSON.stringify(sessions));
   return true;
 };
 // GRAILKEY DURABLE BUYER DECISION LEDGER V1 — a client-minted correlation
@@ -2614,7 +2619,7 @@ const updateBuyerSessionSyncFields = (ts, patch) => {
   const idx = sessions.findIndex((s) => s.ts === ts);
   if (idx === -1) return;
   sessions[idx] = { ...sessions[idx], ...patch };
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+  scopedSet(SESSIONS_KEY, JSON.stringify(sessions));
 };
 
 // Local-first doctrine (same as Collection's persistCollectionItem): the
@@ -2689,20 +2694,20 @@ const DEFAULT_BUYER_SETTINGS = { whatnotFee: 10, supplies: 0.75, labor: 2.0, min
 const TRADE_PILES_KEY = "cv_trade_piles";
 const getTradePiles = () => {
   try {
-    return JSON.parse(localStorage.getItem(TRADE_PILES_KEY) || "[]");
+    return JSON.parse(scopedGet(TRADE_PILES_KEY) || "[]");
   } catch {
     return [];
   }
 };
 const saveTradePiles = (piles) => {
-  localStorage.setItem(TRADE_PILES_KEY, JSON.stringify(piles));
+  scopedSet(TRADE_PILES_KEY, JSON.stringify(piles));
 };
 
 // Listing Packets persistence (24h TTL)
 const LISTING_PACKETS_KEY = "cv_listing_packets";
 const getListingPackets = () => {
   try {
-    return JSON.parse(localStorage.getItem(LISTING_PACKETS_KEY) || "{}");
+    return JSON.parse(scopedGet(LISTING_PACKETS_KEY) || "{}");
   } catch {
     return {};
   }
@@ -2711,7 +2716,7 @@ const saveListingPacket = (itemId, channel, packet) => {
   const packets = getListingPackets();
   if (!packets[itemId]) packets[itemId] = {};
   packets[itemId][channel] = { packet, createdAt: Date.now() };
-  localStorage.setItem(LISTING_PACKETS_KEY, JSON.stringify(packets));
+  scopedSet(LISTING_PACKETS_KEY, JSON.stringify(packets));
 };
 const getStoredPacket = (itemId, channel) => {
   const packets = getListingPackets();
@@ -2724,7 +2729,7 @@ const getStoredPacket = (itemId, channel) => {
 
 const loadBuyerSettings = () => {
   try {
-    const raw = localStorage.getItem("cv_buyer_settings");
+    const raw = scopedGet("cv_buyer_settings");
     if (!raw) return { ...DEFAULT_BUYER_SETTINGS };
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_BUYER_SETTINGS, ...parsed };
@@ -2735,7 +2740,7 @@ const loadBuyerSettings = () => {
 
 function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, onLogSession, scanResult }) {
   const [bid, setBid] = useState("");
-  const [budget, setBudget] = useState(() => localStorage.getItem("cv_buyer_budget") || "");
+  const [budget, setBudget] = useState(() => scopedGet("cv_buyer_budget") || "");
   const [seeded, setSeeded] = useState(false);
   const [logged, setLogged] = useState(false);
   const [loggedTs, setLoggedTs] = useState(null);
@@ -2757,11 +2762,11 @@ function BidCalculator({ marketValue, detectedPrice, resultTitle, resultGrade, o
   }, [detectedPrice, seeded]);
 
   useEffect(() => {
-    if (budget) localStorage.setItem("cv_buyer_budget", budget);
+    if (budget) scopedSet("cv_buyer_budget", budget);
   }, [budget]);
 
   useEffect(() => {
-    localStorage.setItem("cv_buyer_settings", JSON.stringify(settings));
+    scopedSet("cv_buyer_settings", JSON.stringify(settings));
   }, [settings]);
 
   const bidNum = parseFloat(bid);
@@ -3416,8 +3421,8 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
   // Track collection changes for backup reminder
   useEffect(() => {
     if (items.length === 0) return;
-    const lastBackup = localStorage.getItem("cv_last_backup_date");
-    const lastCount = parseInt(localStorage.getItem("cv_last_backup_count") || "0", 10);
+    const lastBackup = scopedGet("cv_last_backup_date");
+    const lastCount = parseInt(scopedGet("cv_last_backup_count") || "0", 10);
     if (!lastBackup || items.length !== lastCount) {
       setBackupBanner(true);
     }
@@ -3561,8 +3566,8 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
     a.download = `comic-vault-backup-${date}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    localStorage.setItem("cv_last_backup_date", date);
-    localStorage.setItem("cv_last_backup_count", String(items.length));
+    scopedSet("cv_last_backup_date", date);
+    scopedSet("cv_last_backup_count", String(items.length));
     setBackupBanner(false);
     setTimeout(() => {
       window.open("https://drive.google.com/drive/my-drive", "_blank");
@@ -11452,6 +11457,10 @@ export default function App() {
   const [analysis, setAnalysis] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [snapshots, setSnapshots] = useState([]);
+  // LIVE EXPOSURE CLOSURE — count of pre-fix unscoped local rows that could
+  // not be proven to belong to this account (never shown, never assigned
+  // without an explicit confirmation).
+  const [unclaimedLegacyCount, setUnclaimedLegacyCount] = useState(0);
   const [refreshingPrices, setRefreshingPrices] = useState(0);
   const [duplicateWarning, setDuplicateWarning] = useState(null);
   const [pendingDuplicate, setPendingDuplicate] = useState(null);
@@ -11510,18 +11519,50 @@ export default function App() {
   // No separate fetch needed (story/creators/pop/goCollect arrive with pricing).
   // loadDeferredMetadata removed (was SPEED-2a optimization, now reversed).
 
-  // Sync tradePiles to localStorage on change
+  // LIVE EXPOSURE CLOSURE (2026-10-04) — principal boundary for in-memory
+  // user state. On logout/session loss every user-owned React state value is
+  // dropped (the principal-scoped IndexedDB is NOT touched — A's offline
+  // state stays on disk, reachable only by A's own sign-in) and in-flight
+  // scan/refresh work is invalidated; on sign-in, user-owned localStorage
+  // state is reloaded for the NEW principal only. Without this the previous
+  // account's catalogue stayed in memory for the next one.
+  useEffect(() => {
+    if (grailkeyAuthed) {
+      setTradePiles(getTradePiles());
+      return;
+    }
+    setCatalogue([]);
+    setSelectedItem(null);
+    setSnapshots([]);
+    setAnalysis(null);
+    setResult(null);
+    setPendingDuplicate(null);
+    setDuplicateWarning(null);
+    setUnclaimedLegacyCount(0);
+    setTradePiles([]);
+    activeScanRef.current = null;
+    scanGenerationRef.current += 1;
+    try { cardEnrichAbortRef.current?.abort?.(); } catch { /* no-op */ }
+    activeCardEnrichIdRef.current = null;
+    try { autoRefreshAbortersRef.current.forEach((c) => c.abort?.()); } catch { /* no-op */ }
+  }, [grailkeyAuthed]);
+
+  // Sync tradePiles to localStorage on change (principal-scoped; refused
+  // when no principal is signed in).
   useEffect(() => {
     saveTradePiles(tradePiles);
   }, [tradePiles]);
 
-  // Load catalogue, snapshots, and cached analysis from IndexedDB on mount.
+  // Load catalogue, snapshots, and cached analysis from the SIGNED-IN
+  // principal's own scoped IndexedDB. Nothing user-owned loads before the
+  // principal is known; a stale async load from a previous principal never
+  // lands in the new one's state.
   useEffect(() => {
-    // Warm up grade + enrich endpoints silently — GK-268 AUTH LAUNCH: this
-    // component only ever renders once grailkeyAuthed is true (see the
-    // `if (!grailkeyAuthed) return <GrailKeyLoginGate/>` gate above), so a
-    // valid session always exists on every render that reaches here.
-    if (!isAuthenticated()) return;
+    if (!grailkeyAuthed) return;
+    const me = getPrincipalScope();
+    if (!me) return;
+    let cancelled = false;
+    const mine = () => !cancelled && getPrincipalScope() === me;
 
     apiFetch('/api/grade', {
       method: 'POST',
@@ -11537,14 +11578,18 @@ export default function App() {
     (async () => {
       await migrateFromLocalStorage();
       await migrateComicVineRemoval(); // Dispatch 42 Task 1 — strip stale ComicVine data before first render
+      if (!mine()) return;
       const items = await getAllComics();
+      if (!mine()) return;
       setCatalogue(items.map(normalizeItem)); // STRUCTURAL FIX: normalize on load
       const snaps = await getAllSnapshots();
+      if (!mine()) return;
       setSnapshots(snaps);
       const cached = await getAnalysis();
-      if (cached) setAnalysis(cached);
+      if (mine() && cached) setAnalysis(cached);
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, [grailkeyAuthed]);
 
   // GrailKey Clean Account/Collection Cutover (2026-09-17), extended by
   // the Collection Sync Closeout (2026-09-18) — on authenticated login,
@@ -11565,8 +11610,22 @@ export default function App() {
   // that has no `_syncStatus` field at all.
   useEffect(() => {
     if (!grailkeyAuthed) return;
+    // LIVE EXPOSURE CLOSURE — every await below is followed by a principal
+    // check: a hydrate/retry started for A never writes or pushes once B
+    // (or nobody) is signed in.
+    const me = getPrincipalScope();
+    if (!me) return;
+    let cancelled = false;
+    const mine = () => !cancelled && getPrincipalScope() === me;
     (async () => {
       const serverItems = await fetchServerCollection();
+      if (!mine()) return;
+      // Evidence-gated claim of pre-fix unscoped local rows: only rows this
+      // account's OWN server collection proves are theirs are copied in.
+      if (serverItems) {
+        try { await autoClaimProvableLegacy(serverItems); } catch { /* never blocks hydrate */ }
+        if (!mine()) return;
+      }
       if (serverItems && serverItems.length > 0) {
         // GRAILKEY — COLLECTION IMAGE SYNC (2026-09-19). putComic() is a
         // full IndexedDB store.put(), never a partial merge (src/db.js) —
@@ -11583,6 +11642,7 @@ export default function App() {
         // `attributes.remoteImages` for display.
         const existingById = new Map((await getAllComics()).map((c) => [c.id, c]));
         for (const item of serverItems) {
+          if (!mine()) return;
           const existingImages = existingById.get(item.id)?.images;
           await putComic({
             id: item.id,
@@ -11600,8 +11660,11 @@ export default function App() {
           });
         }
       }
+      if (!mine()) return;
       const localItems = await getAllComics();
+      if (!mine()) return;
       await retryPendingCollectionItems(localItems);
+      if (!mine()) return;
       // GK-227 — same authenticated-reconnect trigger, retries using each
       // pending entry's OWN preserved original bytes (never re-derived
       // from item.images, which may have changed since).
@@ -11609,12 +11672,17 @@ export default function App() {
         setCatalogue((prev) => prev.map((x) => (x.id === itemId ? { ...x, _pendingEvidenceAppends: stillPending } : x)));
         putComic({ ...localItems.find((x) => x.id === itemId), _pendingEvidenceAppends: stillPending }).catch(() => {});
       });
+      if (!mine()) return;
       const items = await getAllComics();
+      if (!mine()) return;
       setCatalogue(items.map(normalizeItem));
+      try { const n = await countUnclaimedLegacy(); if (mine()) setUnclaimedLegacyCount(n); } catch { /* informational only */ }
+      if (!mine()) return;
       // GRAILKEY DURABLE BUYER DECISION LEDGER V1 — same authenticated-
       // reconnect trigger, same "never block, best-effort" contract.
       await retryPendingBuyerDecisions();
     })();
+    return () => { cancelled = true; };
   }, [grailkeyAuthed]);
 
   // P0-B: Auto-heal books with NO price at all (genuinely incomplete scans).
@@ -12170,7 +12238,12 @@ export default function App() {
     return () => clearTimeout(t);
   }, [installDismissed, installPrompt, showSafariBanner]);
 
-  const addToCatalogue = useCallback(async (data, sourceDataUrl) => {
+  const addToCatalogue = useCallback(async (data, sourceDataUrl, ownerScope = null) => {
+    // LIVE EXPOSURE CLOSURE (2026-10-04) — a long-running scan/bulk-import
+    // that started under principal A must not save into principal B's
+    // scope if the account changed mid-flight. Callers pass the principal
+    // captured when the operation began; mismatch refuses (returns null).
+    if (ownerScope && getPrincipalScope() !== ownerScope) return null;
     let thumb = null;
     try {
       thumb = sourceDataUrl ? await makeThumbnail(sourceDataUrl) : null;
@@ -12292,6 +12365,7 @@ export default function App() {
       // correction-supersession special case, only CURRENT_SCAN_OWNERSHIP_MODE.
       const scanOwnership = { scanId, generation, kind: 'scan', itemId: null };
       activeScanRef.current = scanOwnership;
+      const scanPrincipal = getPrincipalScope();
       setError(null);
       setResult(null);
       setEnriching(false);
@@ -12459,7 +12533,7 @@ export default function App() {
           () => setResult({ ...data, issue: issueNum, image: b64 })
         );
         setLoading(false);
-        const savedId = (save && !isDuplicate) ? await addToCatalogue({ ...data, issue: issueNum }, b64) : null;
+        const savedId = (save && !isDuplicate) ? await addToCatalogue({ ...data, issue: issueNum }, b64, scanPrincipal) : null;
         // GrailKey Directive V, Task 2 (GK-88) — the item now exists;
         // mutate the SAME ownership object already stored in
         // activeScanRef.current (not a new one) so the enrich-stage
@@ -13013,6 +13087,7 @@ export default function App() {
     let completed = 0;
     // P0 HOTFIX: shared Set to prevent duplicate races (workers check before grade)
     const inFlightKeys = new Set();
+    const bulkPrincipal = getPrincipalScope();
 
     // Worker function: process one file (compress → grade → save → fire enrich)
     const processFile = async (file, index) => {
@@ -13110,7 +13185,7 @@ export default function App() {
 
         // C6: Wrap save/enrich in try-finally to ensure inFlightKeys.delete on error
         try {
-          const savedId = await addToCatalogue({ ...data, issue: bulkIssue }, b64);
+          const savedId = await addToCatalogue({ ...data, issue: bulkIssue }, b64, bulkPrincipal);
           if (savedId) {
             added++;
             console.log('[bulk] added to catalogue:', data.title, bulkIssue);
@@ -15109,6 +15184,26 @@ export default function App() {
   return (
     <div className="app">
       {CLERK_ENABLED && <ClerkSignOutBridge signOutRef={clerkSignOutRef} />}
+      {unclaimedLegacyCount > 0 && (
+        <div style={{ background: "#2a2412", border: "1px solid #d4af37", color: "#e8d9a0", fontSize: 12, padding: "8px 12px", margin: "8px 12px", borderRadius: 6 }}>
+          <div>{unclaimedLegacyCount} item{unclaimedLegacyCount === 1 ? "" : "s"} saved on this device before accounts were separated could not be verified as yours, so they are hidden.</div>
+          <button
+            style={{ marginTop: 6, background: "transparent", border: "1px solid #d4af37", color: "#e8d9a0", borderRadius: 4, fontSize: 12, padding: "3px 8px" }}
+            onClick={async () => {
+              if (!window.confirm("Only claim these if this device has only ever been used by you. They will be copied into THIS account.")) return;
+              try {
+                await claimAllLegacy();
+                const items = await getAllComics();
+                setCatalogue(items.map(normalizeItem));
+                setUnclaimedLegacyCount(await countUnclaimedLegacy());
+                setTradePiles(getTradePiles());
+              } catch (e) {
+                alert("Could not claim local items: " + (e?.message || e));
+              }
+            }}
+          >These are mine — claim them</button>
+        </div>
+      )}
       <header className="header">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>

@@ -15,7 +15,8 @@
 // server-side (api/asset-media-append.js's own base64-charset check is
 // the second, independent layer of the same discipline).
 
-import { authFetch } from "./grailkeySession.js";
+import { authFetch, getPrincipalScope } from "./grailkeySession.js";
+import { getAllComics } from "../db.js";
 
 function stripDataUrlPrefix(dataUrl) {
   const idx = dataUrl.indexOf(",");
@@ -86,7 +87,19 @@ export function retireEvidenceIdempotencyKey(itemId, captureView) {
 // bytes stored in that entry — never re-derives from item.images (which
 // may have been reordered/trimmed since), never reconstructs from a URL.
 export async function retryPendingPhysicalMediaAppends(items, onResolved) {
-  for (const item of items || []) {
+  // LIVE EXPOSURE CLOSURE (2026-10-04) — pending evidence entries hold raw
+  // photo bytes belonging to the principal whose scoped DB they came from.
+  // Refuse the moment the signed-in principal changes (stale retry).
+  const scope = getPrincipalScope();
+  if (!scope) return;
+  // Ownership = presence in the CURRENT principal's scoped DB (a stale list
+  // from another principal is reduced to rows this principal actually owns,
+  // and the STORED pending entries are what get retried).
+  const stored = new Map((await getAllComics()).map((c) => [c.id, c]));
+  for (const hint of items || []) {
+    const item = hint && stored.get(hint.id);
+    if (!item) continue;
+    if (getPrincipalScope() !== scope) return;
     const pending = item?._pendingEvidenceAppends;
     if (!Array.isArray(pending) || pending.length === 0) continue;
     const stillPending = [];

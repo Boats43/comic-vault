@@ -24,6 +24,7 @@
 // Invoke: node tests/gk234-collection-delete-resurrection.test.js
 
 import 'fake-indexeddb/auto';
+import { signInTestPrincipal } from './helpers/installBrowserSession.js';
 import { readFileSync } from 'node:fs';
 
 let passed = 0;
@@ -88,7 +89,7 @@ async function main() {
     // platform-level event a real crash/quota/constraint failure would
     // produce, and confirm deleteComic's own promise correctly rejects
     // instead of resolving.
-    const openReq = indexedDB.open('comic-vault', 3);
+    const openReq = indexedDB.open('comic-vault--p-test-principal-fixture');
     const db = await new Promise((resolve, reject) => {
       openReq.onsuccess = () => resolve(openReq.result);
       openReq.onerror = () => reject(openReq.error);
@@ -170,6 +171,9 @@ async function main() {
   // ═══════════════════════════════════════════════════════════════════
   console.log('\nB7-5: post-hard-delete rehydration cannot resurrect the row:');
   {
+    // B7-3's no-session case replaced localStorage with a no-op mock; restore a working one + sign in (scoped IndexedDB requires a session).
+    globalThis.localStorage = (() => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: (k) => { m.delete(k); } }; })();
+    signInTestPrincipal();
     const { putComic: putComicRehydrate, deleteComic: deleteComicRehydrate, getAllComics: getAllComicsRehydrate } = await import(`../src/db.js?rehydrate=${Date.now()}`);
     await putComicRehydrate({ id: 'server-item-1', title: 'Synced Comic', timestamp: Date.now(), _syncStatus: 'synced' });
     await putComicRehydrate({ id: 'server-item-2', title: 'Other Synced Comic', timestamp: Date.now(), _syncStatus: 'synced' });

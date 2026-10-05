@@ -28,48 +28,21 @@
 // engine — idempotent because pushCollectionItem's server-side upsert
 // already is (same id + same attributes never creates a duplicate row).
 
-import { putComic, getAllComics, getStorageScope, NoPrincipalScopeError } from "../db.js";
+import { putComic } from "../db.js";
 import { pushCollectionItem } from "./collectionSync.js";
 
-// LIVE EXPOSURE CLOSURE (2026-10-04) — a local row may only ever be pushed
-// under the principal whose scoped database holds it. The scope is captured
-// BEFORE the first local write and re-checked before every network push and
-// every post-push write: if the signed-in principal changed in between
-// (logout/login as someone else mid-flight), the operation REFUSES — the
-// row stays `_syncStatus:'pending'` in its OWNER's database (retried when
-// that owner signs back in) and is never pushed under, or re-written into,
-// another principal's scope. The server still derives the principal only
-// from the bearer token; this guard exists so the CLIENT never hands the
-// server another user's data under a fresh token.
-const scopeChanged = (scope) => getStorageScope() !== scope;
-
 export async function persistCollectionItem(entry) {
-  const scope = getStorageScope();
-  if (!scope) throw new NoPrincipalScopeError();
   await putComic({ ...entry, _syncStatus: "pending" });
-  if (scopeChanged(scope)) return { ...entry, _syncStatus: "pending", _refusedScopeChanged: true };
   const serverResult = await pushCollectionItem(entry);
   const finalEntry = { ...entry, _syncStatus: serverResult ? "synced" : "pending" };
-  if (scopeChanged(scope)) return { ...finalEntry, _refusedScopeChanged: true };
   await putComic(finalEntry);
   return finalEntry;
 }
 
 export async function retryPendingCollectionItems(items) {
-  const scope = getStorageScope();
-  if (!scope) return [];
-  // OWNERSHIP = presence in the CURRENT principal's own scoped database.
-  // `items` is only a hint of ids to consider: a stale list captured under
-  // another principal is filtered down to rows this principal actually owns
-  // locally, and the row pushed is the one STORED in this scope, never the
-  // caller-supplied object.
-  const stored = new Map((await getAllComics()).map((c) => [c.id, c]));
-  const pending = (items || [])
-    .filter((i) => i && stored.get(i.id)?._syncStatus === "pending")
-    .map((i) => stored.get(i.id));
+  const pending = (items || []).filter((i) => i && i._syncStatus === "pending");
   const results = [];
   for (const item of pending) {
-    if (scopeChanged(scope)) break; // stale retry from another principal refuses
     results.push(await persistCollectionItem(item));
   }
   return results;

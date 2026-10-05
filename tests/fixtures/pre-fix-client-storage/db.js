@@ -2,32 +2,8 @@
 // One database, one object store keyed by `id`, with a `timestamp` index
 // so we can return items newest-first without sorting the whole array.
 
-import { getPrincipalScope } from "./lib/grailkeySession.js";
-import { scopedGet, scopedSet } from "./lib/principalStorage.js";
-
-// LIVE EXPOSURE CLOSURE (2026-10-04) — LOCAL DURABLE USER DATA IS
-// PRINCIPAL-SCOPED. One PHYSICAL IndexedDB per principal:
-// `comic-vault--p-<principalId>`. The pre-fix, unscoped `comic-vault`
-// database (LEGACY_DB_NAME) is NEVER opened by this module's accessors:
-// it is quarantined, untouched, and only read by src/lib/legacyLocalClaim.js
-// under an explicit, evidence-gated claim. The scope is resolved from the
-// CURRENT session token on every open (never cached across calls), so it
-// can never disagree with the token the server authenticates. With no
-// session there is no scope: reads return empty, writes reject.
-export const LEGACY_DB_NAME = "comic-vault";
-const DB_NAME_PREFIX = "comic-vault--p-";
+const DB_NAME = "comic-vault";
 const DB_VERSION = 4;
-
-export class NoPrincipalScopeError extends Error {
-  constructor() {
-    super("No authenticated principal — local user data is unavailable until sign-in.");
-    this.name = "NoPrincipalScopeError";
-    this.code = "NO_PRINCIPAL_SCOPE";
-  }
-}
-
-export const scopedDbName = (principal) => `${DB_NAME_PREFIX}${encodeURIComponent(principal)}`;
-export const getStorageScope = () => getPrincipalScope();
 const STORE = "comics";
 const SNAPSHOTS_STORE = "valueSnapshots";
 const ANALYSIS_STORE = "analysisCache";
@@ -53,8 +29,7 @@ const FIXTURE_BANK_STORE = "fixtureBank";
 const GENERIC_CAPTURE_DRAFTS_STORE = "genericCaptureDrafts";
 const LEGACY_KEY = "cv_catalogue";
 
-// One cached open() promise per physical database name.
-const dbPromises = new Map();
+let dbPromise = null;
 
 // GK-231 hardening (2026-09-20) — B1/B2. A version-upgrade open() blocks
 // (fires NEITHER onupgradeneeded NOR onsuccess NOR onerror — just sits)
@@ -75,12 +50,9 @@ const dbPromises = new Map();
 const BLOCKED_MESSAGE = 'GrailKey storage upgrade is blocked by another open GrailKey tab/session. Close other GrailKey tabs and retry.';
 
 const openDb = () => {
-  const principal = getPrincipalScope();
-  if (!principal) return Promise.reject(new NoPrincipalScopeError());
-  const dbName = scopedDbName(principal);
-  if (dbPromises.has(dbName)) return dbPromises.get(dbName);
-  const dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(dbName, DB_VERSION);
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
@@ -108,11 +80,10 @@ const openDb = () => {
     };
     req.onerror = () => reject(req.error);
     req.onblocked = () => {
-      dbPromises.delete(dbName);
+      dbPromise = null;
       reject(new Error(BLOCKED_MESSAGE));
     };
   });
-  dbPromises.set(dbName, dbPromise);
   return dbPromise;
 };
 
@@ -230,7 +201,7 @@ const CV_MIGRATION_FLAG = "cv_migration_v1_done";
 
 export const migrateComicVineRemoval = async () => {
   try {
-    if (scopedGet(CV_MIGRATION_FLAG)) return 0;
+    if (localStorage.getItem(CV_MIGRATION_FLAG)) return 0;
     const items = await getAllComics();
     let count = 0;
     for (const item of items) {
@@ -240,7 +211,7 @@ export const migrateComicVineRemoval = async () => {
         count++;
       }
     }
-    scopedSet(CV_MIGRATION_FLAG, "1");
+    localStorage.setItem(CV_MIGRATION_FLAG, "1");
     return count;
   } catch {
     return 0;
@@ -301,7 +272,7 @@ export const clearFixtureBank = () => runMutation(FIXTURE_BANK_STORE, (store) =>
 // with no DOM.
 export const getFixtureBankDiagnostics = () =>
   openDb().then(async (db) => ({
-    dbName: db.name,
+    dbName: DB_NAME,
     dbVersionOpened: db.version,
     objectStoreNames: Array.from(db.objectStoreNames),
     fixtureRecordCount: (await getAllFixtures()).length,
@@ -337,11 +308,28 @@ export const getAllGenericCaptureDrafts = () =>
 export const deleteGenericCaptureDraft = (id) =>
   runMutation(GENERIC_CAPTURE_DRAFTS_STORE, (store) => store.delete(id)).then(() => undefined);
 
-// DISABLED (LIVE EXPOSURE CLOSURE, 2026-10-04). This used to copy a legacy
-// unscoped `cv_catalogue` localStorage array into the (then global)
-// IndexedDB store. With principal-scoped storage that would silently
-// ASSIGN pre-existing, unattributable data to whichever principal signs in
-// first — exactly the ambiguous-ownership assignment this dispatch forbids.
-// The legacy key is left untouched (never read, never deleted); it is
-// surfaced by src/lib/legacyLocalClaim.js as unclaimed legacy data.
-export const migrateFromLocalStorage = async () => 0;
+// One-shot migration: if a legacy `cv_catalogue` array exists in localStorage,
+// copy its entries into IndexedDB then drop the key. Safe to call on every load.
+export const migrateFromLocalStorage = async () => {
+  try {
+    const raw = localStorage.getItem(LEGACY_KEY);
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      localStorage.removeItem(LEGACY_KEY);
+      return 0;
+    }
+    // Each putComic opens its own transaction — safe to await in a loop.
+    let count = 0;
+    for (const item of parsed) {
+      if (item && item.id) {
+        await putComic(item);
+        count++;
+      }
+    }
+    localStorage.removeItem(LEGACY_KEY);
+    return count;
+  } catch {
+    return 0;
+  }
+};
