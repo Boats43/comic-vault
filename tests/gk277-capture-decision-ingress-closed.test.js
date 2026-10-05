@@ -63,7 +63,7 @@ const totals = async () => (await client.query('SELECT (SELECT count(*) FROM dec
 async function capture(itemId, scanPayloadExtra, bodyExtra = {}) {
   await createCollectionItem({ principalId: JIMMY, id: itemId, assetCategory: 'comic', attributes: { title: 'GK-277 test', issue: '1', year: '2020' } });
   const key = randomUUID();
-  const body = {
+  const body = { assetClass: 'comic',
     scanPayload: { correlationId: key, collectionItemId: itemId, book: { title: 'GK-277 test', issue: '1', year: '2020' }, ...scanPayloadExtra },
     photos: [{ bytes: ONE_PX, contentType: 'image/png', captureRole: 'capture-photo' }],
     idempotencyKey: key, copyDisposition: { choice: 'ANOTHER_COPY' }, ...bodyExtra, // GK-279: repeat captures of one book identity need the explicit operator choice

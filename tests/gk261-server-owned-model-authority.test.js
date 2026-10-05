@@ -142,7 +142,7 @@ try {
   console.log('-- 1. client INSERT supplies all protected fields -> cannot mint them --');
   {
     const id = newId('forged-insert');
-    const r = await coll(tokA, 'POST', { body: { id, attributes: { title: 'Creepy', ...FORGED } } });
+    const r = await coll(tokA, 'POST', { body: { assetCategory: 'comic', id, attributes: { title: 'Creepy', ...FORGED } } });
     assertEq(r.statusCode, 200, 'save itself succeeds');
     const a = await row(PA, id);
     assertTrue(a && PROTECTED.every((k) => !(k in a)), 'CRITICAL: none of the protected keys were persisted from the client INSERT');
@@ -158,7 +158,7 @@ try {
   const baselineId = newId('baseline');
   {
     // 4. valid same-principal receipt; 5/6. forged client grade/provider/model alongside
-    const r = await coll(tokA, 'POST', { body: { id: baselineId, gradeReceiptId: rid, attributes: { title: 'Creepy', ...FORGED } } });
+    const r = await coll(tokA, 'POST', { body: { assetCategory: 'comic', id: baselineId, gradeReceiptId: rid, attributes: { title: 'Creepy', ...FORGED } } });
     assertEq(r.statusCode, 200, 'save with receipt + forged client fields: 200');
     const a = await row(PA, baselineId);
     assertEq(a?.modelPredictedGrade, 'VG 4.0', "CRITICAL (4/5): baseline is the SERVER'S model grade, not the forged 'CGC 9.8'");
@@ -185,7 +185,7 @@ try {
     r = await coll(tokA, 'PUT', { id: baselineId, body: { attributes: { title: 'Creepy', ...nulls } } });
     a = await row(PA, baselineId);
     assertTrue(PROTECTED.filter((k) => k in before).every((k) => JSON.stringify(a[k]) === JSON.stringify(before[k])), 'CRITICAL (3): PUT with explicit nulls cannot clear any protected value');
-    r = await coll(tokA, 'POST', { body: { id: baselineId, attributes: { title: 'Creepy', ...nulls, ...FORGED } } });
+    r = await coll(tokA, 'POST', { body: { assetCategory: 'comic', id: baselineId, attributes: { title: 'Creepy', ...nulls, ...FORGED } } });
     a = await row(PA, baselineId);
     assertTrue(PROTECTED.filter((k) => k in before).every((k) => JSON.stringify(a[k]) === JSON.stringify(before[k])), 'CRITICAL (2/3): POST upsert (ON CONFLICT) cannot overwrite or clear either');
     r = await coll(tokA, 'PUT', { id: baselineId, body: { attributes: { title: 'Creepy' } } });
@@ -203,7 +203,7 @@ try {
     assertEq(a?.modelPredictedAt, snapshot.modelPredictedAt, 'replay did not change the baseline timestamp');
     // same receipt against a DIFFERENT item
     const other = newId('replay-other');
-    await coll(tokA, 'POST', { body: { id: other, attributes: { title: 'Other' } } });
+    await coll(tokA, 'POST', { body: { assetCategory: 'comic', id: other, attributes: { title: 'Other' } } });
     await coll(tokA, 'PUT', { id: other, body: { gradeReceiptId: rid, attributes: { title: 'Other' } } });
     const o = await row(PA, other);
     assertTrue(!('modelPredictedGrade' in o), 'a consumed receipt cannot mint a baseline on a second item');
@@ -214,12 +214,12 @@ try {
     const g = await grade(tokA);
     const stolen = g.body.gradeReceiptId;
     const id = newId('cross');
-    await coll(tokB, 'POST', { body: { id, gradeReceiptId: stolen, attributes: { title: 'Creepy' } } });
+    await coll(tokB, 'POST', { body: { assetCategory: 'comic', id, gradeReceiptId: stolen, attributes: { title: 'Creepy' } } });
     const b = await row(PB, id);
     assertTrue(b && !('modelPredictedGrade' in b), 'CRITICAL: principal B cannot claim principal A\'s receipt (REFUSED, no baseline)');
     // and the refused attempt did not burn A's receipt
     const idA = newId('cross-owner');
-    await coll(tokA, 'POST', { body: { id: idA, gradeReceiptId: stolen, attributes: { title: 'Creepy' } } });
+    await coll(tokA, 'POST', { body: { assetCategory: 'comic', id: idA, gradeReceiptId: stolen, attributes: { title: 'Creepy' } } });
     const a = await row(PA, idA);
     assertEq(a?.modelPredictedGrade, 'VG 4.0', "the rightful owner can still claim after B's refused attempt");
   }
@@ -231,7 +231,7 @@ try {
     const rec = mem.get(key);
     rec.v.issuedAt = Date.now() - 7 * 60 * 60 * 1000; // older than the 6h TTL window, store entry itself not yet evicted
     const id = newId('expired');
-    await coll(tokA, 'POST', { body: { id, gradeReceiptId: g.body.gradeReceiptId, attributes: { title: 'Creepy' } } });
+    await coll(tokA, 'POST', { body: { assetCategory: 'comic', id, gradeReceiptId: g.body.gradeReceiptId, attributes: { title: 'Creepy' } } });
     const a = await row(PA, id);
     assertTrue(a && !('modelPredictedGrade' in a), 'CRITICAL: expired receipt mints no authority');
   }
@@ -239,13 +239,13 @@ try {
   console.log('\n-- 9. missing / garbage receipt -> no client fallback --');
   {
     const id = newId('no-receipt');
-    const r = await coll(tokA, 'POST', { body: { id, attributes: { title: 'Creepy', ...FORGED } } });
+    const r = await coll(tokA, 'POST', { body: { assetCategory: 'comic', id, attributes: { title: 'Creepy', ...FORGED } } });
     const a = await row(PA, id);
     assertEq(r.statusCode, 200, 'save without receipt succeeds');
     assertTrue(!('modelPredictedGrade' in a), 'CRITICAL: no receipt => no baseline, even with forged values present');
     const id2 = newId('garbage-receipt');
-    await coll(tokA, 'POST', { body: { id: id2, gradeReceiptId: 'gr_notarealreceipt', attributes: { title: 'Creepy' } } });
-    await coll(tokA, 'POST', { body: { id: id2, gradeReceiptId: { $ne: 1 }, attributes: { title: 'Creepy' } } });
+    await coll(tokA, 'POST', { body: { assetCategory: 'comic', id: id2, gradeReceiptId: 'gr_notarealreceipt', attributes: { title: 'Creepy' } } });
+    await coll(tokA, 'POST', { body: { assetCategory: 'comic', id: id2, gradeReceiptId: { $ne: 1 }, attributes: { title: 'Creepy' } } });
     const g = await row(PA, id2);
     assertTrue(!('modelPredictedGrade' in g), 'unknown / malformed receipt ids mint nothing and do not error the save');
   }
@@ -268,7 +268,7 @@ try {
   console.log('\n-- 11/12. identityAuthority: forged, null, and the real server transition --');
   {
     const id = newId('identity');
-    await coll(tokA, 'POST', { body: { id, attributes: { title: 'Creepy', issue: '1', year: '1964', publisher: 'Warren', identityAuthority: { title: 'OPERATOR_CONFIRMED' } } } });
+    await coll(tokA, 'POST', { body: { assetCategory: 'comic', id, attributes: { title: 'Creepy', issue: '1', year: '1964', publisher: 'Warren', identityAuthority: { title: 'OPERATOR_CONFIRMED' } } } });
     assertTrue(!('identityAuthority' in (await row(PA, id))), 'CRITICAL (11): forged identityAuthority on create is not persisted');
     // real server transition: validated manual correction on an owned item
     const res = mkRes();

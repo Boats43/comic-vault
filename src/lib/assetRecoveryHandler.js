@@ -33,6 +33,7 @@
 // other real endpoint in this project already relies on.
 
 import { verifyToken, InvalidTokenError } from '../modules/auth/index.js';
+import { isSupportedAssetCategory } from './assetCategories.js';
 import {
   listPhysicalOrphans, listMissingProjections, getPhysicalAsset,
   NotFoundError as AssetNotFoundError,
@@ -103,7 +104,12 @@ export async function handleAssetRecovery(req, res) {
       // the anti-join alone) and is the one place asset_class is read
       // from — the real, durable gk_asset row, never guessed.
       const graph = await getPhysicalAsset({ principalId, gkAssetId: target.gk_asset_id });
-      const assetCategory = graph.asset?.asset_class || 'comic';
+      // U1 — the durable class is authoritative and always present on a real gk_asset row; if it is
+      // somehow absent, REFUSE rather than invent 'comic'.
+      const assetCategory = graph.asset?.asset_class;
+      if (!isSupportedAssetCategory(assetCategory)) {
+        throw new Error(`asset ${target.gk_asset_id} has no supported asset_class (${JSON.stringify(assetCategory)}) — refusing to recover a collection row with an invented category`);
+      }
       const created = await createCollectionItem({
         principalId,
         id: collectionItemId,

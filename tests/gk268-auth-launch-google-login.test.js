@@ -140,7 +140,7 @@ try {
   console.log('\n--- H: tenant isolation — principal A cannot read principal B\'s physical asset ---');
   const principalA = login1.principalId;
   const principalB = login2.principalId;
-  const assetB = await createPhysicalAsset({
+  const assetB = await createPhysicalAsset({ assetClass: 'comic',
     principalId: principalB,
     captureBasis: { test: true, tag: TAG, nonce: randomUUID() },
     idempotencyKey: `${TAG}-asset-b-${randomUUID()}`,

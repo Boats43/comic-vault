@@ -62,12 +62,13 @@ export const ADAPTERS = {
 
 /**
  * Get adapter config for an asset type.
- * Defaults to 'comic' for unknown types (backward compatibility).
+ * U1 — NO SILENT COMIC: a missing or unknown type returns null (never the comic adapter).
+ * Callers must handle null explicitly (refuse, or use a neutral, non-comic behavior).
  *
  * @param {string|null|undefined} assetType - 'comic', 'book', 'card', etc.
- * @returns {Object} Adapter config
+ * @returns {Object|null} Adapter config, or null when no adapter exists for that type
  */
 export function getAdapter(assetType) {
-  const type = assetType || 'comic';
-  return ADAPTERS[type] || ADAPTERS.comic;
+  if (typeof assetType !== 'string' || !assetType) return null;
+  return Object.prototype.hasOwnProperty.call(ADAPTERS, assetType) ? ADAPTERS[assetType] : null;
 }

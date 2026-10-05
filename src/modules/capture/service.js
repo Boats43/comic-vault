@@ -28,7 +28,9 @@ import {
   ValidationFailedError, ConflictError,
 } from '../assets/index.js';
 import * as mapping from './mapping.js';
+import { enrollAsset, ConflictError as InventoryConflictError } from '../inventory/index.js';
 import { claimGradeReceipt, restoreGradeReceipt } from '../../lib/gradeReceipt.js';
+import { SUPPORTED_ASSET_CATEGORIES, isSupportedAssetCategory } from '../../lib/assetCategories.js';
 
 function requireFields(obj, fields) {
   for (const f of fields) {
@@ -38,19 +40,20 @@ function requireFields(obj, fields) {
   }
 }
 
-// U4.2 — the only two durable asset classes this orchestrator will ever
-// mint. Deliberately NOT free-text: exposing arbitrary asset_class values
-// here would let a caller invent categories with no adapter, no render
-// path, and no A2 background-path exclusion behind them.
-const ALLOWED_ASSET_CLASSES = ['comic', 'generic'];
+// U4.2 / U1 — the only durable asset classes this orchestrator will ever
+// mint (comic | book | generic). Deliberately NOT free-text: exposing arbitrary
+// asset_class values here would let a caller invent categories with no adapter,
+// no render path, and no A2 background-path exclusion behind them. U1: there is
+// NO DEFAULT — a missing or unknown assetClass is refused, never minted as comic.
+const ALLOWED_ASSET_CLASSES = SUPPORTED_ASSET_CATEGORIES;
 
 async function captureFromScanOnce({
-  principalId, scanPayload, photos = [], idempotencyKey, assetClass = 'comic', copyDisposition,
+  principalId, scanPayload, photos = [], idempotencyKey, assetClass, copyDisposition,
 } = {}) {
   requireFields({ principalId, scanPayload, idempotencyKey }, ['principalId', 'scanPayload', 'idempotencyKey']);
-  if (!ALLOWED_ASSET_CLASSES.includes(assetClass)) {
+  if (!isSupportedAssetCategory(assetClass)) {
     throw new ValidationFailedError(
-      `assetClass must be one of ${ALLOWED_ASSET_CLASSES.join('|')}, got: ${assetClass}`
+      `assetClass is required and must be one of ${ALLOWED_ASSET_CLASSES.join('|')} (no default), got: ${assetClass === undefined ? 'undefined' : JSON.stringify(assetClass)}`
     );
   }
   if (!scanPayload.correlationId && !scanPayload.scanlogKey) {
@@ -125,7 +128,7 @@ async function captureFromScanOnce({
   // that check remains the authoritative defense (defense in depth,
   // never relying on this call site alone).
   if (scanPayload.collectionItemId && !existingLink) {
-    await assertCollectionItemLinkable({ principalId, collectionItemId: scanPayload.collectionItemId });
+    await assertCollectionItemLinkable({ principalId, collectionItemId: scanPayload.collectionItemId, expectedCategory: assetClass });
   }
 
   let continuityLink = null;
@@ -161,7 +164,7 @@ async function captureFromScanOnce({
   // the normal mint path, unchanged, no prompt.
   let copyChoice = null;
   let transientAssessment = null;
-  if (!existingLink && !continuityLink && scanPayload.collectionItemId) {
+  if (!existingLink && !continuityLink && scanPayload.collectionItemId && assetClass !== 'generic') {
     copyChoice = await resolvePhysicalCopyChoice({
       principalId, collectionItemId: scanPayload.collectionItemId,
       book: scanPayload.book, disposition: copyDisposition,
@@ -304,6 +307,21 @@ async function captureFromScanOnce({
     });
   }
 
+  // UNIVERSAL U1 — a newly captured GENERIC asset enters the EXISTING neutral Inventory
+  // Authority AVAILABLE state (no Generic-only state exists or is created). The operator's
+  // explicit Save-as-Generic / Capture-Generic action IS the enrollment authorization; it is
+  // never inferred for comic/book captures. Idempotent via a derived key; an asset that is
+  // already enrolled (a replay under another key) is treated as already-enrolled, not an error.
+  let inventory = null;
+  if (assetClass === 'generic' && !sameCopy) {
+    try {
+      inventory = await enrollAsset({ principalId, gkAssetId, idempotencyKey: `${idempotencyKey}:inventory` });
+    } catch (e) {
+      if (e instanceof InventoryConflictError) inventory = { gkAssetId, state: 'AVAILABLE', alreadyEnrolled: true };
+      else throw e;
+    }
+  }
+
   let retired = false;
   if (sameCopy && transientAssessment) {
     // Evidence (photo) is durably on the existing asset and the decision
@@ -314,6 +332,7 @@ async function captureFromScanOnce({
 
   return {
     gkAssetId, mintOutcome, linkOutcome, identity, media, valuation, decision, acquisition,
+    ...(inventory ? { inventory } : {}),
     ...(copyChoice?.choice ? {
       copyDecision: {
         choice: copyChoice.choice,
@@ -445,8 +464,12 @@ export async function recordAnotherCopyAtSave(args = {}) {
 // operator decision for this exact row => PhysicalCopyDecisionRequiredError.
 // Check failure => PhysicalCopyCandidateCheckUnavailableError (fail-closed).
 // Nothing is written by this function.
-export async function assertPhysicalCopySaveAllowed({ principalId, id, attributes } = {}) {
+export async function assertPhysicalCopySaveAllowed({ principalId, id, attributes, assetCategory } = {}) {
   requireFields({ principalId, id, attributes }, ['principalId', 'id', 'attributes']);
+  // U1 — physical-copy discovery is comic/book IDENTITY similarity (title/issue/year). A Generic
+  // asset has no catalogue identity (its name is optional, operator-supplied, and never identity
+  // authority), so it must never be matched against — or prompt as a duplicate of — anything.
+  if (assetCategory === 'generic') return { standing: 'NOT_APPLICABLE_GENERIC' };
   const candidates = await findPhysicalCopyCandidatesForBook({
     principalId,
     book: { title: attributes.title ?? null, issue: attributes.issue ?? null, year: attributes.year ?? null },

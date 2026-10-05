@@ -159,7 +159,7 @@ try {
     const { body, logs } = await runOnce({
       label: 'J1 refresh on persisted Book',
       bearer: TOKEN,
-      requestBody: {
+      requestBody: { assetType: 'comic',
         title: 'The Rationalists', issue: null, grade: 'Very Good', confidence: 'high',
         isGraded: false, numericGrade: null, year: '2020', publisher: null,
         skipImageSearch: true, collectionItemId: id, ownedRefresh: true,
@@ -182,7 +182,7 @@ try {
     const { body } = await runOnce({
       label: 'J2 re-identify agrees (book)',
       bearer: TOKEN,
-      requestBody: {
+      requestBody: { assetType: 'comic',
         title: 'The Rationalists', issue: null, grade: 'Very Good', confidence: 'high',
         isGraded: false, numericGrade: null, year: '2020', publisher: null,
         collectionItemId: id, ownedReidentify: true,
@@ -199,7 +199,7 @@ try {
     const { body, logs } = await runOnce({
       label: 'J3 re-identify conflicts (comic-shaped evidence)',
       bearer: TOKEN,
-      requestBody: {
+      requestBody: { assetType: 'comic',
         title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high',
         isGraded: false, numericGrade: null, year: '1988', publisher: 'Marvel',
         collectionItemId: id, ownedReidentify: true,
@@ -243,7 +243,7 @@ try {
     const { body } = await runOnce({
       label: 'J5 legacy comic row, ordinary comic refresh',
       bearer: TOKEN,
-      requestBody: {
+      requestBody: { assetType: 'comic',
         title: 'Weird War Tales', issue: '64', grade: 'Fine', confidence: 'high',
         isGraded: false, numericGrade: null, year: '1978', publisher: 'DC',
         skipImageSearch: true, collectionItemId: id, ownedRefresh: true,
@@ -263,7 +263,7 @@ try {
     const { body, logs } = await runOnce({
       label: 'J6 durable generic row -- never defaults to comic',
       bearer: TOKEN,
-      requestBody: {
+      requestBody: { assetType: 'comic',
         title: 'Unidentified Collectible', issue: null, grade: null, confidence: 'high',
         isGraded: false, numericGrade: null, year: null, publisher: null,
         skipImageSearch: true, collectionItemId: id, ownedRefresh: true,
@@ -281,7 +281,7 @@ try {
     const { body, logs } = await runOnce({
       label: 'J7 bare collectionItemId, no flag -- fresh-save shape, must NOT trigger owned-asset logic',
       bearer: TOKEN,
-      requestBody: {
+      requestBody: { assetType: 'comic',
         title: 'A Real Owned Book', issue: null, grade: 'Very Good', confidence: 'high',
         isGraded: false, numericGrade: null, publisher: null,
         collectionItemId: id, // real durable row exists, but NEITHER flag is set
@@ -305,7 +305,7 @@ try {
       label: 'ownedRefresh:true, no token -- blanket gate rejects first (401, superseded GK-253/254 behavior)',
       bearer: null,
       expectStatus: 401,
-      requestBody: {
+      requestBody: { assetType: 'comic',
         title: 'The Rationalists', grade: null, confidence: 'high',
         isGraded: false, numericGrade: null, publisher: null,
         skipImageSearch: true, collectionItemId: `${TAG}-j1`, ownedRefresh: true,

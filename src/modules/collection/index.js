@@ -21,6 +21,7 @@ export {
   ValidationFailedError,
   AuthorizationFailedError,
   NotFoundError,
+  CategoryImmutableError,
 } from './errors.js';
 
 // Test/shutdown only.

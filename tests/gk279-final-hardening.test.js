@@ -84,7 +84,7 @@ async function capture(pid, { collectionItemId, key, disposition, prior, photo =
   const res = mockRes();
   await captureRoute({
     method: 'POST', headers: hdr(pid),
-    body: {
+    body: { assetClass: 'comic',
       scanPayload: { correlationId: key, collectionItemId, book: { title: BOOK.title }, ...(prior ? { priorCollectionItemId: prior } : {}) },
       photos: [{ bytes: Buffer.from(`${RUN}-${photo}-${key}`).toString('base64'), contentType: 'image/jpeg', captureRole: 'capture-photo' }],
       idempotencyKey: key, ...(disposition ? { copyDisposition: disposition } : {}),
@@ -231,7 +231,7 @@ try {
   assertTrue(foreignRetire.statusCode === 400 && await rowExists(corrId) === 1, "foreign principal can neither retire nor reference P's row");
 
   console.log('\n--- unauthenticated ---');
-  const un = mockRes(); await collectionRoute({ method: 'POST', headers: { 'x-forwarded-for': ip() }, query: {}, body: { id: `${RUN}-unauth`, attributes: { ...BOOK } } }, un);
+  const un = mockRes(); await collectionRoute({ method: 'POST', headers: { 'x-forwarded-for': ip() }, query: {}, body: { assetCategory: 'comic', id: `${RUN}-unauth`, attributes: { ...BOOK } } }, un);
   assertTrue(un.statusCode === 401, 'unauthenticated save -> 401 (guard is behind auth)');
 } catch (e) {
   failed++; console.log('  ✗ UNEXPECTED ERROR', e?.stack || e);

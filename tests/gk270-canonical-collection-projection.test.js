@@ -176,7 +176,7 @@ try {
     await createCollectionItem({ principalId: principalAId, id: itemIdFirst, assetCategory: 'comic', attributes: { title: 'Old Man Logan Mike Deodato', issue: '25', year: 2017 } });
     await createCollectionItem({ principalId: principalAId, id: itemIdSecond, assetCategory: 'comic', attributes: { title: 'Old Man Logan Deodato', issue: '25', year: 2017 } });
 
-    const asset = await createPhysicalAsset({
+    const asset = await createPhysicalAsset({ assetClass: 'comic',
       principalId: principalAId,
       captureBasis: { test: true, tag: TAG, nonce: randomUUID() },
       idempotencyKey: `${TAG}-asset-${randomUUID()}`,
@@ -213,8 +213,8 @@ try {
     // basisKey -> distinct gkAssetId under the existing content-addressed
     // mint dedup) -- exactly what a real second, operator-confirmed
     // "Another Copy" capture produces today, unchanged by this dispatch.
-    const assetCopy1 = await createPhysicalAsset({ principalId: principalAId, captureBasis: { test: true, tag: TAG, copy: 1, nonce: randomUUID() }, idempotencyKey: `${TAG}-copy1-asset-${randomUUID()}` });
-    const assetCopy2 = await createPhysicalAsset({ principalId: principalAId, captureBasis: { test: true, tag: TAG, copy: 2, nonce: randomUUID() }, idempotencyKey: `${TAG}-copy2-asset-${randomUUID()}` });
+    const assetCopy1 = await createPhysicalAsset({ assetClass: 'comic', principalId: principalAId, captureBasis: { test: true, tag: TAG, copy: 1, nonce: randomUUID() }, idempotencyKey: `${TAG}-copy1-asset-${randomUUID()}` });
+    const assetCopy2 = await createPhysicalAsset({ assetClass: 'comic', principalId: principalAId, captureBasis: { test: true, tag: TAG, copy: 2, nonce: randomUUID() }, idempotencyKey: `${TAG}-copy2-asset-${randomUUID()}` });
     createdAssetIds.push(assetCopy1.assetId, assetCopy2.assetId);
     assertTrue(assetCopy1.assetId !== assetCopy2.assetId, 'two legitimately distinct physical copies mint two distinct gkAssetIds');
 
@@ -234,7 +234,7 @@ try {
     const itemIdA = `${TAG}-crossp-a`;
     createdCollectionItemIds.push(itemIdA);
     await createCollectionItem({ principalId: principalAId, id: itemIdA, assetCategory: 'comic', attributes: { title: 'Detective Comics', issue: '27', year: 1939 } });
-    const assetA = await createPhysicalAsset({ principalId: principalAId, captureBasis: { test: true, tag: TAG, cross: 'a', nonce: randomUUID() }, idempotencyKey: `${TAG}-crossp-a-asset-${randomUUID()}` });
+    const assetA = await createPhysicalAsset({ assetClass: 'comic', principalId: principalAId, captureBasis: { test: true, tag: TAG, cross: 'a', nonce: randomUUID() }, idempotencyKey: `${TAG}-crossp-a-asset-${randomUUID()}` });
     createdAssetIds.push(assetA.assetId);
     await linkCollectionItem({ principalId: principalAId, collectionItemId: itemIdA, gkAssetId: assetA.assetId, idempotencyKey: `${TAG}-crossp-a-link-${randomUUID()}` });
 
@@ -260,7 +260,7 @@ try {
 
     // B's own, genuinely separate capture of a similar-looking book is
     // completely unaffected and proceeds normally.
-    const assetB = await createPhysicalAsset({ principalId: principalBId, captureBasis: { test: true, tag: TAG, cross: 'b', nonce: randomUUID() }, idempotencyKey: `${TAG}-crossp-b-asset-${randomUUID()}` });
+    const assetB = await createPhysicalAsset({ assetClass: 'comic', principalId: principalBId, captureBasis: { test: true, tag: TAG, cross: 'b', nonce: randomUUID() }, idempotencyKey: `${TAG}-crossp-b-asset-${randomUUID()}` });
     createdAssetIds.push(assetB.assetId);
     const linkB = await linkCollectionItem({ principalId: principalBId, collectionItemId: itemIdB, gkAssetId: assetB.assetId, idempotencyKey: `${TAG}-crossp-b-asset-link-${randomUUID()}` });
     assertTrue(linkB.outcome === 'linked' && assetB.assetId !== assetA.assetId, 'Principal B\'s own identical-looking book gets its own, fully independent physical asset — A\'s identity never influenced it');

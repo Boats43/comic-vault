@@ -90,7 +90,7 @@ async function withGk178Workaround(fn) {
 
 const asset1 = await withGk178Workaround(() => assets.createPhysicalAsset({
   principalId: OPERATOR_PRINCIPAL, captureBasis: { marker: MARKER, slot: 'main', ts: Date.now() },
-  assetClass: 'd4-proof', source: MARKER, idempotencyKey: uid('mint'),
+  assetClass: 'generic', source: MARKER, idempotencyKey: uid('mint'),
 }));
 const idf = await withGk178Workaround(() => assets.recordIdentifierDefinition({
   principalId: OPERATOR_PRINCIPAL, scheme: 'isbn', issuingAuthority: 'ISBN-agency',

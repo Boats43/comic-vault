@@ -25,6 +25,7 @@ import { AssetServiceError, NotFoundError, ConflictError, ValidationFailedError,
 import { isPlausiblePhysicalCopyCandidate } from '../../lib/duplicateCopyDetection.js';
 import * as media from '../media/index.js';
 import { withRetryOn40P01 } from './retry.js';
+import { isSupportedAssetCategory, describeSupportedCategories } from '../../lib/assetCategories.js';
 
 const CONTRACT_VERSION = 'grailkey-data1b-asset-service-v1';
 const BASIS_SCHEMA_VERSION = 'asset-capture-event-v1';
@@ -92,8 +93,12 @@ async function assertPrincipalOwnsAsset(client, principalId, gkAssetId) {
 // ─────────────────────────────────────────────────────────────────────
 // createPhysicalAsset
 // ─────────────────────────────────────────────────────────────────────
-export async function createPhysicalAsset({ principalId, captureBasis, assetClass = 'comic', source, idempotencyKey, correlationId } = {}) {
+export async function createPhysicalAsset({ principalId, captureBasis, assetClass, source, idempotencyKey, correlationId } = {}) {
   requireFields({ principalId, captureBasis }, ['principalId', 'captureBasis']);
+  // U1 — NO DEFAULT CATEGORY. An unknown or missing class never becomes 'comic'.
+  if (!isSupportedAssetCategory(assetClass)) {
+    throw new ValidationFailedError(`assetClass is required and must be one of ${describeSupportedCategories()} (no default), got: ${assetClass === undefined ? 'undefined' : JSON.stringify(assetClass)}`);
+  }
   const client = await acquireConnection();
   try {
     await assertPrincipalActive(client, principalId);
@@ -119,10 +124,16 @@ export async function createPhysicalAsset({ principalId, captureBasis, assetClas
         mintPolicyVersion: MINT_POLICY_VERSION,
         contractVersion: CONTRACT_VERSION,
         candidateSnapshot: captureBasis,
+        assetClass,
       });
 
-      if (assetClass && assetClass !== 'comic') {
-        await client.query('UPDATE data1_dev.gk_asset SET asset_class = $1 WHERE id = $2', [assetClass, mint.assetId]);
+      // A resolved-existing mint basis names an asset that already has a class; the
+      // class is immutable, so a different requested class is refused, never applied.
+      if (mint.outcome !== 'minted-new') {
+        const existing = await repo.getAssetById(client, mint.assetId);
+        if (existing && existing.asset_class !== assetClass) {
+          throw new ConflictError(`asset ${mint.assetId} already exists with asset_class "${existing.asset_class}"; refusing to re-mint it as "${assetClass}"`);
+        }
       }
 
       // Only on a genuine first mint — resolved-existing means this asset
@@ -678,7 +689,7 @@ export async function transferOwnership({ principalId, gkAssetId, toPrincipalId,
 async function assertCollectionItemDurablyOwned(principalId, collectionItemId) {
   const collectionMod = await import('../collection/index.js');
   try {
-    await collectionMod.getMyCollectionItem({ principalId, id: collectionItemId });
+    return await collectionMod.getMyCollectionItem({ principalId, id: collectionItemId });
   } catch (e) {
     if (e instanceof collectionMod.NotFoundError) {
       throw new ValidationFailedError(
@@ -694,9 +705,18 @@ async function assertCollectionItemDurablyOwned(principalId, collectionItemId) {
 // asset, rather than discovering a bad reference only after gkAsset/
 // media already exist. Never mutates anything; throws
 // ValidationFailedError on a nonexistent or cross-principal reference.
-export async function assertCollectionItemLinkable({ principalId, collectionItemId } = {}) {
+export async function assertCollectionItemLinkable({ principalId, collectionItemId, expectedCategory } = {}) {
   requireFields({ principalId, collectionItemId }, ['principalId', 'collectionItemId']);
-  await assertCollectionItemDurablyOwned(principalId, collectionItemId);
+  const item = await assertCollectionItemDurablyOwned(principalId, collectionItemId);
+  // U1 — the physical asset's class and the Collection row's category are ONE
+  // vocabulary and must agree: a comic-category row can never mint a generic
+  // asset (or vice versa). Only checked when the caller states its expectation.
+  if (expectedCategory !== undefined && item.assetCategory !== expectedCategory) {
+    throw new ValidationFailedError(
+      `collectionItemId "${collectionItemId}" has category "${item.assetCategory}" but the capture asks to mint "${expectedCategory}" — categories must match (no reclassification by capture)`
+    );
+  }
+  return { assetCategory: item.assetCategory };
 }
 
 export async function linkCollectionItem({ principalId, collectionItemId, gkAssetId, idempotencyKey, correlationId } = {}) {

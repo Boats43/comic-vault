@@ -56,7 +56,9 @@ export async function assertPrincipalExists(client, principalId) {
 // implements 0003's own mint-basis transactional contract (C2-v2):
 // UNIQUE (basis_namespace, basis_key) is the sole idempotency gate. Same
 // basis, concurrent or repeated, always resolves to exactly one entity.
-export async function mintAsset(client, { basisNamespace, basisKey, basisSchemaVersion, mintPolicyVersion, contractVersion, candidateSnapshot }) {
+export async function mintAsset(client, { basisNamespace, basisKey, basisSchemaVersion, mintPolicyVersion, contractVersion, candidateSnapshot, assetClass }) {
+  // U1 — the class is ALWAYS written explicitly; the column's historical DEFAULT is never relied on.
+  if (typeof assetClass !== 'string' || !assetClass) throw new Error('mintAsset requires an explicit assetClass (no default)');
   const candidateId = await uuidv7(client);
 
   const basisInsert = await client.query(
@@ -71,7 +73,7 @@ export async function mintAsset(client, { basisNamespace, basisKey, basisSchemaV
   if (basisInsert.rows.length > 0) {
     basisId = basisInsert.rows[0].id;
     assetId = candidateId;
-    await client.query(`INSERT INTO data1_dev.gk_asset (id, mint_basis_id) VALUES ($1, $2)`, [assetId, basisId]);
+    await client.query(`INSERT INTO data1_dev.gk_asset (id, mint_basis_id, asset_class) VALUES ($1, $2, $3)`, [assetId, basisId, assetClass]);
     outcome = 'minted-new';
   } else {
     const existing = await client.query(

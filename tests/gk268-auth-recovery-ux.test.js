@@ -127,7 +127,7 @@ for (const [label, url] of surfaces) {
 // collection: the REAL collectionSync functions (authFetch-based)
 const sync = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'collectionSync.js')).href);
 login(); script = () => reply(401);
-const pushed = await sync.pushCollectionItem({ id: 'cv_x', title: 'T' });
+const pushed = await sync.pushCollectionItem({ id: 'cv_x', title: 'T', assetCategory: 'comic' });
 ok(pushed === null && !isAuthenticated() && uiAuthed === false, 'collection (real pushCollectionItem): 401 -> login surface, no crash');
 login(); script = () => reply(401);
 let fetched; try { fetched = await sync.fetchServerCollection(); } catch { fetched = 'threw'; }

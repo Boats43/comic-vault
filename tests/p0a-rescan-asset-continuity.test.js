@@ -114,7 +114,7 @@ try {
   const OLD_ID = `${TAG}-classic-old`;
   createdCollectionItemIds.push(OLD_ID);
   await createCollectionItem({ principalId: JIMMY_PRINCIPAL_ID, id: OLD_ID, assetCategory: 'comic', attributes: { title: 'P0-A Continuity Test' } });
-  const cap1 = await captureFromScan({
+  const cap1 = await captureFromScan({ assetClass: 'comic',
     principalId: JIMMY_PRINCIPAL_ID,
     scanPayload: { collectionItemId: OLD_ID, correlationId: crypto.randomUUID() },
     idempotencyKey: `${TAG}:cap1`,
@@ -140,7 +140,7 @@ try {
   const DRIFTED_ID = `${TAG}-classic-drifted`;
   createdCollectionItemIds.push(DRIFTED_ID);
   await createCollectionItem({ principalId: JIMMY_PRINCIPAL_ID, id: DRIFTED_ID, assetCategory: 'comic', attributes: { title: 'P0-A Continuity Test (drifted)' } });
-  const capDrift = await captureFromScan({
+  const capDrift = await captureFromScan({ assetClass: 'comic',
     principalId: JIMMY_PRINCIPAL_ID,
     scanPayload: { collectionItemId: DRIFTED_ID, correlationId: crypto.randomUUID() },
     idempotencyKey: `${TAG}:capdrift`,
@@ -157,7 +157,7 @@ try {
   const NEW_ID = `${TAG}-classic-new`;
   createdCollectionItemIds.push(NEW_ID);
   await createCollectionItem({ principalId: JIMMY_PRINCIPAL_ID, id: NEW_ID, assetCategory: 'comic', attributes: { title: 'P0-A Continuity Test' } });
-  const capFixed = await captureFromScan({
+  const capFixed = await captureFromScan({ assetClass: 'comic',
     principalId: JIMMY_PRINCIPAL_ID,
     scanPayload: { collectionItemId: NEW_ID, priorCollectionItemId: OLD_ID, correlationId: crypto.randomUUID() },
     idempotencyKey: `${TAG}:capfixed`,
@@ -192,7 +192,7 @@ try {
   // reject, never silently mint fresh (that would defeat the whole
   // point — a caller bug must be surfaced, not hidden).
   await assertRejected(
-    () => captureFromScan({
+    () => captureFromScan({ assetClass: 'comic',
       principalId: JIMMY_PRINCIPAL_ID,
       scanPayload: { collectionItemId: `${TAG}-classic-bogus`, priorCollectionItemId: `${TAG}-never-existed`, correlationId: crypto.randomUUID() },
       idempotencyKey: `${TAG}:capbogus`,
@@ -204,7 +204,7 @@ try {
   // Regression: the pre-existing "same collectionItemId, called again"
   // path is unchanged — still attaches via the direct link, no
   // continuity logic even consulted.
-  const capReplay = await captureFromScan({
+  const capReplay = await captureFromScan({ assetClass: 'comic',
     principalId: JIMMY_PRINCIPAL_ID,
     scanPayload: { collectionItemId: OLD_ID, correlationId: crypto.randomUUID() },
     idempotencyKey: `${TAG}:capreplay`,

@@ -157,7 +157,7 @@ try {
     const { body } = await runOnce({
       label: 'F1 owned Book, valid auth, ordinary refresh',
       bearer: TOKEN,
-      requestBody: { title: 'The Rationalists', grade: 'Very Good', confidence: 'high', isGraded: false, numericGrade: null, skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
+      requestBody: { assetType: 'comic', title: 'The Rationalists', grade: 'Very Good', confidence: 'high', isGraded: false, numericGrade: null, skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
     });
     assertEq(body?.assetType, 'book', 'remains Book');
     assertTrue(body?.refusedToPrice === true, 'fresh REFUSED');
@@ -182,7 +182,7 @@ try {
     const { status } = await runOnce({
       label: 'F2 owned Book, MISSING auth, ordinary refresh -> blanket gate rejects first (401)',
       bearer: null,
-      requestBody: { title: 'The Rationalists', grade: 'Very Good', confidence: 'high', isGraded: false, numericGrade: null, skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
+      requestBody: { assetType: 'comic', title: 'The Rationalists', grade: 'Very Good', confidence: 'high', isGraded: false, numericGrade: null, skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
       expectStatus: 401,
     });
     assertEq(status, 401, 'rejected before any handler body logic (including GK-254’s own) ever runs');
@@ -197,7 +197,7 @@ try {
     const { status } = await runOnce({
       label: 'F2b owned Book, EXPIRED auth, ordinary refresh -> blanket gate rejects first (401)',
       bearer: EXPIRED_TOKEN,
-      requestBody: { title: 'The Rationalists', grade: 'Very Good', confidence: 'high', isGraded: false, numericGrade: null, skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
+      requestBody: { assetType: 'comic', title: 'The Rationalists', grade: 'Very Good', confidence: 'high', isGraded: false, numericGrade: null, skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
       expectStatus: 401,
     });
     assertEq(status, 401, 'a genuinely expired token is rejected at the blanket gate, same as a missing one');
@@ -210,7 +210,7 @@ try {
     const { status, fetchLog } = await runOnce({
       label: 'F3 owned Comic, MISSING auth, ordinary refresh -> blanket gate rejects first (401)',
       bearer: null,
-      requestBody: { title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
+      requestBody: { assetType: 'comic', title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
       expectStatus: 401,
     });
     assertEq(status, 401, 'rejected for a COMIC too -- the blanket gate runs before category is ever considered');
@@ -225,7 +225,7 @@ try {
     const { status, logs } = await runOnce({
       label: 'F4 owned Book, MISSING auth, re-identify -> blanket gate rejects first (401)',
       bearer: null,
-      requestBody: { title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, publisher: 'Marvel', collectionItemId: id, ownedReidentify: true },
+      requestBody: { assetType: 'comic', title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, publisher: 'Marvel', collectionItemId: id, ownedReidentify: true },
       expectStatus: 401,
     });
     assertEq(status, 401, 'rejected before any body logic runs');
@@ -244,7 +244,7 @@ try {
     const { body, logs } = await runOnce({
       label: 'F5 fresh normal Scan, valid session, no owned flags -> GK-254 logic completely unaffected (Section A scope)',
       bearer: TOKEN,
-      requestBody: { title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, year: '1988', publisher: 'Marvel' }, // no collectionItemId, no ownedRefresh/ownedReidentify -- the real gradeBlob-without-a-saved-item shape
+      requestBody: { assetType: 'comic', title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, year: '1988', publisher: 'Marvel' }, // no collectionItemId, no ownedRefresh/ownedReidentify -- the real gradeBlob-without-a-saved-item shape
       expectFetchComps: true,
     });
     assertFalse(!!logs.find((l) => l.startsWith('[owned-asset-authority]')), 'GK-254 logic never even attempted for a fresh scan');
@@ -268,7 +268,7 @@ try {
       // (ownedRefresh), not a re-identify -- the durable pin must apply
       // BEFORE any speculative per-request derivation even has a chance
       // to disagree.
-      requestBody: { title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, publisher: 'Marvel', skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
+      requestBody: { assetType: 'comic', title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, publisher: 'Marvel', skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
     });
     assertEq(body?.assetType, 'book', 'final category is Book -- durable authority wins outright on ordinary refresh');
     assertTrue(body?.refusedToPrice === true, 'new REFUSED');
@@ -284,7 +284,7 @@ try {
     const { body } = await runOnce({
       label: 'G2 durable Comic, ordinary refresh with book-signal title text',
       bearer: TOKEN,
-      requestBody: {
+      requestBody: { assetType: 'comic',
         title: 'Amazing Spider-Man Omnibus Collected Edition Hardcover', issue: '300', grade: 'Very Fine', confidence: 'high',
         isGraded: false, numericGrade: null, publisher: 'Marvel', skipImageSearch: true, collectionItemId: id, ownedRefresh: true,
       },
@@ -303,7 +303,7 @@ try {
     const { body } = await runOnce({
       label: 'G3 durable Book, re-identify derives Comic',
       bearer: TOKEN,
-      requestBody: { title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, publisher: 'Marvel', collectionItemId: id, ownedReidentify: true },
+      requestBody: { assetType: 'comic', title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, publisher: 'Marvel', collectionItemId: id, ownedReidentify: true },
       expectPriceCharting: true,
     });
     assertEq(body?.assetType, 'book', 'durable Book retained');
@@ -319,7 +319,7 @@ try {
     const { body } = await runOnce({
       label: 'G4 durable Comic, re-identify derives Book',
       bearer: TOKEN,
-      requestBody: {
+      requestBody: { assetType: 'comic',
         title: 'Amazing Spider-Man Omnibus Collected Edition Hardcover', issue: '300', grade: 'Very Fine', confidence: 'high',
         isGraded: false, numericGrade: null, publisher: 'Marvel', collectionItemId: id, ownedReidentify: true,
       },
@@ -360,7 +360,7 @@ try {
       label: 'H control -- valid-auth durable Comic refresh, existing economics unchanged',
       bearer: TOKEN,
       pool: POOL,
-      requestBody: { title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, year: '1988', publisher: 'Marvel', skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
+      requestBody: { assetType: 'comic', title: 'Amazing Spider-Man', issue: '300', grade: 'Very Fine', confidence: 'high', isGraded: false, numericGrade: null, year: '1988', publisher: 'Marvel', skipImageSearch: true, collectionItemId: id, ownedRefresh: true },
       expectFetchComps: true,
     });
     assertEq(body?.assetType, 'comic', 'stays comic');

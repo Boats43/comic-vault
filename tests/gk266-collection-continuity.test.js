@@ -144,7 +144,7 @@ try {
     const beforeCount = await gkAssetCount(PRINCIPAL_A);
     let threw = null;
     try {
-      await captureFromScan({
+      await captureFromScan({ assetClass: 'comic',
         principalId: PRINCIPAL_A,
         scanPayload: { collectionItemId, correlationId: randomUUID() },
         photos: [photo()],
@@ -160,7 +160,7 @@ try {
     // Now sync, then retry the SAME collectionItemId — must succeed.
     createdCollectionIds.push(collectionItemId);
     await createCollectionItem({ principalId: PRINCIPAL_A, id: collectionItemId, assetCategory: 'comic', attributes: { title: 'GK-266 Test Comic' } });
-    const result = await captureFromScan({
+    const result = await captureFromScan({ assetClass: 'comic',
       principalId: PRINCIPAL_A,
       scanPayload: { collectionItemId, correlationId: randomUUID() },
       photos: [photo()],
@@ -184,7 +184,7 @@ try {
     const beforeCountB = await gkAssetCount(PRINCIPAL_B);
     let threw = null;
     try {
-      await captureFromScan({
+      await captureFromScan({ assetClass: 'comic',
         principalId: PRINCIPAL_B,
         scanPayload: { collectionItemId, correlationId: randomUUID() },
         photos: [photo()],
@@ -212,8 +212,8 @@ try {
     assertTrue(countRes.rows[0].n === 1, 'D: re-syncing the same id never creates a second collection_item row');
 
     const key = `${TAG}-capture-idempotent`;
-    const first = await captureFromScan({ principalId: PRINCIPAL_A, scanPayload: { collectionItemId, correlationId: randomUUID() }, photos: [photo()], idempotencyKey: key });
-    const second = await captureFromScan({ principalId: PRINCIPAL_A, scanPayload: { collectionItemId, correlationId: randomUUID() }, photos: [photo()], idempotencyKey: key });
+    const first = await captureFromScan({ assetClass: 'comic', principalId: PRINCIPAL_A, scanPayload: { collectionItemId, correlationId: randomUUID() }, photos: [photo()], idempotencyKey: key });
+    const second = await captureFromScan({ assetClass: 'comic', principalId: PRINCIPAL_A, scanPayload: { collectionItemId, correlationId: randomUUID() }, photos: [photo()], idempotencyKey: key });
     assertTrue(first.gkAssetId === second.gkAssetId, 'D: replaying the same captureFromScan idempotencyKey returns the SAME gkAssetId, never a second physical asset');
   }
 
@@ -368,7 +368,7 @@ try {
     const beforeCount = await gkAssetCount(PRINCIPAL_A);
     let captureThrew = null;
     try {
-      await captureFromScan({ principalId: PRINCIPAL_A, scanPayload: { collectionItemId, correlationId: randomUUID() }, photos: [photo()], idempotencyKey: `${TAG}-capture-sync-failure` });
+      await captureFromScan({ assetClass: 'comic', principalId: PRINCIPAL_A, scanPayload: { collectionItemId, correlationId: randomUUID() }, photos: [photo()], idempotencyKey: `${TAG}-capture-sync-failure` });
     } catch (e) { captureThrew = e; }
     assertTrue(captureThrew instanceof AssetsValidationFailedError, 'I: capture attempt against the never-synced id is rejected');
     const afterCount = await gkAssetCount(PRINCIPAL_A);

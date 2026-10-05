@@ -169,13 +169,16 @@ export async function upsertItem(client, { id, principalId, assetCategory, attri
     `INSERT INTO data1_dev.collection_item (id, principal_id, asset_category, attributes)
      VALUES ($1, $2, $3, ${stripFullyProtectedGradingKeysSql('$4')})
      ON CONFLICT (principal_id, id) DO UPDATE
-       SET asset_category = EXCLUDED.asset_category,
-           attributes = ${protectedAttributesMergeSql('collection_item.attributes', 'EXCLUDED.attributes')},
+       SET attributes = ${protectedAttributesMergeSql('collection_item.attributes', 'EXCLUDED.attributes')},
            updated_at = now()
+       WHERE collection_item.asset_category = EXCLUDED.asset_category
      RETURNING id, asset_category, attributes, created_at, updated_at`,
     [id, principalId, assetCategory, JSON.stringify(attributes)]
   );
-  return toRow(res.rows[0]);
+  // U1 — the category is immutable: an existing row is only updated when the incoming
+  // category EQUALS the stored one (the ON CONFLICT ... WHERE above), so a mismatch
+  // changes nothing and returns no row. null = category conflict (caller decides).
+  return res.rows.length > 0 ? toRow(res.rows[0]) : null;
 }
 
 // Full replace of `attributes` for every ordinary field — mirrors the
@@ -188,10 +191,10 @@ export async function upsertItem(client, { id, principalId, assetCategory, attri
 export async function updateItem(client, { id, principalId, assetCategory, attributes }) {
   const res = await client.query(
     `UPDATE data1_dev.collection_item
-        SET asset_category = COALESCE($3, asset_category),
-            attributes = ${protectedAttributesMergeSql('attributes', '$4')},
+        SET attributes = ${protectedAttributesMergeSql('attributes', '$4')},
             updated_at = now()
       WHERE principal_id = $1 AND id = $2
+        AND ($3::text IS NULL OR asset_category = $3::text)
       RETURNING id, asset_category, attributes, created_at, updated_at`,
     [principalId, id, assetCategory ?? null, JSON.stringify(attributes)]
   );

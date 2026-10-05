@@ -118,7 +118,7 @@ export const buildResearchFacts = (item) => {
   const slabbed = (gradeConfirmed && a.operatorIsGraded != null ? a.operatorIsGraded : a.isGraded) === true;
 
   const facts = {
-    assetCategory: present(a.assetType) ? String(a.assetType) : (present(a.assetCategory) ? String(a.assetCategory) : 'comic'),
+    assetCategory: present(a.assetType) ? String(a.assetType) : (present(a.assetCategory) ? String(a.assetCategory) : 'unspecified'), // U1 — never defaulted to comic
     gkAssetId: a.gkAssetId || null,
     identityStanding: STANDING_BLOCKING.has(identityStanding) ? identityStanding : (identityBlocked ? 'UNRESOLVED' : 'CONFIRMED'),
     title: field(a.title),

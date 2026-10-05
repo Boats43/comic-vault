@@ -2591,8 +2591,10 @@ export default async function handler(req, res) {
     }
 
     // Session 4B — Set assetType early so identityComplete logic can use it.
-    // Defaults to 'comic' when not provided (backward compatibility).
-    out.assetType = assetType || 'comic';
+    // U1 — NO DEFAULT: a missing assetType is NOT 'comic'. It stays unset, and GK-250's economic
+    // allowlist (only the exact string 'comic' may be priced) refuses it. Every request site now
+    // sends its category explicitly; an owned refresh is pinned to the durable category below.
+    out.assetType = assetType;
     console.log(`[enrich-entry] assetType from req.body: ${assetType}, out.assetType: ${out.assetType}`);
 
     // ─────────────────────────────────────────────────────────────────
@@ -7394,7 +7396,7 @@ export default async function handler(req, res) {
               appId: process.env.EBAY_APP_ID,
               certId: process.env.EBAY_CERT_ID,
               // Session 4B — adapter-aware comp queries (book category 267, comic 259104)
-              categoryId: getAdapter(out.assetType).ebayCategoryId,
+              categoryId: getAdapter(out.assetType)?.ebayCategoryId ?? null,
               assetType: out.assetType,
               author: out.author || null,  // book identity field for buildBookQuery
               cvVolumeStartYear: comicVine?.startYear || null,  // Q128 — volume-label-year corroboration (Harley Quinn #62 class). NOT comicVine?.volume?.startYear — that shape is always undefined (comicVine.volume is a flat string); .startYear is the correct top-level field.
@@ -9356,7 +9358,9 @@ export default async function handler(req, res) {
     });
     // Session 4B — Pass adapter identityFields for asset-aware confidence check
     // Crow Dead Time fix — pass pcProductId to allow publisher skip when PC matched a real product
-    const adapter = getAdapter(out.assetType);
+    // U1 — no adapter (unset/unknown type) is NOT the comic adapter: identity is judged on the one
+    // universally-required field (title). Such a response is already economically refused (GK-250).
+    const adapter = getAdapter(out.assetType) || { identityFields: ['title'] };
     const idCheck = assessIdentityConfidence(sanitizedIdentity, identitySource, adapter.identityFields, out.pcProductId);
     console.log(`[identity-gate] assetType=${out.assetType} fields=${JSON.stringify(adapter.identityFields)} missing=${JSON.stringify(idCheck.missingFields)}`);
 

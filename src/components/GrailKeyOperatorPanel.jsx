@@ -197,6 +197,14 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
       return;
     }
     setCaptureState("capturing");
+    // U1 — NO SILENT COMIC: the physical asset's class IS the catalogue item's own explicit
+    // category. An item with no supported category on record cannot be captured (refused
+    // pending an operator choice), never captured as 'comic' by absence.
+    const assetClass = item?.assetCategory;
+    if (assetClass !== 'comic' && assetClass !== 'book' && assetClass !== 'generic') {
+      setCaptureState({ error: 'This item has no category on record, so it cannot be captured as a physical asset yet.' });
+      return;
+    }
     const idempotencyKey = getOrCreateCaptureIdempotencyKey(collectionItemId);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS * 4); // photo upload, allow more time
@@ -223,6 +231,7 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
           scanPayload,
           photos: [{ bytes: stripDataUrlPrefix(localPhoto), contentType: contentTypeFromDataUrl(localPhoto), captureRole: "capture-photo" }],
           idempotencyKey,
+          assetClass, // U1 — explicit, from the item's own category
           ...(disposition ? { copyDisposition: disposition } : {}),
         }),
         signal: controller.signal,

@@ -39,8 +39,9 @@ import { verifyToken, InvalidTokenError } from '../src/modules/auth/index.js';
 import {
   listMyCollection, getMyCollectionItem, createCollectionItem,
   updateCollectionItem, deleteCollectionItem, claimModelBaseline,
-  ValidationFailedError, AuthorizationFailedError, NotFoundError,
+  ValidationFailedError, AuthorizationFailedError, NotFoundError, CategoryImmutableError,
 } from '../src/modules/collection/index.js';
+import { isSupportedAssetCategory, describeSupportedCategories } from '../src/lib/assetCategories.js';
 import { resolveCollectionItemLink } from '../src/modules/assets/index.js';
 import { assertPhysicalCopySaveAllowed, PhysicalCopyCandidateCheckUnavailableError } from '../src/modules/capture/index.js';
 import { respondPhysicalCopyError } from '../src/lib/physicalCopyErrors.js';
@@ -176,6 +177,11 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const { id: bodyId, assetCategory, attributes, images, gradeReceiptId } = req.body || {};
+      // U1 — NO DEFAULT CATEGORY: refuse BEFORE the physical-copy check or any photo upload
+      // (a refused save must leave no orphan blob and no row).
+      if (!isSupportedAssetCategory(assetCategory)) {
+        return res.status(400).json({ error: 'ASSET_CATEGORY_REQUIRED', message: `assetCategory is required and must be one of ${describeSupportedCategories()}.` });
+      }
       // GK-279 — SERVER-OWNED physical-copy standing for a NEW row, evaluated BEFORE
       // any photo upload or write (a refusal leaves no orphan and no row). Updates to
       // an existing row are not a duplicate-creation event. Failure to determine
@@ -189,7 +195,7 @@ export default async function handler(req, res) {
           if (lookupErr instanceof NotFoundError) isNewRow = true;
           else throw new PhysicalCopyCandidateCheckUnavailableError('collection existence check failed', lookupErr?.code || lookupErr?.name);
         }
-        if (isNewRow) await assertPhysicalCopySaveAllowed({ principalId, id: bodyId, attributes });
+        if (isNewRow) await assertPhysicalCopySaveAllowed({ principalId, id: bodyId, attributes, assetCategory });
       }
       const resolvedAttributes = await withResolvedImages(attributes, images);
       const created = await createCollectionItem({ principalId, id: bodyId, assetCategory, attributes: resolvedAttributes });
@@ -231,6 +237,9 @@ export default async function handler(req, res) {
     if (respondPhysicalCopyError(res, e, { principalId, handler: 'collection-create', req })) return;
     if (e instanceof ValidationFailedError) {
       return res.status(400).json({ error: e.message });
+    }
+    if (e instanceof CategoryImmutableError) {
+      return res.status(409).json({ error: 'ASSET_CATEGORY_IMMUTABLE', message: 'This item already has a category and it cannot be changed.' });
     }
     if (e instanceof NotFoundError) {
       return res.status(404).json({ error: 'Not found' });

@@ -11121,6 +11121,7 @@ function WatchMode({ onStop }) {
               method: "POST",
               headers: { "Content-Type": "application/json", ...getVaultHeaders() },
               body: JSON.stringify({
+                assetType: data.assetType, // U1 — explicit category, never defaulted server-side
                 title: data.title,
                 issue: issueNum,
                 grade: data.grade,
@@ -11648,7 +11649,7 @@ export default function App() {
             // second device landed with no assetCategory at all and would
             // have rendered through the ordinary comic path there —
             // exactly the cross-device round-trip U4.6 requires to work.
-            assetCategory: item.assetCategory || "comic",
+            assetCategory: item.assetCategory, // U1 — never defaulted; the server row always carries its explicit category
             ...item.attributes,
             ...(existingImages ? { images: existingImages } : {}),
             _syncStatus: "synced",
@@ -11789,6 +11790,7 @@ export default function App() {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify({
+            assetType: item.assetCategory ?? item.assetType, // U1 — explicit category, never defaulted server-side
             title: item.title,
             issue: item.issue || item.title?.match(/#(\d+)/)?.[1] || null,
             grade: item.grade,
@@ -12233,6 +12235,12 @@ export default function App() {
   }, [installDismissed, installPrompt, showSafariBanner]);
 
   const addToCatalogue = useCallback(async (data, sourceDataUrl, ownerScope = null) => {
+    // U1 — NO SILENT COMIC: a scan result is only saved as an explicit comic or book. Anything
+    // else (missing, 'unsupported', unknown) is refused here, never folded into 'comic'.
+    if (data?.assetType !== 'comic' && data?.assetType !== 'book') {
+      console.warn('[addToCatalogue] refused: no supported assetType (comic|book) on the scan result');
+      return null;
+    }
     // LIVE EXPOSURE CLOSURE (2026-10-04) — a long-running scan/bulk-import
     // that started under principal A must not save into principal B's
     // scope if the account changed mid-flight. Callers pass the principal
@@ -12292,8 +12300,8 @@ export default function App() {
       // set on this object at all before this fix) purely as the raw,
       // non-authoritative signal — api/enrich.js's own durable-authority
       // resolution reads assetCategory, never assetType, for authority.
-      assetType: data.assetType || 'comic',
-      assetCategory: data.assetType === 'book' ? 'book' : 'comic',
+      assetType: data.assetType, // U1 — explicit; addToCatalogue refuses anything but comic|book above
+      assetCategory: data.assetType,
       assetTypeConfident: data.assetTypeConfident !== false,
       foreignEdition: data.foreignEdition === true,
       isReprint: data.isReprint === true,
@@ -12564,7 +12572,7 @@ export default function App() {
           // details provided".
           reason: data.reason || null,
           // Session 4B — Pass assetType from grade.js (book vs comic routing)
-          assetType: data.assetType || 'comic',
+          assetType: data.assetType,
           // 2026-07-18 — Vision's own "is this actually a comic" read
           assetTypeConfident: data.assetTypeConfident,
           foreignEdition: data.foreignEdition,
@@ -13027,6 +13035,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({
+          assetType: 'comic', // U1 — explicit category, never defaulted server-side
           barcode,
           title: "Barcode scan",  // placeholder
           skipVision: true,
@@ -13194,6 +13203,7 @@ export default function App() {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify({
+            assetType: data.assetType, // U1 — explicit category, never defaulted server-side
             title: data.title,
             issue: bulkIssue,
             grade: data.grade,
@@ -14035,6 +14045,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({
+          assetType: item.assetCategory ?? item.assetType, // U1 — explicit category, never defaulted server-side
           title: sanitizedTitle,
           issue: item.issue || item.title?.match(/#(\d+)/)?.[1] || null,
           grade: item.grade,
@@ -14514,6 +14525,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getVaultHeaders() },
         body: JSON.stringify({
+          assetType: gradeData.assetType, // U1 — explicit category, never defaulted server-side
           title: gradeData.title,
           issue: issueNum,
           grade: gradeData.grade,
@@ -15472,6 +15484,7 @@ export default function App() {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', ...getVaultHeaders() },
                             body: JSON.stringify({
+                              assetType: 'comic', // U1 — explicit category, never defaulted server-side
                               manualIdentity: true,
                               skipVision: true,
                               skipImageSearch: true,
@@ -15685,6 +15698,7 @@ export default function App() {
                             method: "POST",
                             headers: { "Content-Type": "application/json", ...getVaultHeaders() },
                             body: JSON.stringify({
+                              assetType: data.assetType, // U1 — explicit category, never defaulted server-side
                               title: data.title, issue: data.issue, grade: data.grade,
                               isGraded: data.isGraded, numericGrade: data.numericGrade,
                               year: data.year, publisher: data.publisher,
@@ -15824,6 +15838,7 @@ export default function App() {
                           method: "POST",
                           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
                           body: JSON.stringify({
+                            assetType: data.assetType, // U1 — explicit category, never defaulted server-side
                             title: data.title, issue: data.issue, grade: data.grade,
                             isGraded: data.isGraded, numericGrade: data.numericGrade,
                             year: data.year, publisher: data.publisher,
@@ -15950,6 +15965,7 @@ export default function App() {
                           method: "POST",
                           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
                           body: JSON.stringify({
+                            assetType: data.assetType, // U1 — explicit category, never defaulted server-side
                             title: data.title, issue: data.issue, grade: data.grade,
                             isGraded: data.isGraded, numericGrade: data.numericGrade,
                             year: data.year, publisher: data.publisher,

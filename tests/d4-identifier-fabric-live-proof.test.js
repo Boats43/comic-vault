@@ -59,7 +59,7 @@ console.log('-- Identity permanence --\n');
 const assetA = await assets.createPhysicalAsset({
   principalId: OPERATOR_PRINCIPAL,
   captureBasis: { marker: D4_PROVENANCE_MARKER, slot: 'identity-permanence-A', ts: Date.now() },
-  assetClass: 'd4-proof', source: D4_PROVENANCE_MARKER, idempotencyKey: uid('mint-A'),
+  assetClass: 'generic', source: D4_PROVENANCE_MARKER, idempotencyKey: uid('mint-A'),
 });
 const originalGkAssetId = assetA.assetId;
 console.log('  Minted real gkAssetId A:', originalGkAssetId);
@@ -118,7 +118,7 @@ console.log('\n-- Many assets -> one PRODUCT_CLASS identifier --\n');
 
 const assetB = await assets.createPhysicalAsset({
   principalId: OPERATOR_PRINCIPAL, captureBasis: { marker: D4_PROVENANCE_MARKER, slot: 'B', ts: Date.now() },
-  assetClass: 'd4-proof', source: D4_PROVENANCE_MARKER, idempotencyKey: uid('mint-B'),
+  assetClass: 'generic', source: D4_PROVENANCE_MARKER, idempotencyKey: uid('mint-B'),
 });
 const identifierP = await assets.recordIdentifierDefinition({
   principalId: OPERATOR_PRINCIPAL, scheme: 'gtin', issuingAuthority: 'GS1',
@@ -284,7 +284,7 @@ console.log('\n-- Unknown state --\n');
 
 const assetUnknown = await assets.createPhysicalAsset({
   principalId: OPERATOR_PRINCIPAL, captureBasis: { marker: D4_PROVENANCE_MARKER, slot: 'unknown-state', ts: Date.now() },
-  assetClass: 'd4-proof', source: D4_PROVENANCE_MARKER, idempotencyKey: uid('mint-unknown'),
+  assetClass: 'generic', source: D4_PROVENANCE_MARKER, idempotencyKey: uid('mint-unknown'),
 });
 const unknownAssertions = await dbClient.query(`SELECT count(*)::int AS n FROM asset_identifier_assertion WHERE asset_id=$1`, [assetUnknown.assetId]);
 const unknownObs = await dbClient.query(`SELECT count(*)::int AS n FROM asset_raw_observation WHERE asset_id=$1`, [assetUnknown.assetId]);

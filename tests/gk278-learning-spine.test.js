@@ -125,7 +125,7 @@ try {
   console.log('\n-- T2/T3 client cannot create events or forge provenance --\n');
   const before = (await preds(PA)).length;
   const cid = itemId('forge');
-  const forge = await coll(tokA, 'POST', { body: { id: cid, attributes: { title: 'Creepy', modelPredictionEvent: { provider: 'forged' }, modelPredictedProvenance: { predictionEventId: randomUUID(), provider: 'forged', model: 'forged' }, modelPredictedGrade: 'CGC 9.8' } } });
+  const forge = await coll(tokA, 'POST', { body: { assetCategory: 'comic', id: cid, attributes: { title: 'Creepy', modelPredictionEvent: { provider: 'forged' }, modelPredictedProvenance: { predictionEventId: randomUUID(), provider: 'forged', model: 'forged' }, modelPredictedGrade: 'CGC 9.8' } } });
   eq(forge.statusCode, 200, 'T2 save with forged prediction material succeeds as an ordinary save');
   eq((await preds(PA)).length, before, 'T2 forged payload created ZERO prediction events');
   const fa = await attrsOf(PA, cid);
@@ -161,7 +161,7 @@ try {
   console.log('\n-- receipt -> item linkage (prediction event referenced by the server-owned baseline) --\n');
   const cid2 = itemId('item2');
   const g3 = await grade(tokA);
-  const s2 = await coll(tokA, 'POST', { body: { id: cid2, gradeReceiptId: g3.body.gradeReceiptId, attributes: { title: 'Creepy', issue: '1', year: '1964', publisher: 'Warren' } } });
+  const s2 = await coll(tokA, 'POST', { body: { assetCategory: 'comic', id: cid2, gradeReceiptId: g3.body.gradeReceiptId, attributes: { title: 'Creepy', issue: '1', year: '1964', publisher: 'Warren' } } });
   eq(s2.statusCode, 200, 'save with receipt');
   const a2 = await attrsOf(PA, cid2);
   const latestGrade = (await preds(PA)).filter((r) => r.surface === 'GRADE').pop();
@@ -197,7 +197,7 @@ try {
 
   console.log('\n-- T9 identity correction -- real validated manual correction --\n');
   const cid3 = itemId('identity');
-  await coll(tokA, 'POST', { body: { id: cid3, attributes: { title: 'Creepy', issue: '1', year: '1964', publisher: 'Warren' } } });
+  await coll(tokA, 'POST', { body: { assetCategory: 'comic', id: cid3, attributes: { title: 'Creepy', issue: '1', year: '1964', publisher: 'Warren' } } });
   await enrich(tokA, enrichBase(cid3, {
     issue: '2', images: [`data:image/png;base64,${PNG}`], skipVision: true, manualIdentity: true, identitySource: 'manual',
     manualAuthority: { correctedBy: 'operator', correctedFields: ['issue'] }, priorIdentity: { title: 'Creepy', issue: '1', year: '1964', publisher: 'Warren' },

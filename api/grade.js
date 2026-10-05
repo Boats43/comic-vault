@@ -206,11 +206,23 @@ const attachGradeReceipt = async (result, principalId, ctx = {}) => {
 // Single choke point: all res.status(200).json() calls pass through this.
 // Prevents assetType from being undefined regardless of which path
 // (Vision fallback, eBay-first, watch pipeline) the scan takes.
-const ensureAssetType = (responseObj, initialScan = null) => {
+// U1 — NO SILENT COMIC: a scan the model itself could not establish as a comic (no title, "not a
+// comic", "unknown", or no publisher/year/issue AND assetTypeConfident !== true — the same
+// conditions the client's no-comic gate already rejects) is stamped 'unsupported', never 'comic'.
+// The operator can then explicitly choose SAVE AS GENERIC; nothing is minted automatically.
+export const ensureAssetType = (responseObj, initialScan = null) => {
   if (!responseObj.assetType) {
     const isBook = detectBookSignals(responseObj) ||
                    (initialScan && detectBookSignals(initialScan));
-    responseObj.assetType = isBook ? 'book' : 'comic';
+    if (isBook) {
+      responseObj.assetType = 'book';
+    } else {
+      const title = String(responseObj.title || '').trim().toLowerCase();
+      const noIdentity = !responseObj.publisher && !responseObj.year && !responseObj.issue;
+      const unsupported = !title || title === 'unknown' || title.includes('not a comic') ||
+        (noIdentity && responseObj.assetTypeConfident !== true);
+      responseObj.assetType = unsupported ? 'unsupported' : 'comic';
+    }
   }
   return responseObj;
 };

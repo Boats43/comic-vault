@@ -83,7 +83,7 @@ const createdAssetIds = [];
 try {
   console.log('-- setup: mint one real test asset via the real capture-scan handler --\n');
   const collectionItemId = `${TAG}-item`;
-  const mintBody = {
+  const mintBody = { assetClass: 'comic',
     scanPayload: {
       correlationId: randomUUID(),
       collectionItemId,

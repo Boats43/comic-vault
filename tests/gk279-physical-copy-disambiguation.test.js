@@ -66,7 +66,7 @@ async function newItem(principalId, id, attrs) {
 async function capture(principalId, { collectionItemId, key, disposition, title = 'x', photo = 'a', extra = {} }) {
   const req = {
     method: 'POST', headers: { authorization: `Bearer ${tokenFor(principalId)}`, 'x-forwarded-for': `10.${Math.floor(Math.random()*250)}.${Math.floor(Math.random()*250)}.${Math.floor(Math.random()*250)}` },
-    body: {
+    body: { assetClass: 'comic',
       scanPayload: { correlationId: key, collectionItemId, book: { title }, ...extra },
       photos: [{ bytes: Buffer.from(`${TAG}-${photo}-${key}`).toString('base64'), contentType: 'image/jpeg', captureRole: 'capture-photo' }],
       idempotencyKey: key,

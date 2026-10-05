@@ -18,7 +18,8 @@
 
 import { acquireConnection } from './db.js';
 import * as repo from './repository.js';
-import { ValidationFailedError, AuthorizationFailedError, NotFoundError } from './errors.js';
+import { ValidationFailedError, AuthorizationFailedError, NotFoundError, CategoryImmutableError } from './errors.js';
+import { isSupportedAssetCategory, describeSupportedCategories } from '../../lib/assetCategories.js';
 import { appendOperatorCorrectionEventTx } from '../learning/index.js';
 import { planGradingCorrections, planIdentityCorrection } from '../../lib/operatorCorrectionPlan.js';
 
@@ -62,15 +63,23 @@ export async function getMyCollectionItem({ principalId, id } = {}) {
   }
 }
 
-export async function createCollectionItem({ principalId, id, assetCategory = 'comic', attributes } = {}) {
+export async function createCollectionItem({ principalId, id, assetCategory, attributes } = {}) {
   requireFields({ principalId, id, attributes }, ['principalId', 'id', 'attributes']);
+  // U1 — NO DEFAULT CATEGORY. A missing/unknown category never becomes 'comic'.
+  if (!isSupportedAssetCategory(assetCategory)) {
+    throw new ValidationFailedError(`assetCategory is required and must be one of ${describeSupportedCategories()} (no default), got: ${assetCategory === undefined ? 'undefined' : JSON.stringify(assetCategory)}`);
+  }
   if (typeof attributes !== 'object' || Array.isArray(attributes)) {
     throw new ValidationFailedError('attributes must be a JSON object');
   }
   const client = await acquireConnection();
   try {
     await assertPrincipalActive(client, principalId);
-    return await repo.upsertItem(client, { id, principalId, assetCategory, attributes });
+    const row = await repo.upsertItem(client, { id, principalId, assetCategory, attributes });
+    if (!row) {
+      throw new CategoryImmutableError(`collection item ${id} already exists with a different category; category is immutable (no reclassification)`);
+    }
+    return row;
   } finally {
     client.release();
   }
@@ -81,11 +90,20 @@ export async function updateCollectionItem({ principalId, id, assetCategory, att
   if (typeof attributes !== 'object' || Array.isArray(attributes)) {
     throw new ValidationFailedError('attributes must be a JSON object');
   }
+  if (assetCategory !== undefined && assetCategory !== null && !isSupportedAssetCategory(assetCategory)) {
+    throw new ValidationFailedError(`assetCategory must be one of ${describeSupportedCategories()}, got: ${JSON.stringify(assetCategory)}`);
+  }
   const client = await acquireConnection();
   try {
     await assertPrincipalActive(client, principalId);
     const updated = await repo.updateItem(client, { id, principalId, assetCategory, attributes });
-    if (!updated) throw new NotFoundError(`collection item ${id} does not exist`);
+    if (!updated) {
+      // Distinguish a missing row from a category mismatch (the update only applies when the
+      // supplied category equals the stored one).
+      const existing = assetCategory ? await repo.getByPrincipalAndId(client, principalId, id) : null;
+      if (existing) throw new CategoryImmutableError(`collection item ${id} has a different category; category is immutable (no reclassification)`);
+      throw new NotFoundError(`collection item ${id} does not exist`);
+    }
     return updated;
   } finally {
     client.release();

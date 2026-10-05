@@ -37,6 +37,7 @@
 // /api/asset-media-append, never via /api/collection.
 
 import { authFetch } from "./grailkeySession.js";
+import { isSupportedAssetCategory } from "./assetCategories.js";
 
 export async function fetchServerCollection() {
   try {
@@ -91,12 +92,15 @@ export async function pushCollectionItem(entry) {
     // own top-level field (never inside attributes) and the server derives the model
     // baseline from its own receipt record. No model/grade authority value is ever sent.
     const { images, _syncStatus, _pendingEvidenceAppends, _gradeReceiptId, assetCategory, ...attributes } = entry || {};
+    // U1 — NO DEFAULT CATEGORY. An entry with no explicit supported category is never pushed
+    // (it stays pending locally); it is never relabeled 'comic' on its way to the server.
+    if (!isSupportedAssetCategory(assetCategory)) return null;
     const res = await authFetch("/api/collection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id: entry.id,
-        assetCategory: assetCategory || "comic",
+        assetCategory,
         attributes,
         images: Array.isArray(images) && images.length > 0 ? images : undefined,
         gradeReceiptId: typeof _gradeReceiptId === "string" ? _gradeReceiptId : undefined,

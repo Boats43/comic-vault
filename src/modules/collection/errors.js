@@ -17,6 +17,14 @@ export class ValidationFailedError extends CollectionModuleError {
   }
 }
 
+// U1 — category is IMMUTABLE once a row exists: ordinary writes (refresh, re-push,
+// stale clients) can never change it, and there is no reclassification feature.
+export class CategoryImmutableError extends CollectionModuleError {
+  constructor(message) {
+    super('ASSET_CATEGORY_IMMUTABLE', message);
+  }
+}
+
 export class AuthorizationFailedError extends CollectionModuleError {
   constructor(message) {
     super('AUTHORIZATION_FAILED', message);

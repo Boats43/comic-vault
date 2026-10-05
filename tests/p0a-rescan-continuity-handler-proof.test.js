@@ -110,7 +110,7 @@ try {
   {
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { scanPayload: { collectionItemId: OLD_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap1` },
+      body: { assetClass: 'comic', scanPayload: { collectionItemId: OLD_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap1` },
     };
     idempotencyKeysUsed.push(`${TAG}:cap1:mint`, `${TAG}:cap1:link`, `${TAG}:cap1:identity`);
     const res = mockRes();
@@ -128,7 +128,7 @@ try {
   {
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { scanPayload: { collectionItemId: NEW_ID, priorCollectionItemId: OLD_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap2` },
+      body: { assetClass: 'comic', scanPayload: { collectionItemId: NEW_ID, priorCollectionItemId: OLD_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap2` },
     };
     idempotencyKeysUsed.push(`${TAG}:cap2:link`, `${TAG}:cap2:identity`);
     const res = mockRes();
@@ -171,7 +171,7 @@ try {
     await createCollectionItem({ principalId: JIMMY, id: NEW_ID_2, assetCategory: 'comic', attributes: { title: 'P0-A Handler Test Comic' } });
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { scanPayload: { collectionItemId: NEW_ID_2, priorCollectionItemId: NEW_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap3` },
+      body: { assetClass: 'comic', scanPayload: { collectionItemId: NEW_ID_2, priorCollectionItemId: NEW_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap3` },
     };
     idempotencyKeysUsed.push(`${TAG}:cap3:link`, `${TAG}:cap3:identity`);
     const res = mockRes();
@@ -201,7 +201,7 @@ try {
   {
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { scanPayload: { collectionItemId: `${TAG}-classic-bogus`, priorCollectionItemId: `${TAG}-never-existed`, correlationId: randomUUID() }, idempotencyKey: `${TAG}:capbogus` },
+      body: { assetClass: 'comic', scanPayload: { collectionItemId: `${TAG}-classic-bogus`, priorCollectionItemId: `${TAG}-never-existed`, correlationId: randomUUID() }, idempotencyKey: `${TAG}:capbogus` },
     };
     const res = mockRes();
     await handleCaptureScan(req, res);

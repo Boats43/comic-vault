@@ -77,7 +77,7 @@ const correct = async (id, field, value, prior) => {
 };
 const attrs = async (id) => (await client.query('SELECT attributes FROM collection_item WHERE principal_id=$1 AND id=$2', [PA, id])).rows[0]?.attributes;
 const events = async (id) => (await client.query(`SELECT * FROM operator_correction_event WHERE principal_id=$1 AND collection_item_id=$2 AND surface='IDENTITY' ORDER BY id`, [PA, id])).rows;
-const seed = async (id) => { await coll('POST', { body: { id, attributes: { title: 'Creepy', issue: '98', year: '1964', publisher: 'Warren' } } }); };
+const seed = async (id) => { await coll('POST', { body: { assetCategory: 'comic', id, attributes: { title: 'Creepy', issue: '98', year: '1964', publisher: 'Warren' } } }); };
 
 try {
   console.log('-- A. validated issue correction 98 -> 99: ONE transaction --\n');
@@ -98,7 +98,7 @@ try {
   eq(r.statusCode, 200, 'ordinary save accepted as a request');
   eq((await attrs(A)).issue, '99', 'B: durable issue stays 99 -- client 97 cannot win');
   eq((await events(A))[0].after_value, { issue: '99' }, 'B: event.after still equals the durable value');
-  r = await coll('POST', { body: { id: A, attributes: { title: 'Creepy', issue: '96', year: '1964', publisher: 'Warren' } } });
+  r = await coll('POST', { body: { assetCategory: 'comic', id: A, attributes: { title: 'Creepy', issue: '96', year: '1964', publisher: 'Warren' } } });
   eq((await attrs(A)).issue, '99', 'E: upsert (ON CONFLICT) cannot replace the corrected value');
   await coll('PUT', { id: A, body: { attributes: { title: 'Creepy', issue: null } } });
   eq((await attrs(A)).issue, '99', 'E: explicit null cannot clear the corrected value');

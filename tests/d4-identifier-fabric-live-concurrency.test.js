@@ -65,11 +65,11 @@ console.log('  Session transaction_isolation:', iso.rows[0].transaction_isolatio
 
 const asset1 = await assets.createPhysicalAsset({
   principalId: OPERATOR_PRINCIPAL, captureBasis: { marker: MARKER, slot: '1', ts: Date.now() },
-  assetClass: 'd4-proof', source: MARKER, idempotencyKey: uid('mint-1'),
+  assetClass: 'generic', source: MARKER, idempotencyKey: uid('mint-1'),
 });
 const asset2 = await assets.createPhysicalAsset({
   principalId: OPERATOR_PRINCIPAL, captureBasis: { marker: MARKER, slot: '2', ts: Date.now() },
-  assetClass: 'd4-proof', source: MARKER, idempotencyKey: uid('mint-2'),
+  assetClass: 'generic', source: MARKER, idempotencyKey: uid('mint-2'),
 });
 const idf = await assets.recordIdentifierDefinition({
   principalId: OPERATOR_PRINCIPAL, scheme: 'isbn', issuingAuthority: 'ISBN-agency',
