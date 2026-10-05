@@ -96,6 +96,7 @@ export {
 };
 
 import { checkRateLimit } from "./rate-limit.js";
+import { enforceSpendGuard } from "../src/lib/spendGuard.js";
 
 const FINDING_ENDPOINT =
   "https://svcs.ebay.com/services/search/FindingService/v1";
@@ -2598,6 +2599,13 @@ export default async function handler(req, res) {
     if (cached) {
       return res.status(200).json(cached);
     }
+
+    // DURABLE SPEND GUARD (LIVE EXPOSURE CLOSURE, 2026-10-04) — reserve this
+    // request's units against the per-principal and global DAILY caps BEFORE
+    // any paid provider call. Refuses 429/503 with a stable code and fails
+    // closed if the quota store is unavailable. Placed after warmup /
+    // validation / cache hits so those cost nothing.
+    if (await enforceSpendGuard(res, { principalId: auth.principalId, endpoint: 'comps' })) return;
 
     const comps = await fetchComps({
       title,

@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { requireAuthenticatedPrincipal } from "../src/lib/accessGate.js";
 import { checkRateLimit } from "./rate-limit.js";
+import { enforceSpendGuard } from "../src/lib/spendGuard.js";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -35,6 +36,13 @@ export default async function handler(req, res) {
       res.status(400).json({ error: "comics array required" });
       return;
     }
+
+    // DURABLE SPEND GUARD (LIVE EXPOSURE CLOSURE, 2026-10-04) — reserve this
+    // request's units against the per-principal and global DAILY caps BEFORE
+    // any paid provider call. Refuses 429/503 with a stable code and fails
+    // closed if the quota store is unavailable. Placed after warmup /
+    // validation / cache hits so those cost nothing.
+    if (await enforceSpendGuard(res, { principalId: auth.principalId, endpoint: "manage" })) return;
 
     // Build a compact summary + top books instead of sending full catalogue.
     const getPrice = (c) => {

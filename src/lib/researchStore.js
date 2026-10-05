@@ -16,6 +16,7 @@ export class ResearchStoreUnavailableError extends Error {
 
 let override = null;
 export const setResearchStoreForTests = (store) => { override = store; };
+export const hasResearchStoreOverride = () => override !== null;
 
 let redis = null;
 const getRedis = async () => {
@@ -50,6 +51,14 @@ const redisStore = {
     return n;
   }),
   decr: (key) => wrap((r) => r.decr(key)),
+  // Atomic INCRBY (src/lib/spendGuard.js). Returns the exact post-increment
+  // value; (re)arms the TTL when this call created the key.
+  incrBy: (key, amount, ttlSeconds) => wrap(async (r) => {
+    const n = await r.incrby(key, amount);
+    if (n === amount) await r.expire(key, ttlSeconds);
+    return n;
+  }),
+  decrBy: (key, amount) => wrap((r) => r.decrby(key, amount)),
 };
 
 export const researchStore = () => override || redisStore;
@@ -67,6 +76,8 @@ export const createMemoryResearchStore = () => {
     setNx: async (k, v, ttl) => { if (live(k)) return false; m.set(k, { v, exp: ttl ? now() + ttl * 1000 : 0 }); return true; },
     incr: async (k, ttl) => { const e = live(k); const n = (e ? e.v : 0) + 1; m.set(k, { v: n, exp: e?.exp || (ttl ? now() + ttl * 1000 : 0) }); return n; },
     decr: async (k) => { const e = live(k); const n = (e ? e.v : 0) - 1; m.set(k, { v: n, exp: e?.exp || 0 }); return n; },
+    incrBy: async (k, amount, ttl) => { const e = live(k); const n = (e ? e.v : 0) + amount; m.set(k, { v: n, exp: e?.exp || (ttl ? now() + ttl * 1000 : 0) }); return n; },
+    decrBy: async (k, amount) => { const e = live(k); const n = (e ? e.v : 0) - amount; m.set(k, { v: n, exp: e?.exp || 0 }); return n; },
   };
 };
 

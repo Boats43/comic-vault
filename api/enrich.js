@@ -177,6 +177,7 @@ import { attemptChain1, buildChain1ObservationsFromRawComps } from "../src/lib/d
 import { attemptOutcome1, attemptOutcome1Production } from "../src/lib/outcome1RuntimeBridge.js";
 import { buildScanLogRecord, buildScanLogKey, SCAN_LOG_INDEX_KEY } from "../src/lib/scanLog.js";
 import { checkRateLimit } from "./rate-limit.js";
+import { enforceSpendGuard } from "../src/lib/spendGuard.js";
 import { randomUUID } from "node:crypto";
 import { buildPipelineAudit } from "../src/lib/pipelineAudit.js";
 import { resetTitleStripStats, logTitleStripSummary } from "../src/lib/titleStripStats.js";
@@ -2315,6 +2316,13 @@ export default async function handler(req, res) {
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({ error: 'Invalid request body' });
     }
+
+    // DURABLE SPEND GUARD (LIVE EXPOSURE CLOSURE, 2026-10-04) — reserve this
+    // request's units against the per-principal and global DAILY caps BEFORE
+    // any paid provider call. Refuses 429/503 with a stable code and fails
+    // closed if the quota store is unavailable. Placed after warmup /
+    // validation / cache hits so those cost nothing.
+    if (await enforceSpendGuard(res, { principalId: auth.principalId, endpoint: 'enrich' })) return;
 
     // Phase timing instrumentation — Buyer mode speed measurement.
     // All offsets are ms relative to handler entry. Logged to Vercel
