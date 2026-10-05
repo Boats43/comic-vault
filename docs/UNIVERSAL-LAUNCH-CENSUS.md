@@ -271,3 +271,29 @@ Capture (Generic-from-scan path and its ordering defect, de-comic-ing the defaul
 - **Bootstrap exception:** `MILESTONE_TEN_H8_BOOTSTRAP === 'true'` (`:121`) permits a capture only if `hasAnyPhysicalAsset()` is false (`:137`); any error determining that is treated as exhausted (fail closed, `:135-140`).
 - **Exhaustion:** any `gk_asset` row existing (`:141-148`, 403 `PRODUCTION_CAPTURE_BOOTSTRAP_EXHAUSTED`). The registry records 4 `gk_asset` rows in Production (DOC, GK-266/2026-10-03), so the one-shot bootstrap is exhausted (DOC, not re-read).
 - **Production value: NOT READ.** No Vercel CLI is installed, and the Vercel MCP environment listing would return every secret into the transcript (forbidden by Secret Hygiene); the registry records the flag as write-only (DOC, `docs/TICKET-REGISTRY.md` GK-279 section). To determine it, Jimmy inspects **Vercel Dashboard → comic-vault → Settings → Environment Variables → `MILESTONE_TEN_H8_PASS`, Production**, or observes the live response of "Capture as Owned Physical Asset" in Production: `403 PRODUCTION_CAPTURE_BLOCKED_H8_NOT_PROVEN` means DISABLED. The flag was not changed.
+
+---
+
+## UNIVERSAL U1 RESOLUTION (2026-10-05) — what changed against this map
+
+U1 is the second step of the roadmap (LIVE EXPOSURE CLOSURE → **UNIVERSAL U1** → OUTSIDE-USER PRIVATE BETA; Outcome #1 in parallel). Evidence labels as above; the items below were proven by deterministic tests against real handlers and real Development Postgres (`tests/u1-*.test.js`), not by this document.
+
+| Census finding | U1 state |
+|---|---|
+| "Photo → Generic does not yet exist" | **Built.** A scan the model cannot establish as a comic or book is stamped `assetType:'unsupported'` (never `comic`); the Scan tab offers an explicit **Save as Generic asset** using the already-captured photo. Nothing mints automatically; zero further paid calls. |
+| "Silent Comic defaults remain" | **Closed in code; schema default removal is a separate, operator-gated step.** Every live writer now supplies an explicit supported category (`comic|book|generic`); `createPhysicalAsset`, `captureFromScan`, `createCollectionItem`, `pushCollectionItem`, `getAdapter`, `ensureAssetType`, enrich, the operator panel, hydrate and `addToCatalogue` no longer default. Migration `0039` (forward + rollback, Development-applied and certified) drops both `DEFAULT 'comic'`s and adds `NOT VALID` supported-category CHECKs; **it is NOT applied to Production** (HOLD for explicit approval). Historical rows are never rewritten. |
+| "Book cannot mint as Book" | **Closed.** `book` is in the explicit allowlist; Book → capture → `asset_class='book'` and `asset_category='book'`, refresh keeps it Book, valuation stays REFUSED. A book-category row cannot be minted as a comic. |
+| "Generic management is incomplete" | **Closed for U1 scope.** Durable `gkAssetId`, principal ownership, primary + additional photos (kernel media rows), editable optional name + notes, acquisition basis display, explicit Generic label, Inventory Authority state, Collection persistence, logout/relogin persistence, principal-local isolation. No grade, valuation, comps, listing, or reclassification. |
+| "Generic capture is rejected by GK-266" (addendum above) | **Fixed without weakening GK-266 and without a Generic exception:** the authoritative Collection row is created FIRST, then the physical mint links to it (`/api/collection` → `/api/capture-scan` → `/api/collection`). |
+| "Generic has no inventory state" | A newly captured Generic enters the **existing** neutral Inventory Authority `AVAILABLE` state (no Generic-only state exists). |
+| Category continuity | Category is immutable once a Collection row exists (`409 ASSET_CATEGORY_IMMUTABLE`); a missing category is `400`, never comic; owned refresh pins the durable category. No deliberate reclassification feature. |
+| "multi-marketplace safety is incomplete" / "normalized marketplace adapter contract does not exist" | **Unchanged — not U1.** Marketplace #2 and the marketplace kernel are later work. |
+
+### Rulings banked (verified; neither blocks the U1 asset-management private beta)
+
+- **DELISTED — PARTIAL / RECOVERABLE.** `api/delist-ebay.js` writes no `DELISTED` outcome; a same-asset relist on `ebay` is refused `DUPLICATE_ACTIVE_LISTING` until an operator runs `scripts/observe-outcome1-listing.mjs`. **Must close before outside-user marketplace listing.** (VERIFIED-IN-CODE, not executed.)
+- **SELLER LOCATION — absolute blocker on outside-user eBay listing.** `Phoenix, AZ` / `85033` is hardcoded in both `api/list-ebay.js` XML builders. **Must close before outside-user marketplace listing.** (VERIFIED.)
+
+### What U1 deliberately did NOT do
+
+No marketplace #2; no full `enrich.js` adapter refactor; no universal valuation; no Generic marketplace listing; no New Mutants/GK-228 change; no billing; no MAX BUY; no Economic Router; no card/coin adapter; no Production migration; no H8 change.
