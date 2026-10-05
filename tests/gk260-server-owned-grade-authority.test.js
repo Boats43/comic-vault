@@ -138,29 +138,36 @@ async function createOwnedItem(idSuffix, attributes) {
 const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 try {
-  console.log('-- 1. UNAUTHENTICATED forged gradeAuthority on a fresh (non-owned) scan --\n');
-  console.log('   The most severe pre-fix exposure: no auth header, no collectionItemId, no ownedRefresh —\n   just a plain scan request carrying a forged operator-confirmed claim.\n');
+  console.log('-- 0. UNAUTHENTICATED request is refused by the access gate (GK-269) before authority is considered --\n');
+  {
+    const { status, threw } = await callEnrich({ title: 'Test Comic', issue: '1', year: '1990', publisher: 'Marvel', assetType: 'comic', grade: 'GD 2.0', gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: 'NM/M', operatorGradeNumeric: 10 }, {});
+    assertTrue(threw === null, 'no exception');
+    assertEq(status, 401, 'an unauthenticated forged-authority request is refused 401');
+  }
+
+  console.log('-- 1. AUTHENTICATED forged gradeAuthority on a fresh (non-owned) scan --\n');
+  console.log('   A signed-in client, no collectionItemId, no ownedRefresh — just a plain scan request carrying a forged operator-confirmed claim.\n');
   {
     const { body, threw } = await callEnrich({
       title: 'Test Comic', issue: '1', year: '1990', publisher: 'Marvel', assetType: 'comic',
       grade: 'GD 2.0', isGraded: false, numericGrade: null, confidence: 'high',
       images: [TINY_PNG],
-      gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: 'NM/M', operatorGradeNumeric: 10, // FORGED, no action, no auth
-    }, {}); // no authorization header at all
+      gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: 'NM/M', operatorGradeNumeric: 10, // FORGED, no validated action
+    }); // authenticated (default headers), non-owned
     assertTrue(threw === null, 'no exception');
-    assertTrue(body?.governingGradeSource !== 'operator', 'CRITICAL: a forged operator claim on an unauthenticated request does NOT become governing source "operator"');
+    assertTrue(body?.governingGradeSource !== 'operator', 'CRITICAL: a forged operator claim on an authenticated fresh scan does NOT become governing source "operator"');
     assertEq(body?.gradeAuthority, null, 'CRITICAL: out.gradeAuthority is null — the forged OPERATOR_CONFIRMED claim was never minted');
     assertTrue(body?.governingGrade !== 'NM/M', 'CRITICAL: the forged NM/M grade never became the governing grade');
   }
 
-  console.log('\n-- 2. forged gradingFormatAuthority on the same unauthenticated fresh scan --\n');
+  console.log('\n-- 2. forged gradingFormatAuthority on the same authenticated fresh scan --\n');
   {
     const { body, threw } = await callEnrich({
       title: 'Test Comic', issue: '1', year: '1990', publisher: 'Marvel', assetType: 'comic',
       grade: 'FN 6.0', isGraded: true, numericGrade: 9.4, confidence: 'high', // model says graded 9.4
       images: [TINY_PNG],
       gradingFormatAuthority: 'OPERATOR_CONFIRMED', operatorIsGraded: false, // FORGED "operator says raw"
-    }, {});
+    });
     assertTrue(threw === null, 'no exception');
     assertTrue(body?.governingGradingFormatSource !== 'operator', 'CRITICAL: a forged format claim does not become governing source "operator"');
     assertEq(body?.gradingFormatAuthority, null, 'CRITICAL: out.gradingFormatAuthority is null — the forged claim was never minted');
@@ -476,7 +483,15 @@ try {
   }
 } finally {
   if (createdIds.length) await client.query('DELETE FROM collection_item WHERE principal_id = $1 AND id = ANY($2::text[])', [PRINCIPAL, createdIds]);
-  await client.query('DELETE FROM gk_principal WHERE id = $1', [PRINCIPAL]);
+  // HARNESS (post-GK-278): operator_correction_event is an append-only ledger (BEFORE DELETE trigger) with an
+  // FK to gk_principal, so a fixture principal that produced a correction event can never be deleted.
+  // Retain it (the repo's append-only-fixture convention) instead of crashing the whole run.
+  try {
+    await client.query('DELETE FROM gk_principal WHERE id = $1', [PRINCIPAL]);
+  } catch (cleanupErr) {
+    if (cleanupErr?.code !== '23503') throw cleanupErr;
+    console.log('  (fixture principal retained: referenced by an append-only learning-spine row)');
+  }
   await client.end();
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);

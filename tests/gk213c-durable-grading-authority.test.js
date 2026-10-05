@@ -236,7 +236,7 @@ try {
     assertEq(body?.governingGradingFormatSource, 'model', 'the durable RAW override is NOT resurrected — resolver falls back to model tier');
   }
 
-  console.log('\n-- 9. auth fail-closed regression --\n');
+  console.log('\n-- 9. auth fail-closed regression (current contract: the GK-269 access gate refuses first) --\n');
   {
     const id = await createOwnedItem('auth-failclosed', { gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: 'VF 8.0', operatorGradeNumeric: 8.0 });
     wireEmptyEbayMocks();
@@ -246,12 +246,10 @@ try {
       title: 'Test Comic', year: '1990', publisher: 'Marvel', assetType: 'comic', grade: 'GD 2.0', isGraded: false,
       collectionItemId: id, ownedRefresh: true,
     } };
-    let capturedBody = null;
-    const res = { status: (c) => ({ json: (d) => { capturedBody = d; } }), setHeader: () => {} };
+    let capturedBody = null; let capturedStatus = null;
+    const res = { status: (c) => ({ json: (d) => { capturedStatus = c; capturedBody = d; } }), setHeader: () => {} };
     await handler(req, res);
-    assertTrue(capturedBody?.ownedAssetAuthRequired === true, 'existing GK-254 fail-closed behavior remains byte-for-byte intact — auth failure refuses BEFORE any grading-authority resolution');
-    assertTrue(capturedBody?.refusedToPrice === true, 'refusedToPrice true, no fallback to client-asserted authority when durable-owned authorization fails');
-    assertTrue(!('governingGrade' in capturedBody), 'no governingGrade computed at all on the fail-closed exit — confirms durable authority was never consulted, let alone client authority substituted');
+    assertTrue(capturedStatus === 401, 'an unauthenticated owned-refresh request is refused 401 by the access gate before any grading-authority resolution');
   }
 
   console.log('\n-- 10. durable category regression (GK-253/254 unchanged) --\n');
@@ -349,7 +347,15 @@ try {
   }
 } finally {
   if (createdIds.length) await client.query('DELETE FROM collection_item WHERE principal_id = $1 AND id = ANY($2::text[])', [PRINCIPAL, createdIds]);
-  await client.query('DELETE FROM gk_principal WHERE id = $1', [PRINCIPAL]);
+  // HARNESS (post-GK-278): operator_correction_event is an append-only ledger (BEFORE DELETE trigger) with an
+  // FK to gk_principal, so a fixture principal that produced a correction event can never be deleted.
+  // Retain it (the repo's append-only-fixture convention) instead of crashing the whole run.
+  try {
+    await client.query('DELETE FROM gk_principal WHERE id = $1', [PRINCIPAL]);
+  } catch (cleanupErr) {
+    if (cleanupErr?.code !== '23503') throw cleanupErr;
+    console.log('  (fixture principal retained: referenced by an append-only learning-spine row)');
+  }
   await client.end();
 
   console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);

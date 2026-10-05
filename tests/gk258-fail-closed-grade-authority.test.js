@@ -45,6 +45,13 @@ import {
   resolveGoverningGrade,
 } from '../src/lib/gradeAuthority.js';
 import { computePriceBands } from '../src/lib/priceBands.js';
+// HARNESS (post-GK-269): /api/enrich requires a verified GrailKey session. These fixtures
+// exercise grade-resolution/refusal behavior for a SIGNED-IN scan, so authenticate through the
+// supported auth path (a real signed token; no principal row is needed for a non-owned scan).
+import { randomBytes as __gk258RandomBytes } from 'node:crypto';
+if (!process.env.GRAILKEY_SESSION_SECRET) process.env.GRAILKEY_SESSION_SECRET = __gk258RandomBytes(32).toString('base64url');
+const { issueToken: __gk258IssueToken } = await import('../src/modules/auth/token.js');
+const GK258_AUTH_HEADERS = { authorization: `Bearer ${__gk258IssueToken({ principalId: 'gk258-harness-principal' }).token}` };
 
 let passed = 0;
 let failed = 0;
@@ -147,7 +154,7 @@ async function runTier4Case({ label, gradeFields, expect }) {
   const handlerModule = await import('../api/enrich.js?gk258-' + label.replace(/\s+/g, '_'));
   const handler = handlerModule.default;
   const req = {
-    method: 'POST', headers: {},
+    method: 'POST', headers: GK258_AUTH_HEADERS,
     body: {
       title: 'Ledger Falcon', issue: '7', year: '1970', publisher: 'Marvel', assetType: 'comic',
       confidence: 'high', images: [TINY_PNG],
@@ -506,7 +513,7 @@ console.log('\nSection 2B: real handler, real Tier-4 fixture — MUST-REFUSE cas
     const handlerModule = await import('../api/enrich.js?gk258-O-comp-tier');
     const handler = handlerModule.default;
     const req = {
-      method: 'POST', headers: {},
+      method: 'POST', headers: GK258_AUTH_HEADERS,
       body: {
         title: 'Ledger Falcon', issue: '7', year: '1970', publisher: 'Marvel', assetType: 'comic',
         confidence: 'high', images: [TINY_PNG],
