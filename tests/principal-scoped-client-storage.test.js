@@ -173,16 +173,52 @@ const dClaim = await legacy.autoClaimProvableLegacy([aItem]);
 eq(dClaim, { claimed: 1, ambiguous: 2 }, 'principal D with server proof for exactly one row claims exactly that row');
 eq((await db.getAllComics()).map((c) => c.id), ['cv_1_a'], 'D sees only the proven row');
 eq((await legacy.autoClaimProvableLegacy([aItem])).claimed, 0, 'auto-claim is idempotent');
-eq(await legacy.countUnclaimedLegacy(), 2, 'two legacy rows remain unclaimed for D');
-const explicit = await legacy.claimAllLegacy();
-eq(explicit.comics, 2, 'explicit confirmed claim copies the remaining 2 rows into D\'s scope');
-eq(await legacy.countUnclaimedLegacy(), 0, 'nothing left unclaimed after explicit claim');
-const after = await legacy.readLegacyRows();
-eq(after.comics.map((c) => c.id).sort(), ['cv_1_a', 'cv_2_a', 'cv_3_local'], 'ROLLBACK SAFETY: legacy database is byte-for-byte intact (copy-only, never deleted)');
+eq(await legacy.countUnclaimedLegacy(), 2, 'two ambiguous legacy rows remain unclaimed for D (not copied, not exposed)');
+ok(typeof legacy.claimAllLegacy === 'undefined', 'U1: there is NO manual claim function (a click is not proof of ownership)');
+const afterD = await legacy.readLegacyRows();
+eq(afterD.comics.map((c) => c.id).sort(), ['cv_1_a', 'cv_2_a', 'cv_3_local'], 'ROLLBACK SAFETY: legacy database is byte-for-byte intact (copy-only, never deleted)');
 clearSession();
 login('principal-E', setSession);
-eq(await db.getAllComics(), [], 'a different principal still sees none of D\'s claimed rows');
+eq(await db.getAllComics(), [], "a different principal still sees none of D's claimed rows");
 clearSession();
+
+console.log('PART 4b — U1: A -> logout -> B with AMBIGUOUS legacy rows (the exact pre-fix exposure)');
+{
+  // cv_2_a is a legacy row with _syncStatus:'pending' (pre-fix: it was pushed under whoever signed in next).
+  login('principal-A2', setSession);
+  const aClaim = await legacy.autoClaimProvableLegacy([]);
+  eq(aClaim.claimed, 0, 'A2 has no server corroboration: nothing is imported');
+  clearSession();
+  login('principal-B2', setSession);
+  pushes = [];
+  const bClaim = await legacy.autoClaimProvableLegacy([]);
+  eq(bClaim.claimed, 0, 'B2 has no server corroboration either: nothing is imported');
+  eq(await db.getAllComics(), [], 'B2 sees ZERO of the ambiguous legacy rows');
+  const retried = await persistence.retryPendingCollectionItems(afterD.comics);
+  eq(retried, [], 'B2 cannot retry the ambiguous legacy pending row even when handed the legacy list directly');
+  eq(pushes, [], "no network push of any legacy row under B2's token");
+  clearSession();
+  login('principal-A2', setSession);
+  eq(await db.getAllComics(), [], "A2 returns: the ambiguous rows are STILL not A2's (no ownership by prior presence)");
+  clearSession();
+}
+
+console.log('PART 4c — U1: a corroborated legacy row that was PENDING is imported as synced, never retried');
+{
+  login('principal-F', setSession);
+  const pendingLegacy = afterD.comics.find((c) => c.id === 'cv_2_a');
+  ok(pendingLegacy && pendingLegacy._syncStatus === 'pending', 'fixture: the legacy row is pending in the old database');
+  const proof = { id: 'cv_2_a', assetCategory: 'comic', attributes: { title: 'Batman', issue: '1', year: '1940', publisher: 'DC' } };
+  const c = await legacy.autoClaimProvableLegacy([proof]);
+  eq(c.claimed, 1, "corroborated by principal F's own server row -> imported");
+  const row = (await db.getAllComics()).find((x) => x.id === 'cv_2_a');
+  ok(row && row._syncStatus === 'synced', 'imported as synced (the server row is the truth)');
+  pushes = [];
+  const r = await persistence.retryPendingCollectionItems(await db.getAllComics());
+  eq(r, [], 'and it is never retried');
+  eq(pushes, [], 'no push of legacy data');
+  clearSession();
+}
 
 console.log('PART 5 — structural / auth checks');
 const app = readFileSync(new URL('src/App.jsx', ROOT), 'utf8');

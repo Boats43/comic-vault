@@ -6,37 +6,29 @@
 // have NO recorded owner. REQUIRED INVARIANT: AMBIGUOUS LOCAL OWNERSHIP IS
 // NEVER SILENTLY ASSIGNED.
 //
-// Rules:
+// Rules (UNIVERSAL U1, 2026-10-05 — AMBIGUOUS LEGACY LOCAL DATA IS UNCLAIMED,
+// NOT OPERATOR-CLAIMABLE):
 //   * The legacy database is opened READ-ONLY (no version bump, never
-//     created, never written, never deleted). Legacy data is never removed
-//     by anything in this file. ROLLBACK = ignore/delete the scoped
-//     database; the legacy database is untouched, so nothing is lost.
-//   * AUTO-CLAIM only with proof: a legacy catalogue row is copied into the
-//     authenticated principal's scoped database iff that principal's OWN
-//     server collection holds a row with the same id AND the same identity
-//     (title/issue/year/publisher) AND no gkAssetId disagreement (server
-//     rows are principal-scoped by (principal_id, id) primary key, so a
-//     matching row owned by this principal is server-side proof the local
-//     copy is theirs). Local ids are `cv_<ts>_<rand>`, not UUIDs, so an id
-//     match ALONE is deliberately not trusted.
-//   * Everything else stays quarantined in the legacy database, counted
-//     and reported, invisible to every principal, until a human explicitly
-//     confirms `claimAllLegacy()` for the CURRENT signed-in principal. That
-//     explicit action is the only other path across the boundary.
+//     created, never written, never deleted).
+//   * The ONLY path across the boundary is the proof-gated auto-claim: a
+//     legacy catalogue row is copied into the authenticated principal's
+//     scoped database iff that principal's OWN server collection holds a row
+//     with the same id AND the same identity (title/issue/year/publisher) AND
+//     no gkAssetId disagreement. Local ids are `cv_<ts>_<rand>`, not UUIDs, so
+//     an id match ALONE is deliberately not trusted.
+//   * A claimed row is written `_syncStatus:'synced'` — the principal's own
+//     server row is the truth (hydrate overwrites its attributes) — so a
+//     claimed legacy row is NEVER pending and can never be retried/pushed.
+//   * Everything else stays in the legacy database untouched: not copied,
+//     not exposed, not retried, not deleted.
+//   * There is deliberately NO manual "claim" function. The earlier explicit
+//     claim copied rows with their original `_syncStatus:'pending'`, so a
+//     click was sufficient to push another person's local data to the server
+//     under the claimer's token. A human click is not proof of ownership.
 //   * Copies never overwrite an existing scoped row (idempotent).
 
-import { LEGACY_DB_NAME, getAllComics, putComic, putFixture, putGenericCaptureDraft, putSnapshot } from "../db.js";
+import { LEGACY_DB_NAME, getAllComics, putComic } from "../db.js";
 import { getPrincipalScope } from "./grailkeySession.js";
-import { scopedGet, scopedSet } from "./principalStorage.js";
-
-// Unscoped localStorage keys that held user-owned data pre-fix.
-export const LEGACY_LOCALSTORAGE_KEYS = [
-  "cv_buyer_sessions",
-  "cv_trade_piles",
-  "cv_listing_packets",
-  "cv_buyer_settings",
-  "cv_buyer_budget",
-];
 
 const norm = (v) => String(v ?? "").trim().toLowerCase();
 
@@ -136,7 +128,7 @@ export async function autoClaimProvableLegacy(serverItems) {
   let claimed = 0;
   for (const row of provable) {
     if (existing.has(row.id)) continue;
-    await putComic(row);
+    await putComic({ ...row, _syncStatus: "synced" }); // corroborated by the principal's own server row; never pending
     existing.add(row.id);
     claimed++;
   }
@@ -151,34 +143,4 @@ export async function countUnclaimedLegacy() {
   if (legacy.comics.length === 0) return 0;
   const existing = new Set((await getAllComics()).map((c) => c.id));
   return legacy.comics.filter((r) => r && r.id && !existing.has(r.id)).length;
-}
-
-// EXPLICIT, human-confirmed claim for the CURRENT signed-in principal. The
-// only path (besides the proof-gated auto-claim above) by which unscoped
-// legacy data enters a principal's scope. Copy-only; never deletes the
-// legacy database or its localStorage keys.
-export async function claimAllLegacy() {
-  if (!getPrincipalScope()) throw new Error("claimAllLegacy requires an authenticated principal");
-  const legacy = await readLegacyRows();
-  const existing = new Set((await getAllComics()).map((c) => c.id));
-  const out = { comics: 0, fixtures: 0, drafts: 0, snapshots: 0, localStorageKeys: 0 };
-  for (const row of legacy.comics) {
-    if (row?.id && !existing.has(row.id)) { await putComic(row); out.comics++; }
-  }
-  for (const row of legacy.fixtures) {
-    if (row?.traceId) { await putFixture(row); out.fixtures++; }
-  }
-  for (const row of legacy.drafts) {
-    if (row?.id) { await putGenericCaptureDraft(row); out.drafts++; }
-  }
-  for (const row of legacy.snapshots) {
-    if (row?.date) { await putSnapshot(row); out.snapshots++; }
-  }
-  for (const key of LEGACY_LOCALSTORAGE_KEYS) {
-    try {
-      const raw = localStorage.getItem(key);
-      if (raw != null && scopedGet(key) == null && scopedSet(key, raw)) out.localStorageKeys++;
-    } catch { /* no-op */ }
-  }
-  return out;
 }

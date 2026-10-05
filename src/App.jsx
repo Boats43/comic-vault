@@ -30,7 +30,7 @@ import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
 import { isAuthenticated, clearSession, getSession, authFetch, apiFetch, getPrincipalScope } from "./lib/grailkeySession.js";
 import { scopedGet, scopedSet } from "./lib/principalStorage.js";
-import { autoClaimProvableLegacy, countUnclaimedLegacy, claimAllLegacy } from "./lib/legacyLocalClaim.js";
+import { autoClaimProvableLegacy } from "./lib/legacyLocalClaim.js";
 import { fetchServerCollection, deleteServerCollectionItem } from "./lib/collectionSync.js";
 import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
 import { appendPhysicalMediaEvidence, getOrCreateEvidenceIdempotencyKey, retireEvidenceIdempotencyKey, retryPendingPhysicalMediaAppends } from "./lib/physicalMediaAppend.js";
@@ -11457,10 +11457,6 @@ export default function App() {
   const [analysis, setAnalysis] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [snapshots, setSnapshots] = useState([]);
-  // LIVE EXPOSURE CLOSURE — count of pre-fix unscoped local rows that could
-  // not be proven to belong to this account (never shown, never assigned
-  // without an explicit confirmation).
-  const [unclaimedLegacyCount, setUnclaimedLegacyCount] = useState(0);
   const [refreshingPrices, setRefreshingPrices] = useState(0);
   const [duplicateWarning, setDuplicateWarning] = useState(null);
   const [pendingDuplicate, setPendingDuplicate] = useState(null);
@@ -11538,7 +11534,6 @@ export default function App() {
     setResult(null);
     setPendingDuplicate(null);
     setDuplicateWarning(null);
-    setUnclaimedLegacyCount(0);
     setTradePiles([]);
     activeScanRef.current = null;
     scanGenerationRef.current += 1;
@@ -11676,7 +11671,6 @@ export default function App() {
       const items = await getAllComics();
       if (!mine()) return;
       setCatalogue(items.map(normalizeItem));
-      try { const n = await countUnclaimedLegacy(); if (mine()) setUnclaimedLegacyCount(n); } catch { /* informational only */ }
       if (!mine()) return;
       // GRAILKEY DURABLE BUYER DECISION LEDGER V1 — same authenticated-
       // reconnect trigger, same "never block, best-effort" contract.
@@ -15184,26 +15178,6 @@ export default function App() {
   return (
     <div className="app">
       {CLERK_ENABLED && <ClerkSignOutBridge signOutRef={clerkSignOutRef} />}
-      {unclaimedLegacyCount > 0 && (
-        <div style={{ background: "#2a2412", border: "1px solid #d4af37", color: "#e8d9a0", fontSize: 12, padding: "8px 12px", margin: "8px 12px", borderRadius: 6 }}>
-          <div>{unclaimedLegacyCount} item{unclaimedLegacyCount === 1 ? "" : "s"} saved on this device before accounts were separated could not be verified as yours, so they are hidden.</div>
-          <button
-            style={{ marginTop: 6, background: "transparent", border: "1px solid #d4af37", color: "#e8d9a0", borderRadius: 4, fontSize: 12, padding: "3px 8px" }}
-            onClick={async () => {
-              if (!window.confirm("Only claim these if this device has only ever been used by you. They will be copied into THIS account.")) return;
-              try {
-                await claimAllLegacy();
-                const items = await getAllComics();
-                setCatalogue(items.map(normalizeItem));
-                setUnclaimedLegacyCount(await countUnclaimedLegacy());
-                setTradePiles(getTradePiles());
-              } catch (e) {
-                alert("Could not claim local items: " + (e?.message || e));
-              }
-            }}
-          >These are mine — claim them</button>
-        </div>
-      )}
       <header className="header">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
