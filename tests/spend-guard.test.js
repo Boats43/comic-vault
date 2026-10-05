@@ -154,7 +154,7 @@ console.log('5. concurrent calls cannot exceed the cap');
   eq(s2._dump()[guard.globalDayKey()], 30, 'global counter settles at the ceiling');
 }
 
-console.log('6. warmup / validation / lock paths cost nothing; real scans are counted');
+console.log('6. warmup / validation paths cost nothing; real scans (including a request carrying a legacy client gradeLocked flag) are counted');
 {
   const s = freshStore();
   setCaps({ principal: 50, operator: 50, global: 100 });
@@ -165,11 +165,12 @@ console.log('6. warmup / validation / lock paths cost nothing; real scans are co
   const bad = await call(chat, 'warm-user', { nomessage: true });
   eq(bad.statusCode, 400, 'invalid chat body rejected');
   const locked = await call(grade, 'warm-user', { existingGrade: { grade: '9.8' }, gradeConfidence: 'HIGH', gradeLocked: true, images: ['x'] });
-  ok(locked.statusCode === 200 && locked.body.locked === true, 'grade-lock early return answered without Vision');
-  eq(s._dump()[guard.principalDayKey('warm-user')], undefined, 'none of those consumed any spend units');
-  eq(providerCalls, 0, 'and none reached a provider');
+  // Grade authority: a client gradeLocked flag no longer short-circuits the server, so it is an
+  // ordinary guarded request (3 units) — never a free Vision skip.
+  ok(locked.body?.locked !== true && locked.body?.skippedVision !== true, 'a client gradeLocked request is no longer answered from a lock');
+  eq(s._dump()[guard.principalDayKey('warm-user')], 3, 'warmup/validation consumed nothing; the former lock request is a normal 3-unit request');
   const g = await call(grade, 'warm-user', { images: ['data:image/png;base64,AAAA'] }); // real scan path: guard runs before image/provider work
-  ok(s._dump()[guard.principalDayKey('warm-user')] === 3, 'a real grade request reserves 3 units before any provider work');
+  ok(s._dump()[guard.principalDayKey('warm-user')] === 6, 'a real grade request reserves 3 units before any provider work');
   setCaps({ principal: 2, operator: 50, global: 100 });
   const before = providerCalls;
   const refusedGrade = await call(grade, 'warm-user', { images: ['data:image/png;base64,AAAA'] });

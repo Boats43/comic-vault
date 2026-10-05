@@ -92,6 +92,9 @@ Nine keys required (all set in Vercel), plus:
 ### Push & Deploy Are Held By Default (P0 PROTOCOL — standing, ruled 2026-10-05, Universal U1 Production Closeout)
 **PUSH AND DEPLOY ARE HELD BY DEFAULT.** A dispatch authorizes a `git push` only with the explicit words **PUSH AUTHORIZED**, and a Production deploy only with **DEPLOY AUTHORIZED** (each scoped to what that dispatch names). **A list of stop conditions is NOT authorization** — stop conditions add refusals, they never grant authority; if no stop condition fires, the default HOLD still stands. Every push to `main` auto-deploys to Production on Vercel, so a push is a deploy: batch an authorized push into ONE push at the intended final SHA. Production migrations (e.g. 0039) need their own explicit authorization (`PRODUCTION MIGRATION <n> AUTHORIZED`). Evidence: the U1 runtime (`21e0473`..`d642796`) reached Production before the intended final release-candidate approval — backward-compatible, no historical rewrite, no rollback needed, recorded as a sequencing deviation (`docs/TICKET-REGISTRY.md`, "UNIVERSAL U1 PRODUCTION CLOSEOUT"). No cleanup campaign.
 
+### Conditional Stop Is A Stop (P0 PROTOCOL — standing, ruled 2026-10-05, grade-authority release isolation)
+**A CONDITIONAL STOP IS A STOP. THE CONDITION IS EVALUATED BY THE REVIEWER, NOT THE IMPLEMENTER.** If a dispatch says "IF X → STOP / HOLD / REPORT", do not evaluate X and keep implementing in the same pass: return the finding and wait for reviewer authorization. Outside-user hard gates (client sold-comp grade authority, seller location, DELISTED recovery) are in `docs/GRADING-CAMPAIGN.md`.
+
 ### Secret Hygiene (P0 PROTOCOL — standing, ruled 2026-08-23, DATA-1D correction pass, GK-164)
 **Secrets never appear in reports, logs, commits, tests, or docs — state where they live, never what they are.** Evidence: `docs/adr/DATA-1D-AUTH-CROSS-DEVICE.md` printed Jimmy's real operator passphrase in cleartext, in a local commit never pushed to `origin`. Fix: credential rotated via a local, uncommitted script that generates the new value inside itself and never prints it; a session-epoch revocation mechanism (`GRAILKEY_SESSION_EPOCH`, `src/modules/auth/token.js`) now lets a disclosure be neutralized for ALL outstanding tokens, not just future logins; the disclosing commit itself was rewritten out of local history before push (ruled by Jimmy, GK-164) — `git reflog expire`/`gc` deliberately NOT run as part of that. When a credential must be referenced in any artifact, name its storage location only (`"rotated, stored at X, not displayed"`). Full detail: `docs/PATTERN-LIBRARY.md`, "GK-164."
 
@@ -459,6 +462,7 @@ Full detail (external API status, internal-investigation notes): `docs/OPEN-BLOC
 - Universal Launch Census (a SYSTEM MAP, NOT the roadmap — roadmap is live exposure closure → Universal U1 → outside-user private beta; Outcome #1 in parallel) → `docs/UNIVERSAL-LAUNCH-CENSUS.md`
 - Tickets/history → `docs/TICKET-REGISTRY.md`
 - Product refinement / grading program bank (GK-213, not implemented) → `docs/PRODUCT-REFINEMENT-BANK.md`
+- Grading campaign spine, grade-authority laws, outside-user hard gates, blind-certified-corpus contract (NO rubric calibration before corpus) → `docs/GRADING-CAMPAIGN.md`
 - Failure patterns (older/architectural) → `docs/PATTERN-LIBRARY.md`
 - Architecture decisions → `docs/adr/`
 - Strategy → `docs/GRAILKEY-STRATEGY.md`

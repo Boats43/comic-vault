@@ -12247,12 +12247,6 @@ export default function App() {
       isGraded: data.isGraded === true,
       numericGrade:
         typeof data.numericGrade === "number" ? data.numericGrade : null,
-      // GrailKey Outcome #1 calibration patch — persisted so addPhotoToComic's
-      // gradeLocked wiring has something real to read. Previously this field
-      // was set on the transient `data` object (gradeBlob's Fix 4) but never
-      // copied into the saved entry, so item.gradeLocked was always falsy for
-      // every catalogue item ever saved.
-      gradeLocked: data.gradeLocked === true,
       issue: data.issue || null,
       keyIssue: data.keyIssue || "",
       price: null,  // ignore data.price, will be calculated by enrich.js
@@ -12499,10 +12493,9 @@ export default function App() {
           setPendingDuplicate(null);
         }
 
-        // FIX 4: Set grade lock on HIGH confidence
-        if (data.confidence?.toLowerCase() === 'high') {
-          data.gradeLocked = true;
-        }
+        // GRADE AUTHORITY: model confidence is NOT authority — no grade lock is
+        // minted here (formerly "FIX 4", which froze the model grade on HIGH
+        // confidence and blocked re-grading on new photos).
 
         // Show the Claude result immediately. Slice 7 — guard against a
         // stale/superseded scan's grade response overwriting a later
@@ -13041,10 +13034,10 @@ export default function App() {
       }
 
       // Show result with barcode-derived identity
+      // A barcode observes identity, never condition: no grade, no lock.
       setResult({
         ...enrichData,
         identitySource: 'barcode',
-        gradeLocked: true,
       });
 
       // Save to catalogue
@@ -14497,8 +14490,8 @@ export default function App() {
           confidence: item.confidence,
         },
         gradeConfidence: item.confidence?.toUpperCase(),
-        gradeLocked: item.gradeLocked || false,
         forceRegrade: true, // FIX 2: Bypass grade lock for explicit re-identification
+        predictionKind: 'RE_GRADE', // observability label only, never authority
         scanId: reidentifyOwnership.scanId,
       }),
     });
@@ -14909,20 +14902,18 @@ export default function App() {
     const newThumb = await makeThumbnail(rawB64, 1200, 0.85);
     const nextPhotos = [...existingPhotos, newThumb];
 
-    // GrailKey Outcome #1 calibration patch (Wolverine #67 forensic audit) —
-    // thread the SAME existingGrade/gradeConfidence/gradeLocked contract
-    // reIdentifyBook already uses (api/grade.js:657-669), minus
-    // forceRegrade: an ordinary Add Photo is not an explicit override
-    // action, so a locked item's grade must be respected, not bypassed.
-    // When item.gradeLocked is true, the server skips Vision entirely and
-    // echoes existingGrade back unchanged (skipReason: 'grade_locked') —
-    // the new photo is still appended to `images` below regardless of
-    // whether the server skipped Vision.
+    // GRADE AUTHORITY: the server no longer honours any client "grade lock"
+    // (the old gradeLocked/existingGrade short-circuit was removed — model
+    // confidence is not authority). Every add-photo re-grades with all photos;
+    // the first model prediction stays preserved write-once via
+    // modelPredictedGrade*, and each call writes its own model_prediction_event.
+    // The material-new-evidence cost rule is HELD (docs/GRADING-CAMPAIGN.md).
     const res = await apiFetch("/api/grade", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getVaultHeaders() },
       body: JSON.stringify({
         images: nextPhotos,
+        predictionKind: 'RE_GRADE', // observability label only, never authority
         // GK-271 — declared capture views, parallel to `images`. Only the
         // operator-supplied role for the photo just added is known; every
         // other entry is null (never inferred from order/count).
@@ -14937,7 +14928,6 @@ export default function App() {
           confidence: item.confidence,
         },
         gradeConfidence: item.confidence?.toUpperCase(),
-        gradeLocked: item.gradeLocked || false,
         scanId: addPhotoOwnership.scanId,
       }),
     });

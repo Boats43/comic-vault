@@ -60,35 +60,13 @@ const gradeApiSource = readFileSync(new URL('../api/grade.js', import.meta.url),
 // modified by this patch, but now load-bearing for addPhotoToComic).
 // Extract the real shipped condition and prove the truth table.
 // ═══════════════════════════════════════════════════════════════════════
-console.log('-- Section 1: api/grade.js real gradeLocked short-circuit condition --');
+console.log('-- Section 1: api/grade.js no longer has ANY client-lock short-circuit (grade authority control plane) --');
 {
-  const condMatch = gradeApiSource.match(
-    /\/\/ FIX 4: Grade lock - skip Vision on HIGH confidence books\s*\n\s*if \(([\s\S]*?)\)\s*\{\s*\n\s*console\.log\('\[grade-lock\] returning locked grade, skipping Vision'\);/
-  );
-  assertTrue(!!condMatch, 'gradeLocked short-circuit condition is found and isolated for extraction');
-  const cond = condMatch?.[1] || 'false';
-  const skipsVision = new Function('body', `return (${cond});`);
-
-  assertEq(
-    skipsVision({ existingGrade: { grade: 'VG 4.0' }, gradeConfidence: 'HIGH', gradeLocked: true }),
-    true,
-    'locked + HIGH + no forceRegrade → Vision IS skipped (locked grade wins)'
-  );
-  assertEq(
-    skipsVision({ existingGrade: { grade: 'VG 4.0' }, gradeConfidence: 'HIGH', gradeLocked: true, forceRegrade: true }),
-    false,
-    'locked + HIGH + forceRegrade:true → Vision is NOT skipped — the existing explicit override path still works'
-  );
-  assertEq(
-    skipsVision({ existingGrade: { grade: 'VG 4.0' }, gradeConfidence: 'HIGH', gradeLocked: false }),
-    false,
-    'unlocked (gradeLocked:false) → Vision is NOT skipped, regardless of forceRegrade'
-  );
-  assertEq(
-    skipsVision({ existingGrade: { grade: 'VG 4.0' }, gradeConfidence: 'MEDIUM', gradeLocked: true }),
-    false,
-    'locked but gradeConfidence not exactly HIGH → Vision is NOT skipped (matches gradeBlob only ever locking on high confidence)'
-  );
+  // The former "FIX 4" lock skipped Vision when a client-asserted gradeLocked+HIGH was supplied.
+  // Model confidence is not authority; client state may not mint grade authority. The behavior is
+  // proven end-to-end in tests/grade-authority-control-plane.test.js (real handler).
+  assertTrue(!/FIX 4: Grade lock/.test(gradeApiSource), 'the gradeLocked short-circuit block is gone from api/grade.js');
+  assertTrue(!/skipReason:\s*'grade_locked'/.test(gradeApiSource), 'api/grade.js can no longer return a grade_locked echo');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -110,7 +88,7 @@ console.log('\n-- Section 2: addPhotoToComic real /api/grade request body --');
 
   const lockedItem = { grade: 'VG 4.0', isGraded: false, numericGrade: null, confidence: 'high', gradeLocked: true };
   const body1 = buildBody(lockedItem, ['p1', 'p2'], { scanId: 'scan-1' });
-  assertEq(body1.gradeLocked, true, 'locked item → request body gradeLocked:true');
+  assertEq(body1.gradeLocked, undefined, 'a legacy locked item no longer sends gradeLocked');
   assertEq(body1.gradeConfidence, 'HIGH', 'locked item (confidence:"high") → request body gradeConfidence:"HIGH"');
   assertEq(body1.existingGrade.grade, 'VG 4.0', 'request body carries the real existingGrade.grade from item');
   assertEq(body1.forceRegrade, undefined, 'ordinary Add Photo NEVER sends forceRegrade');
@@ -119,12 +97,12 @@ console.log('\n-- Section 2: addPhotoToComic real /api/grade request body --');
 
   const unlockedItem = { grade: 'FN 6.0', isGraded: false, numericGrade: null, confidence: 'medium', gradeLocked: false };
   const body2 = buildBody(unlockedItem, ['p1'], { scanId: 'scan-2' });
-  assertEq(body2.gradeLocked, false, 'unlocked item → request body gradeLocked:false');
+  assertEq(body2.gradeLocked, undefined, 'unlocked item sends no gradeLocked either');
   assertEq(body2.forceRegrade, undefined, 'unlocked ordinary Add Photo also never sends forceRegrade');
 
   const neverLockedItem = { grade: 'FN 6.0', isGraded: false, numericGrade: null, confidence: 'medium' };
   const body3 = buildBody(neverLockedItem, ['p1'], { scanId: 'scan-3' });
-  assertEq(body3.gradeLocked, false, 'item.gradeLocked absent (legacy item saved before this patch) → defaults to false, backward compatible');
+  assertEq(body3.gradeLocked, undefined, 'item.gradeLocked absent → no gradeLocked field');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -147,7 +125,8 @@ console.log('\n-- Section 3: addPhotoToComic real merge (`updated`) --');
     `${mergeSrc}\nreturn updated;`
   );
 
-  // 3a — locked item, server echoes existingGrade back (no reason/cgcPenaltyFlags/title/etc.)
+  // 3a — legacy item still carrying a bare gradeLocked:true. The flag is inert: a genuine new
+  // model result replaces item.grade like any other, and the write-once baseline is untouched.
   const lockedItem = {
     id: 'wolverine-67', title: 'Wolverine', issue: '67', grade: 'VG 4.0', isGraded: false,
     numericGrade: null, reason: 'Clean copy, no visible defects.', confidence: 'high',
@@ -155,16 +134,14 @@ console.log('\n-- Section 3: addPhotoToComic real merge (`updated`) --');
     modelPredictedGrade: 'VG 4.0', modelPredictedGradeReason: 'Clean copy, no visible defects.',
     modelPredictedGradeConfidence: 'high', modelPredictedAt: 1000,
   };
-  const lockedEcho = { grade: 'VG 4.0', isGraded: false, numericGrade: null, conditionSummary: undefined, confidence: 'high', skipReason: 'grade_locked', locked: true, skippedVision: true };
+  const freshAfterBack = { title: 'Wolverine', issue: '67', grade: 'GD 2.0', isGraded: false, numericGrade: null, reason: 'Back cover shows a large tear.', confidence: 'medium' };
   const nextPhotos = ['front.jpg', 'back.jpg'];
-  const updatedLocked = buildUpdated(lockedItem, lockedEcho, nextPhotos, applyFirstModelPrediction);
+  const updatedLocked = buildUpdated(lockedItem, freshAfterBack, nextPhotos, applyFirstModelPrediction);
 
-  assertEq(updatedLocked.grade, 'VG 4.0', 'LOCKED item: grade is UNCHANGED after Add Photo (authoritative grade not silently replaced)');
-  assertEq(updatedLocked.reason, 'Clean copy, no visible defects.', 'LOCKED item: reason is preserved (server echo carries no new reason field)');
-  assertEq(updatedLocked.cgcPenaltyFlags, null, 'LOCKED item: cgcPenaltyFlags preserved (null → null)');
-  assertEq(updatedLocked.images, nextPhotos, 'LOCKED item: the newly added photo IS still retained in images');
-  assertEq(updatedLocked.modelPredictedGrade, 'VG 4.0', 'LOCKED item: calibration baseline unchanged (write-once, already set)');
-  assertEq(updatedLocked.modelPredictedAt, 1000, 'LOCKED item: modelPredictedAt timestamp unchanged (not re-stamped)');
+  assertEq(updatedLocked.grade, 'GD 2.0', 'legacy gradeLocked item: new back-cover evidence CAN change item.grade (flag confers no authority)');
+  assertEq(updatedLocked.images, nextPhotos, 'legacy gradeLocked item: the newly added photo is retained');
+  assertEq(updatedLocked.modelPredictedGrade, 'VG 4.0', 'legacy gradeLocked item: the FIRST prediction stays preserved (write-once baseline)');
+  assertEq(updatedLocked.modelPredictedAt, 1000, 'legacy gradeLocked item: modelPredictedAt not re-stamped');
 
   // 3b — unlocked item, genuine new Vision response with a real lower grade
   // (a real new defect, not a locked echo) — today's overwrite behavior is
@@ -217,11 +194,11 @@ console.log('\n-- Section 4: reIdentifyBook forceRegrade path + write-once basel
 // entirely — a pre-existing gap this patch had to close for the
 // gradeLocked wiring above to ever fire) and the baseline on first save.
 // ═══════════════════════════════════════════════════════════════════════
-console.log('\n-- Section 5: addToCatalogue persists gradeLocked + seeds the baseline --');
+console.log('\n-- Section 5: addToCatalogue no longer persists gradeLocked + seeds the baseline --');
 {
   assertTrue(
-    /gradeLocked: data\.gradeLocked === true,/.test(appSource),
-    'addToCatalogue now persists gradeLocked onto the saved entry (previously always dropped, making item.gradeLocked permanently falsy for every saved item)'
+    !/gradeLocked: data\.gradeLocked/.test(appSource),
+    'addToCatalogue no longer persists a gradeLocked flag (model confidence is not authority)'
   );
   assertTrue(
     /images: thumb \? \[thumb\] : \[\],\s*\n\s*\/\/ GrailKey Outcome #1 calibration patch[\s\S]*?\.\.\.applyFirstModelPrediction\(null, data\),\s*\n\s*\};/.test(appSource),

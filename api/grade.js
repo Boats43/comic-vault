@@ -132,6 +132,7 @@ const parseResponse = (text) => {
 // measured against real comic-pool titles from this same session's logs).
 import { detectBookSignals, classifyTitle } from '../src/lib/categoryClassifier.js';
 import { issueGradeReceipt } from '../src/lib/gradeReceipt.js';
+import { observeGradeProvenance, classifyWriteFailure, buildPredictionEvidenceMeta, resolvePredictionKind } from '../src/lib/gradeProvenanceObservability.js';
 import { recordModelPrediction, sha256Hex } from '../src/modules/learning/index.js';
 import { randomUUID } from 'node:crypto';
 
@@ -147,7 +148,7 @@ import { randomUUID } from 'node:crypto';
 // came from the eBay image-search consensus). Written here from the server's own response
 // object only; no client field is read. A failure to write never blocks the scan.
 const attachGradeReceipt = async (result, principalId, ctx = {}) => {
-  const { model = null, meta = null, inputHash = null, identityFromModel = false } = ctx;
+  const { model = null, meta = null, inputHash = null, identityFromModel = false, branch = 'unknown', imageCount = 0, imageViews = null, sentDimensions = null, predictionKind = 'FIRST_GRADE' } = ctx;
   const buildSha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || null;
   const resultId = randomUUID();
   const provenance = {
@@ -161,14 +162,24 @@ const attachGradeReceipt = async (result, principalId, ctx = {}) => {
   try {
     if (result && typeof result.grade === 'string' && result.grade.trim()) {
       const base = { principalId, resultId, ...provenance, inputHash, usage: meta?.usage || null };
-      const g = await recordModelPrediction({
-        ...base, surface: 'GRADE',
-        prediction: {
-          grade: result.grade, numericGrade: result.numericGrade ?? null, isGraded: result.isGraded ?? null,
-          confidence: result.confidence ?? null, reason: typeof result.reason === 'string' ? result.reason : null,
-        },
-      });
+      let g;
+      try {
+        g = await recordModelPrediction({
+          ...base, surface: 'GRADE',
+          prediction: {
+            grade: result.grade, numericGrade: result.numericGrade ?? null, isGraded: result.isGraded ?? null,
+            confidence: result.confidence ?? null, reason: typeof result.reason === 'string' ? result.reason : null,
+            // Additive, non-sensitive evidence metadata so a later calibration is reconstructible.
+            evidence: buildPredictionEvidenceMeta({ branch, imageCount, imageViews, sentDimensions, gradeEvidence: result.gradeEvidence, predictionKind }),
+          },
+        });
+      } catch (writeErr) {
+        // PHASE 1 (observe only): measure the failure, then fail exactly as before.
+        await observeGradeProvenance({ kind: 'prediction', outcome: 'write_failed', branch, model: provenance.model, buildSha, predictionKind, errorClass: classifyWriteFailure(writeErr) });
+        throw writeErr;
+      }
       predictionEventId = g.eventId;
+      await observeGradeProvenance({ kind: 'prediction', outcome: 'ok', branch, model: provenance.model, buildSha, predictionKind });
       if (result.cgcPenaltyFlags || result.defectPenalty || result.restoration || result.conditionClaimsWithheld) {
         await recordModelPrediction({
           ...base, surface: 'CONDITION',
@@ -198,6 +209,7 @@ const attachGradeReceipt = async (result, principalId, ctx = {}) => {
       principalId, result, ...provenance, resultId, predictionEventId,
     });
     if (receiptId) result.gradeReceiptId = receiptId;
+    await observeGradeProvenance({ kind: 'receipt', outcome: receiptId ? 'issued' : 'not_issued', branch, model: provenance.model, buildSha, predictionKind });
   } catch { /* receipt is best-effort; absence == UNKNOWN */ }
   return result;
 };
@@ -589,7 +601,7 @@ const resizeImageForVision = async (base64String) => {
 
     // Already small enough — return original
     if (width <= MAX_DIMENSION && height <= MAX_DIMENSION) {
-      return raw;
+      return { data: raw, width, height };
     }
 
     // Resize maintaining aspect ratio
@@ -606,7 +618,7 @@ const resizeImageForVision = async (base64String) => {
 
     console.log(`[resize] ${width}×${height} → ${resized.bitmap.width}×${resized.bitmap.height} (${originalKB}KB → ${resizedKB}KB)`);
 
-    return resizedBuffer.toString('base64');
+    return { data: resizedBuffer.toString('base64'), width: resized.bitmap.width, height: resized.bitmap.height };
   } catch (err) {
     console.error('[resize] failed:', err?.message);
     throw new Error('Image resize failed — please retake photo');
@@ -616,6 +628,9 @@ const resizeImageForVision = async (base64String) => {
 // Build image content blocks from base64 array.
 const buildImageContent = async (images) => {
   const content = [];
+  // Dimensions actually sent to the model, recorded on the prediction event.
+  // An array property is not serialized with the request body.
+  const sentDimensions = [];
   for (const img of images) {
     const s = String(img);
     const m = s.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/);
@@ -623,10 +638,12 @@ const buildImageContent = async (images) => {
     const rawData = m ? m[2] : s.replace(/^data:[^;]+;base64,/, "");
 
     // Resize before sending to Vision
-    const data = await resizeImageForVision(rawData);
+    const resized = await resizeImageForVision(rawData);
+    sentDimensions.push({ width: resized.width, height: resized.height });
 
-    content.push({ type: "image", source: { type: "base64", media_type, data } });
+    content.push({ type: "image", source: { type: "base64", media_type, data: resized.data } });
   }
+  content.sentDimensions = sentDimensions;
   return content;
 };
 
@@ -821,19 +838,13 @@ export default async function handler(req, res) {
   try {
     const body = req.body || {};
 
-    // FIX 4: Grade lock - skip Vision on HIGH confidence books
-    if (body.existingGrade &&
-        body.gradeConfidence === 'HIGH' &&
-        body.gradeLocked === true &&
-        !body.forceRegrade) {
-      console.log('[grade-lock] returning locked grade, skipping Vision');
-      return res.status(200).json(echoScanId({
-        ...body.existingGrade,
-        skipReason: 'grade_locked',
-        locked: true,
-        skippedVision: true,
-      }, body.scanId));
-    }
+    // GRADE AUTHORITY: a client-supplied `gradeLocked` flag (derived by the client
+    // from model confidence) never causes Vision to be skipped. MODEL CONFIDENCE
+    // IS NOT AUTHORITY; CLIENT STATE MAY NOT MINT GRADE AUTHORITY; new visual
+    // evidence must always be able to generate a new model prediction. Operator
+    // authority lives in gradeAuthority/operatorGrade (src/lib/gradeAuthority.js),
+    // unchanged. Legacy `gradeLocked`/`existingGrade`/`gradeConfidence`/`forceRegrade`
+    // fields in a request body are inert: do NOT reconnect them as authority.
 
     const { images, image } = body;
     if (!Array.isArray(images) || images.length === 0) {
@@ -874,12 +885,20 @@ export default async function handler(req, res) {
       return;
     }
 
+    const evidenceCtx = {
+      imageCount: Array.isArray(images) ? images.length : (image ? 1 : 0),
+      imageViews: body.imageViews,
+      sentDimensions: imageContent.sentDimensions || null,
+      // Observability label only (never authority): clients label a re-grade; otherwise inferred from image count.
+      predictionKind: resolvePredictionKind(body.predictionKind, Array.isArray(images) ? images.length : 1),
+    };
+
     // Watch mode: self-correcting multi-pass pipeline
     if (body.source === "watch") {
       const { result, passes, timings } = await watchPipeline(imageContent, body.voiceContext);
       applyConditionGuard(result, Array.isArray(images) ? images.length : (image ? 1 : 0), body.imageViews);
       if (noImage) result.noImage = true;
-      await attachGradeReceipt(result, auth.principalId, { model: null, inputHash });
+      await attachGradeReceipt(result, auth.principalId, { model: null, inputHash, branch: 'WATCH', ...evidenceCtx });
       res.setHeader("x-watch-passes", String(passes));
       res.setHeader("x-watch-timing", JSON.stringify(timings));
       res.status(200).json(echoScanId(ensureAssetType(result), body.scanId));
@@ -952,7 +971,7 @@ export default async function handler(req, res) {
       if (noImage) result.noImage = true;
 
       console.log('[grade] eBay-first path succeeded');
-      await attachGradeReceipt(result, auth.principalId, { model: "claude-haiku-4-5-20251001", meta: gradeMeta, inputHash, identityFromModel: false });
+      await attachGradeReceipt(result, auth.principalId, { model: "claude-haiku-4-5-20251001", meta: gradeMeta, inputHash, identityFromModel: false, branch: 'HAIKU_EBAY_CONSENSUS', ...evidenceCtx });
       mark('response_sent');
       res.status(200).json(echoScanId(ensureAssetType(result), body.scanId));
       return;
@@ -1036,7 +1055,7 @@ export default async function handler(req, res) {
     applyNewsstandFallback(finalParsed);
     finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 
-    await attachGradeReceipt(finalParsed, auth.principalId, { model: "claude-sonnet-4-5-20250929", meta: finalMeta, inputHash, identityFromModel: true });
+    await attachGradeReceipt(finalParsed, auth.principalId, { model: "claude-sonnet-4-5-20250929", meta: finalMeta, inputHash, identityFromModel: true, branch: isBook ? 'SONNET_BOOK' : 'SONNET_VISION_FALLBACK', ...evidenceCtx });
     mark('response_sent');
     res.status(200).json(echoScanId(ensureAssetType(finalParsed, initialScan), body.scanId));
   } catch (err) {
