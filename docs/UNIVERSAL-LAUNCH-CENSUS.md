@@ -297,3 +297,15 @@ U1 is the second step of the roadmap (LIVE EXPOSURE CLOSURE → **UNIVERSAL U1**
 ### What U1 deliberately did NOT do
 
 No marketplace #2; no full `enrich.js` adapter refactor; no universal valuation; no Generic marketplace listing; no New Mutants/GK-228 change; no billing; no MAX BUY; no Economic Router; no card/coin adapter; no Production migration; no H8 change.
+
+---
+
+## UNIVERSAL U1 PRODUCTION CLOSEOUT (2026-10-05)
+
+Closeout of U1 against Production (full detail: `docs/TICKET-REGISTRY.md`, "UNIVERSAL U1 PRODUCTION CLOSEOUT"):
+
+- **Standing law recorded:** PUSH AND DEPLOY ARE HELD BY DEFAULT (explicit PUSH AUTHORIZED / DEPLOY AUTHORIZED only). The U1 runtime reached Production before the intended final approval; it was backward-compatible and nothing was rewritten.
+- **Production category census (read-only, before 0039):** `gk_asset` 4 rows (comic 2, generic 2), `collection_item` 178 rows (comic 177, book 1), no nulls, no value violating 0039's CHECK. Principals: 1 (operator). The two Production `generic` assets have dangling Collection links from the pre-GK-266 Generic ordering (historical, untouched).
+- **0039 remains NOT applied to Production** (explicit authorization required). `VALIDATE CONSTRAINT` on its NOT VALID CHECKs is NOT planned and must not be run casually.
+- **Stale-client contract:** one stable code `CATEGORY_REQUIRED_CLIENT_OUTDATED` (header `x-grailkey-client-contract`); the current client shows "Update the app and try again."; an already-stale bundle cannot understand it. The bundle now shows a visible `build <sha>` marker so a live test can be proven to come from the current bundle.
+- **Still open for the asset-management private beta:** operator spend config confirmation, H8, live supported Comic capture + durable spend-counter certification, live Generic certification, 0039 disposition. Outside-user marketplace selling stays blocked (seller location, DELISTED recovery).

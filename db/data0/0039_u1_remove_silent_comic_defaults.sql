@@ -26,6 +26,17 @@
 -- ROWS ARE NEVER REWRITTEN (Development holds 105 legacy 'd4-proof' test
 -- rows in gk_asset that this migration must not touch or reclassify).
 --
+-- VALIDATE CONSTRAINT POLICY (ruled 2026-10-05): `VALIDATE CONSTRAINT` on
+-- these two CHECKs is NOT PLANNED, and NO ONE SHOULD RUN IT CASUALLY. NOT VALID
+-- skips validation of historical rows only at creation; every later INSERT and
+-- every UPDATE of ANY column is still checked against the CHECK, so a row
+-- holding an unsupported value is trapped against updates until reconciled.
+-- Legacy unsupported values may intentionally remain (Development holds 111
+-- 'd4-proof' gk_asset rows; Production held none at the 2026-10-05 census),
+-- and VALIDATE would fail wherever one exists until those rows are
+-- deliberately reconciled. Reconcile first (an explicit, separately authorized
+-- decision), then and only then consider validating.
+--
 -- Rollback: db/data0/0039_u1_remove_silent_comic_defaults_rollback.sql.
 -- Re-runnable.
 -- =====================================================================
