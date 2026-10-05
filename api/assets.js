@@ -23,6 +23,7 @@
 import { verifyToken, InvalidTokenError } from '../src/modules/auth/index.js';
 import { getPhysicalAsset, listMyAssets, resolveCollectionItemLink, NotFoundError, AuthorizationFailedError } from '../src/modules/assets/index.js';
 import { checkRateLimit } from './rate-limit.js';
+import { getInventoryState } from '../src/modules/inventory/index.js';
 
 function extractBearerToken(req) {
   const header = req.headers?.authorization || req.headers?.Authorization;
@@ -69,7 +70,15 @@ export default async function handler(req, res) {
     }
     if (gkAssetId) {
       const asset = await getPhysicalAsset({ principalId, gkAssetId });
-      return res.status(200).json({ asset: { ...asset, media: rewriteMediaUris(asset.media) } });
+      // U1 — additive, read-only: the Inventory Authority state (null = UNMANAGED). A failure to read it
+      // never fails the asset read.
+      let inventoryState;
+      try {
+        inventoryState = (await getInventoryState({ principalId, gkAssetId })).state;
+      } catch {
+        inventoryState = undefined;
+      }
+      return res.status(200).json({ asset: { ...asset, media: rewriteMediaUris(asset.media) }, ...(inventoryState !== undefined ? { inventoryState } : {}) });
     }
     const assets = await listMyAssets({ principalId });
     return res.status(200).json({ assets });

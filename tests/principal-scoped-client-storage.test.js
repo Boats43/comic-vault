@@ -62,15 +62,16 @@ copyFileSync(new URL('tests/fixtures/pre-fix-client-storage/db.js', ROOT), join(
 copyFileSync(new URL('tests/fixtures/pre-fix-client-storage/collectionPersistence.js', ROOT), join(tmp, 'src/lib/collectionPersistence.js'));
 copyFileSync(new URL('src/lib/collectionSync.js', ROOT), join(tmp, 'src/lib/collectionSync.js'));
 copyFileSync(new URL('src/lib/grailkeySession.js', ROOT), join(tmp, 'src/lib/grailkeySession.js'));
+copyFileSync(new URL('src/lib/assetCategories.js', ROOT), join(tmp, 'src/lib/assetCategories.js')); // collectionSync (current) imports it
 const oldDb = await import(pathToFileURL(join(tmp, 'src/db.js')).href);
 const oldPersist = await import(pathToFileURL(join(tmp, 'src/lib/collectionPersistence.js')).href);
 const oldSession = await import(pathToFileURL(join(tmp, 'src/lib/grailkeySession.js')).href);
 
 login('principal-A', oldSession.setSession);
 // A's local state, written by the OLD code (this is also what a real pre-fix device holds).
-await oldDb.putComic({ timestamp: 1001, id: 'cv_1_a', title: 'Hulk', issue: '180', year: '1974', publisher: 'Marvel', _syncStatus: 'synced', images: ['data:A-photo'] });
-await oldDb.putComic({ timestamp: 1002, id: 'cv_2_a', title: 'Batman', issue: '1', year: '1940', publisher: 'DC', _syncStatus: 'pending', images: ['data:A-photo-2'] });
-await oldDb.putComic({ timestamp: 1003, id: 'cv_3_local', title: 'Legacy Only', issue: '5', year: '1980', publisher: 'X' }); // never synced, no _syncStatus
+await oldDb.putComic({ assetCategory: 'comic', timestamp: 1001, id: 'cv_1_a', title: 'Hulk', issue: '180', year: '1974', publisher: 'Marvel', _syncStatus: 'synced', images: ['data:A-photo'] });
+await oldDb.putComic({ assetCategory: 'comic', timestamp: 1002, id: 'cv_2_a', title: 'Batman', issue: '1', year: '1940', publisher: 'DC', _syncStatus: 'pending', images: ['data:A-photo-2'] });
+await oldDb.putComic({ assetCategory: 'comic', timestamp: 1003, id: 'cv_3_local', title: 'Legacy Only', issue: '5', year: '1980', publisher: 'X' }); // never synced, no _syncStatus
 oldSession.clearSession(); // A logs out — pre-fix, storage untouched
 login('principal-B', oldSession.setSession);
 const bView = await oldDb.getAllComics();
@@ -80,7 +81,7 @@ ok(bView.map((c) => c.id).sort().join() === 'cv_1_a,cv_2_a,cv_3_local', 'PRE-FIX
 ok(bView.some((c) => c.images?.[0] === 'data:A-photo'), 'PRE-FIX: user B sees A\'s raw photo bytes');
 ok(pushes.length === 1 && pushes[0].id === 'cv_2_a' && pushes[0].auth === `Bearer ${tokenFor('principal-B')}`, 'PRE-FIX: A\'s pending row is pushed under B\'s bearer token (cross-principal write)');
 // clear what the old code left pending→synced so the legacy rows read as unsynced legacy again
-await oldDb.putComic({ timestamp: 1004, id: 'cv_2_a', title: 'Batman', issue: '1', year: '1940', publisher: 'DC', _syncStatus: 'pending', images: ['data:A-photo-2'] });
+await oldDb.putComic({ assetCategory: 'comic', timestamp: 1004, id: 'cv_2_a', title: 'Batman', issue: '1', year: '1940', publisher: 'DC', _syncStatus: 'pending', images: ['data:A-photo-2'] });
 oldSession.clearSession();
 store.clear();
 
@@ -94,15 +95,15 @@ const legacy = await import(new URL('src/lib/legacyLocalClaim.js', ROOT).href);
 eq(await db.getAllComics(), [], 'no session: getAllComics() returns nothing (pre-login mount loads no user-owned state)');
 eq(await db.getAllSnapshots(), [], 'no session: snapshots empty');
 let threw = null;
-try { await db.putComic({ timestamp: 1005, id: 'x' }); } catch (e) { threw = e; }
+try { await db.putComic({ assetCategory: 'comic', timestamp: 1005, id: 'x' }); } catch (e) { threw = e; }
 ok(threw && threw.code === 'NO_PRINCIPAL_SCOPE', 'no session: putComic REFUSES (never an unscoped write)');
 ok(pstore.scopedSet('cv_buyer_sessions', '[1]') === false && pstore.scopedGet('cv_buyer_sessions') === null, 'no session: scoped localStorage refuses writes and reads null');
 ok(![...store.keys()].some((k) => k.startsWith('cv_buyer_sessions')), 'no session: nothing was written to localStorage');
 
 console.log('PART 2 — A -> logout -> B -> A');
 login('principal-A', setSession);
-await db.putComic({ timestamp: 1006, id: 'a1', title: 'Hulk', issue: '180', year: '1974', publisher: 'Marvel', _syncStatus: 'synced', images: ['data:A1'] });
-await db.putComic({ timestamp: 1007, id: 'a2', title: 'Batman', issue: '1', year: '1940', publisher: 'DC', _syncStatus: 'pending', images: ['data:A2'] });
+await db.putComic({ assetCategory: 'comic', timestamp: 1006, id: 'a1', title: 'Hulk', issue: '180', year: '1974', publisher: 'Marvel', _syncStatus: 'synced', images: ['data:A1'] });
+await db.putComic({ assetCategory: 'comic', timestamp: 1007, id: 'a2', title: 'Batman', issue: '1', year: '1940', publisher: 'DC', _syncStatus: 'pending', images: ['data:A2'] });
 pstore.scopedSet('cv_buyer_sessions', JSON.stringify([{ ts: 1, title: 'A-buy', _syncStatus: 'pending' }]));
 pstore.scopedSet('cv_trade_piles', JSON.stringify([{ id: 'pile-A' }]));
 const aStaleList = await db.getAllComics(); // a list captured under A
@@ -119,7 +120,7 @@ pushes = [];
 const staleResult = await persistence.retryPendingCollectionItems(aStaleList); // stale list captured under A, retried under B
 eq(staleResult, [], 'B cannot retry A\'s pending rows even when handed A\'s stale list');
 eq(pushes, [], 'no network push happened for A\'s data under B\'s token');
-await db.putComic({ timestamp: 1008, id: 'b1', title: 'Spider-Man', issue: '1', year: '1963', publisher: 'Marvel', _syncStatus: 'synced' });
+await db.putComic({ assetCategory: 'comic', timestamp: 1008, id: 'b1', title: 'Spider-Man', issue: '1', year: '1963', publisher: 'Marvel', _syncStatus: 'synced' });
 pstore.scopedSet('cv_buyer_sessions', JSON.stringify([{ ts: 9, title: 'B-buy' }]));
 eq((await db.getAllComics()).map((c) => c.id), ['b1'], 'B\'s own data is B\'s');
 clearSession();
@@ -138,10 +139,10 @@ clearSession();
 
 console.log('PART 3 — mid-flight account switch refuses');
 login('principal-A', setSession);
-await db.putComic({ timestamp: 1009, id: 'a3', title: 'Flash', issue: '139', year: '1963', publisher: 'DC', _syncStatus: 'pending' });
+await db.putComic({ assetCategory: 'comic', timestamp: 1009, id: 'a3', title: 'Flash', issue: '139', year: '1963', publisher: 'DC', _syncStatus: 'pending' });
 pushes = [];
 onPush = async () => { clearSession(); login('principal-B', setSession); }; // account changes during the network call
-const mid = await persistence.persistCollectionItem({ timestamp: 2000, id: 'a3', title: 'Flash', issue: '139', year: '1963', publisher: 'DC' });
+const mid = await persistence.persistCollectionItem({ timestamp: 2000, assetCategory: 'comic', id: 'a3', title: 'Flash', issue: '139', year: '1963', publisher: 'DC' });
 onPush = null;
 ok(mid._refusedScopeChanged === true, 'persist refuses to write after the principal changed mid-flight');
 ok(!(await db.getAllComics()).some((c) => c.id === 'a3'), 'A\'s in-flight row was NOT written into B\'s database');

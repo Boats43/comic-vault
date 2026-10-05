@@ -194,7 +194,7 @@ const DESKTOP_ITEM_ID = `${TAG}-desktop-item`;
 
 try {
   console.log('-- FORWARD: phone saves an item WITH a real image --\n');
-  const phoneEntry = { id: PHONE_ITEM_ID, title: 'Amazing Fantasy', issue: '15', year: '1962', grade: 'FN 6.0', images: [PHONE_IMAGE] };
+  const phoneEntry = { assetCategory: 'comic', id: PHONE_ITEM_ID, title: 'Amazing Fantasy', issue: '15', year: '1962', grade: 'FN 6.0', images: [PHONE_IMAGE] };
   await putComic(phoneEntry); // the real local-first write addToCatalogue does before persistCollectionItem
   const savedPhone = await persistCollectionItem(phoneEntry);
   assertTrue(savedPhone._syncStatus === 'synced', `phone create -> _syncStatus: 'synced' (got ${savedPhone._syncStatus})`);
@@ -297,7 +297,7 @@ try {
 
   console.log('\n-- REVERSE: "desktop" saves an item WITH a real image; "phone" (zero local record) can display it --\n');
   const desktopImage = `data:image/png;base64,${ONE_PX_PNG_B64}`;
-  const desktopEntry = { id: DESKTOP_ITEM_ID, title: 'Detective Comics', issue: '27', year: '1939', grade: 'GD 2.0', images: [desktopImage] };
+  const desktopEntry = { assetCategory: 'comic', id: DESKTOP_ITEM_ID, title: 'Detective Comics', issue: '27', year: '1939', grade: 'GD 2.0', images: [desktopImage] };
   await putComic(desktopEntry);
   const savedDesktop = await persistCollectionItem(desktopEntry);
   assertTrue(savedDesktop._syncStatus === 'synced', `desktop create -> _syncStatus: 'synced' (got ${savedDesktop._syncStatus})`);

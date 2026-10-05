@@ -167,19 +167,21 @@ assertTrue(isGenericAsset({}) === false, 'isGenericAsset({}) === false (no asset
 console.log('\n-- structural: captureFromScan no longer hardcodes assetClass:\'comic\' at the mint call --\n');
 const captureServiceSrc = readFileSync(path.join(repoRoot, 'src', 'modules', 'capture', 'service.js'), 'utf8');
 assertTrue(!/assetClass:\s*'comic'/.test(captureServiceSrc), 'no literal assetClass:\'comic\' remains anywhere in capture/service.js');
-assertTrue(/assetClass\s*=\s*'comic'/.test(captureServiceSrc) && /ALLOWED_ASSET_CLASSES/.test(captureServiceSrc), 'assetClass is now a validated, defaulted parameter (ALLOWED_ASSET_CLASSES present)');
+assertTrue(!/assetClass\s*=\s*'comic'/.test(captureServiceSrc) && /ALLOWED_ASSET_CLASSES/.test(captureServiceSrc) && /isSupportedAssetCategory\(assetClass\)/.test(captureServiceSrc), 'assetClass is a validated, NOT defaulted parameter (U1: no silent comic; ALLOWED_ASSET_CLASSES present)');
 
-console.log('\n-- structural: GenericAssetCapture.jsx is reachable from exactly one place in src/App.jsx --\n');
+console.log('\n-- structural: GenericAssetCapture.jsx is reachable ONLY from explicit operator actions in src/App.jsx --\n');
 const appSrc = readFileSync(path.join(repoRoot, 'src', 'App.jsx'), 'utf8');
+// U1: exactly TWO render sites, each gated by its own operator-set state, and each state is set ONLY from a click
+// handler: (1) the Collection toolbar button, (2) the Scan-tab "Save as Generic asset" button shown after a scan
+// the classifier could not establish as a comic or book. Neither is automatic, neither mints by itself.
 const jsxUsages = (appSrc.match(/<GenericAssetCapture\b/g) || []).length;
-assertTrue(jsxUsages === 1, `<GenericAssetCapture appears exactly once in App.jsx's JSX (got ${jsxUsages}) — not reachable from more than one render path`);
-// The one render site must be gated behind explicit operator state
-// (showGenericCapture), never rendered unconditionally or from a
-// useEffect/automatic branch.
-const renderSiteMatch = appSrc.match(/\{showGenericCapture && \(\s*<GenericAssetCapture/);
-assertTrue(!!renderSiteMatch, 'the one render site is gated behind showGenericCapture, set only by the explicit toolbar button onClick');
-assertTrue(!/useEffect\([^)]*setShowGenericCapture\(true\)/.test(appSrc), 'setShowGenericCapture(true) is never called from inside a useEffect callback signature on the same line (no automatic-open path)');
-
+assertTrue(jsxUsages === 2, `<GenericAssetCapture appears at exactly two render sites in App.jsx (got ${jsxUsages}) — the toolbar button and the explicit scan-fallback choice`);
+assertTrue(/\{showGenericCapture && \(\s*<GenericAssetCapture/.test(appSrc), 'render site 1 is gated behind showGenericCapture, set only by the explicit toolbar button onClick');
+assertTrue(/\{genericFromScan && \(\s*<GenericAssetCapture/.test(appSrc), 'render site 2 is gated behind genericFromScan');
+assertTrue((appSrc.match(/setGenericFromScan\((?!null)[^)]*\)/g) || []).length === 1 && /onClick=\{\(\) => \{ setGenericFromScan\(unsupportedScan\.photoDataUrl\)/.test(appSrc), 'setGenericFromScan(photo) has exactly one call site and it is an onClick handler (an explicit operator tap, never automatic)');
+assertTrue(!/useEffect\([^)]*setShowGenericCapture\(true\)/.test(appSrc) && !/useEffect\([^)]*setGenericFromScan\(/.test(appSrc), 'neither open-state is ever set from a useEffect callback (no automatic-open path)');
+assertTrue(/if \(save\) setUnsupportedScan\(\{ photoDataUrl: b64 \}\);/.test(appSrc), 'a failed scan only OFFERS the choice (stores the photo); it never mints or calls the capture endpoint itself');
+console.log('');
 console.log('\n-- structural: CollectionDetail\'s generic branch returns before any comic-specific field access --\n');
 const genericBranchIdx = appSrc.indexOf('item?.assetCategory === "generic"');
 const priceBandsAccessIdx = appSrc.indexOf('item.priceBands', genericBranchIdx);

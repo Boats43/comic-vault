@@ -33,7 +33,7 @@ import {
   putGenericCaptureDraft, getGenericCaptureDraft, deleteGenericCaptureDraft,
   getAllGenericCaptureDrafts, putComic,
 } from "../db.js";
-import { authFetch } from "./grailkeySession.js";
+import { authFetch, getPrincipalScope } from "./grailkeySession.js";
 import { persistCollectionItem } from "./collectionPersistence.js";
 
 // Mirrors GrailKeyOperatorPanel.jsx's own isDefinitiveResponseStatus
@@ -97,22 +97,87 @@ export async function discardGenericCaptureDraft(id) {
   await deleteGenericCaptureDraft(id);
 }
 
-// The submit step. Reuses the draft's OWN id as idempotencyKey/
-// correlationId/collectionItemId throughout — never generates a second
-// identifier at submit time — so a reload-then-retry of the same draft
-// is byte-for-byte the same request as the first attempt.
+// PRESENTATION-ONLY label for a Generic asset with no operator-supplied name.
+// UNIVERSAL U1: the operator's name is OPTIONAL. When absent we NEVER store a
+// placeholder as identity ("Unidentified asset" is not a title): the entry's
+// `title` stays empty, and this derived label is computed at render time only,
+// from durable metadata (capture time + the stable asset id), so several
+// unnamed assets stay visually distinct. It must never be written as title
+// truth, used for duplicate detection, or reach marketplace copy.
+export function genericDisplayLabel(item) {
+  const name = typeof item?.title === "string" ? item.title.trim() : "";
+  if (name) return name;
+  const t = Number(item?.timestamp) || Date.parse(item?.createdAt || "") || 0;
+  const day = t
+    ? new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
+    : "undated";
+  const tag = String(item?.id || "").replace(/[^A-Za-z0-9]/g, "").slice(-4).toUpperCase();
+  return `Unidentified asset · ${day}${tag ? ` · #${tag}` : ""}`;
+}
+
+// The submit step — UNIVERSAL U1, GK-266-CORRECT ORDER.
 //
-// Returns { ok: true, entry } on success (caller is responsible for
-// setCatalogue — this module has no React state of its own), or
-// { ok: false, ambiguous: true } / { ok: false, error } on failure. The
-// draft is deleted ONLY on a confirmed success; every other outcome
-// leaves it in IndexedDB untouched, ready for the same retry.
+// BEFORE (broken since GK-266): capture-scan (physical mint) ran FIRST, then the
+// collection_item was written. GK-266's assertCollectionItemLinkable correctly
+// refuses to link a physical asset to a collection_item that does not yet exist
+// server-side, so every Generic capture was rejected.
+//
+// NOW (GK-266 is not weakened and has no Generic exception):
+//   1. durable local entry, then the authoritative server Collection row FIRST
+//      (assetCategory 'generic', via the same local-first persistCollectionItem
+//      every other catalogue write uses). If that cannot be confirmed 'synced',
+//      NOTHING is minted — the draft stays for a safe retry.
+//   2. only then POST /api/capture-scan with collectionItemId = the now-durable
+//      row's id: mint gk_asset (asset_class 'generic'), attach the photo, link
+//      the row, record acquisition if supplied, and initialize Inventory
+//      Authority (server-side, existing neutral state).
+//   3. record the gkAssetId back onto the Collection row, retire the draft.
+// draft.id is the collection item id AND the capture idempotency key throughout,
+// so a reload/retry at ANY step is byte-for-byte the same request.
+//
+// Returns { ok: true, entry, gkAssetId } or { ok: false, ambiguous: true } /
+// { ok: false, error }. The draft is deleted ONLY on a confirmed success.
 export async function submitGenericCapture(draft) {
   if (!draft?.photoDataUrl) return { ok: false, error: "A photo is required." };
-  if (!draft?.name || !draft.name.trim()) return { ok: false, error: "A name is required." };
+
+  // MID-FLIGHT ACCOUNT SWITCH: the principal that started this submit owns every write below. If the
+  // signed-in account changes at any await, the flow FAILS CLOSED — it never writes the other
+  // account's scope and never re-attributes the capture (the draft stays in the STARTING principal's
+  // own database and is retried, idempotently, when that account signs back in).
+  const startedAs = getPrincipalScope();
+  if (!startedAs) return { ok: false, error: "Not signed in." };
+  const switched = () => getPrincipalScope() !== startedAs;
+  const switchedResult = { ok: false, scopeChanged: true, error: "The signed-in account changed while saving — nothing was saved under the other account. Sign back in to finish." };
 
   await updateGenericCaptureDraft(draft.id, { status: "submitting" });
 
+  const name = typeof draft.name === "string" ? draft.name.trim() : "";
+  const entry = {
+    id: draft.id,
+    assetCategory: "generic",
+    title: name, // may be empty: never a placeholder-as-identity
+    description: draft.description || "",
+    purchasePrice: draft.acquisitionCost ?? null,
+    images: [draft.photoDataUrl],
+    timestamp: draft.createdAt || Date.now(),
+  };
+
+  // STEP 1 — the authoritative Collection row exists server-side BEFORE any mint.
+  let synced;
+  try {
+    await putComic(entry);
+    synced = await persistCollectionItem(entry);
+  } catch {
+    await updateGenericCaptureDraft(draft.id, { status: "draft" });
+    return { ok: false, ambiguous: true };
+  }
+  if (switched()) return switchedResult;
+  if (!synced || synced._syncStatus !== "synced") {
+    await updateGenericCaptureDraft(draft.id, { status: "draft" });
+    return { ok: false, ambiguous: true };
+  }
+
+  // STEP 2 — physical mint, linked to the now-durable row.
   const scanPayload = {
     correlationId: draft.id,
     collectionItemId: draft.id,
@@ -143,6 +208,7 @@ export async function submitGenericCapture(draft) {
     return { ok: false, ambiguous: true };
   }
 
+  if (switched()) return switchedResult;
   if (!captureRes) {
     await updateGenericCaptureDraft(draft.id, { status: "draft" });
     return { ok: false, error: "Not signed in." };
@@ -153,43 +219,25 @@ export async function submitGenericCapture(draft) {
   }
   const captureBody = await captureRes.json().catch(() => ({}));
   if (!captureRes.ok) {
-    // Definitive rejection (e.g. a validation error) — the SAME draft
-    // (same id, same bytes) can still be safely retried once whatever
-    // was wrong is fixed; discard is left to the caller/operator, never
-    // automatic here.
+    // Definitive rejection — the SAME draft (same id, same bytes) can still be
+    // safely retried; discard is left to the operator, never automatic.
     await updateGenericCaptureDraft(draft.id, { status: "draft" });
     return { ok: false, error: captureBody.detail || captureBody.error || `Capture failed (${captureRes.status})` };
   }
 
+  if (switched()) return switchedResult;
   const gkAssetId = captureBody.gkAssetId || null;
 
-  // U4.3 — collection_item projection, via the SAME reused local-first +
-  // best-effort-server-sync mechanism every comic catalogue write already
-  // uses (persistCollectionItem, collectionPersistence.js). assetCategory
-  // now round-trips through pushCollectionItem (see collectionSync.js).
-  const entry = {
-    id: draft.id,
-    assetCategory: "generic",
-    title: draft.name.trim(),
-    description: draft.description || "",
-    purchasePrice: draft.acquisitionCost ?? null,
-    images: draft.photoDataUrl ? [draft.photoDataUrl] : [],
-    gkAssetId,
-    timestamp: Date.now(),
-  };
+  // STEP 3 — record the durable asset id on the Collection row (local-first,
+  // best-effort server sync; the capture link is already the durable truth).
+  const linked = gkAssetId ? { ...entry, gkAssetId } : entry;
+  await putComic(linked);
+  const final = await persistCollectionItem(linked).catch(() => ({ ...linked, _syncStatus: "pending" }));
 
-  await putComic(entry);
-  const final = await persistCollectionItem(entry).catch(() => ({ ...entry, _syncStatus: "pending" }));
-
-  // Only a fully-recorded durable asset (gkAssetId present) retires the
-  // draft — the local catalogue write above already succeeded either
-  // way (local-first, matches every other capture path in this app), but
-  // A1's replay-safety guarantee only applies while the draft still
-  // exists, so an incomplete capture-scan response is never treated as
-  // grounds to discard it.
-  if (gkAssetId) {
+  // Only a fully-recorded durable asset (gkAssetId present) retires the draft.
+  if (gkAssetId && !switched()) {
     await discardGenericCaptureDraft(draft.id);
   }
 
-  return { ok: true, entry: final || entry, gkAssetId };
+  return { ok: true, entry: final || linked, gkAssetId, inventory: captureBody.inventory || null };
 }

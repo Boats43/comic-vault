@@ -190,7 +190,7 @@ const LEGACY_ID = `${TAG}-legacy-untouched`;
 
 try {
   console.log('-- phone creates item (persistCollectionItem, real local write + real server round-trip) --\n');
-  const v1 = { id: ITEM_ID, title: 'Brave and the Bold', issue: '141', year: '1978', grade: 'VG 4.0', images: ['fake-photo-data'] };
+  const v1 = { assetCategory: 'comic', id: ITEM_ID, title: 'Brave and the Bold', issue: '141', year: '1978', grade: 'VG 4.0', images: ['fake-photo-data'] };
   const savedV1 = await persistCollectionItem(v1);
   assertTrue(savedV1._syncStatus === 'synced', `create -> _syncStatus: 'synced' (got ${savedV1._syncStatus})`);
   {

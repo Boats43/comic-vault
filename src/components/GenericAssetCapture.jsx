@@ -22,8 +22,12 @@ import {
   createGenericCaptureDraft, updateGenericCaptureDraft, listGenericCaptureDrafts,
   discardGenericCaptureDraft, submitGenericCapture,
 } from "../lib/genericAssetCapture.js";
+import { downscaleImageDataUrl, readFileAsDataUrl } from "../lib/imageDownscale.js";
 
-export default function GenericAssetCapture({ onClose, onCaptured }) {
+// initialPhotoDataUrl — UNIVERSAL U1 "Save as Generic asset" from a scan the classifier could
+// not establish as a comic or book: the ALREADY-CAPTURED image is reused (no re-capture, no
+// second classification call). Nothing is minted until the operator taps Save.
+export default function GenericAssetCapture({ onClose, onCaptured, initialPhotoDataUrl = null }) {
   const [draft, setDraft] = useState(null); // null until a photo is picked or a pending draft is resumed
   const [resumedNotice, setResumedNotice] = useState(false);
   const [name, setName] = useState("");
@@ -39,6 +43,12 @@ export default function GenericAssetCapture({ onClose, onCaptured }) {
   // fresh file-picker read or a fresh id.
   useEffect(() => {
     (async () => {
+      if (initialPhotoDataUrl) {
+        // A scan fallback always starts from ITS OWN photo (a new draft), never an older resumed one.
+        const created = await createGenericCaptureDraft({ photoDataUrl: initialPhotoDataUrl, name: "", description: "", acquisitionCost: null });
+        setDraft(created);
+        return;
+      }
       const pending = await listGenericCaptureDrafts();
       if (pending && pending.length > 0) {
         // Only ever one generic-capture flow is open at a time (this
@@ -54,21 +64,13 @@ export default function GenericAssetCapture({ onClose, onCaptured }) {
     })();
   }, []);
 
-  function readFileAsDataUrl(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-  }
-
   async function handlePhotoChange(e) {
     const file = e.target.files?.[0];
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (!file) return;
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      // Downscaled: a raw phone photo as base64 exceeds Vercel's 4.5 MB request-body limit.
+      const dataUrl = await downscaleImageDataUrl(await readFileAsDataUrl(file));
       // A1 — persisted to IndexedDB (db.js's genericCaptureDrafts store)
       // immediately, before any network call. This IS the "generate the
       // stable capture key" step — createGenericCaptureDraft mints and
@@ -100,10 +102,7 @@ export default function GenericAssetCapture({ onClose, onCaptured }) {
 
   async function handleSubmit() {
     if (!draft || submitting) return;
-    if (!name.trim()) {
-      setError("A name is required.");
-      return;
-    }
+    // UNIVERSAL U1 — the name is OPTIONAL (an unnamed asset gets a derived display label only).
     setSubmitting(true);
     setError(null);
     setAmbiguous(false);
@@ -160,11 +159,11 @@ export default function GenericAssetCapture({ onClose, onCaptured }) {
         </button>
         <input ref={fileInputRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handlePhotoChange} />
 
-        <label style={labelStyle}>Name *</label>
+        <label style={labelStyle}>Name (optional)</label>
         <input
           value={name}
           onChange={(e) => { setName(e.target.value); commitField({ name: e.target.value }); }}
-          placeholder="e.g. Vintage brass compass"
+          placeholder="Optional — add it now or later"
           style={inputStyle}
         />
 
@@ -198,15 +197,15 @@ export default function GenericAssetCapture({ onClose, onCaptured }) {
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!draft?.photoDataUrl || !name.trim() || submitting}
+            disabled={!draft?.photoDataUrl || submitting}
             style={{
               flex: 2, padding: "10px 0", borderRadius: 6, border: "1px solid rgba(212,175,55,0.4)",
               background: submitting ? "#333" : "transparent", color: "#d4af37", fontWeight: 700, fontSize: 13,
-              cursor: (!draft?.photoDataUrl || !name.trim() || submitting) ? "not-allowed" : "pointer",
-              opacity: (!draft?.photoDataUrl || !name.trim()) ? 0.5 : 1,
+              cursor: (!draft?.photoDataUrl || submitting) ? "not-allowed" : "pointer",
+              opacity: !draft?.photoDataUrl ? 0.5 : 1,
             }}
           >
-            {submitting ? "Capturing…" : "Capture Asset"}
+            {submitting ? "Saving…" : "Save as Generic asset"}
           </button>
         </div>
       </div>

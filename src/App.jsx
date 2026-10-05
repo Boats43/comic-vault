@@ -42,6 +42,8 @@ import GrailKeyLoginGate from "./components/GrailKeyLoginGate.jsx";
 import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
 import ResearchMarketPanel from "./components/ResearchMarketPanel.jsx";
 import GenericAssetCapture from "./components/GenericAssetCapture.jsx";
+import GenericAssetDetail from "./components/GenericAssetDetail.jsx";
+import { genericDisplayLabel } from "./lib/genericAssetCapture.js";
 import { useClerk } from "@clerk/react";
 import { deriveMarketCopy, NEUTRAL_MARKET_FOOTER } from "./lib/marketEvidence.js";
 import { getDisplayPrice, getAuthorityPrice, getAdvisoryContractPrice, isIdentityDisplayGated, describeActiveEvidenceProvenance, isIdentityAuthorityInsufficient, getDisplayConditionEvidence, POLYBAG_FLAG_OBSERVATION_TEXT } from "./lib/displayAuthority.js";
@@ -4418,6 +4420,7 @@ export function CollectionDetail({
   onAddPhoto,
   onSameCopyRetired,
   onUpdateField,
+  onGenericChange,
   currentIndex,
   totalItems,
   onPrev,
@@ -4839,56 +4842,18 @@ export function CollectionDetail({
   // one — plus explicit "unavailable"/"unknown" labels rather than
   // silently omitting fields a comic card would show.
   if (item?.assetCategory === "generic") {
-    const genericPhotos = getComicPhotos(item);
+    // UNIVERSAL U1 — a Generic asset is a first-class managed physical asset (name/notes edit,
+    // additional photos, inventory state, acquisition basis) with NO automated economics.
     return (
-      <div className="detail-view" style={{ padding: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <button onClick={onBack} style={{ background: "none", border: "none", color: "#d4af37", fontSize: 15, cursor: "pointer" }}>← Back</button>
-          {totalItems > 1 && (
-            <div style={{ color: "#888", fontSize: 12 }}>{currentIndex + 1} / {totalItems}</div>
-          )}
-        </div>
-        {genericPhotos[0] ? (
-          <img src={genericPhotos[0]} alt="" style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 10, background: "rgba(255,255,255,0.03)" }} />
-        ) : (
-          <div style={{ width: "100%", height: 220, background: "rgba(255,255,255,0.04)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 48 }}>📦</div>
-        )}
-        <div style={{ marginTop: 14 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, color: "#0a0a0a", background: "#d4af37", padding: "2px 8px", borderRadius: 4 }}>GENERIC ASSET</span>
-        </div>
-        <div style={{ fontSize: 20, fontWeight: 800, marginTop: 8 }}>{item.title || "Untitled asset"}</div>
-        {item.description ? (
-          <div style={{ color: "#bbb", fontSize: 13, marginTop: 6 }}>{item.description}</div>
-        ) : null}
-        <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
-          <div><span style={{ color: "#888" }}>Identity: </span><span style={{ color: "#eee" }}>operator supplied</span></div>
-          <div><span style={{ color: "#888" }}>Condition: </span><span style={{ color: "#eee" }}>unknown</span></div>
-          <div><span style={{ color: "#888" }}>Automated valuation: </span><span style={{ color: "#eee" }}>unavailable</span></div>
-          <div>
-            <span style={{ color: "#888" }}>Acquisition cost: </span>
-            <span style={{ color: "#eee" }}>{item.purchasePrice != null ? `$${Number(item.purchasePrice).toFixed(2)}` : "—"}</span>
-          </div>
-          {item.gkAssetId && (
-            <div><span style={{ color: "#888" }}>GrailKey asset id: </span><span style={{ color: "#666", fontSize: 11, wordBreak: "break-all" }}>{item.gkAssetId}</span></div>
-          )}
-        </div>
-        {onDelete && (
-          <button
-            onClick={() => {
-              if (confirm(`Delete "${item.title || "this asset"}"?`)) {
-                onDelete(item.id);
-                onBack();
-              }
-            }}
-            style={{ marginTop: 20, width: "100%", padding: "10px 0", borderRadius: 6, border: "1px solid rgba(224,86,86,0.4)", background: "transparent", color: "#e05656", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
-          >
-            Delete
-          </button>
-        )}
-        <div style={{ color: "#666", fontSize: 10, marginTop: 10 }}>
-          Generic assets do not support automated pricing, grading, or eBay listing — this is a durable ownership record only.
-        </div>
-      </div>
+      <GenericAssetDetail
+        item={item}
+        photos={getComicPhotos(item)}
+        onBack={onBack}
+        onDelete={onDelete}
+        onItemChange={onGenericChange}
+        currentIndex={currentIndex}
+        totalItems={totalItems}
+      />
     );
   }
 
@@ -10559,7 +10524,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
               )}
               <div style={{ padding: "8px 10px" }}>
                 <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginBottom: 2 }}>
-                  {item.title || "Unknown"}
+                  {item.assetCategory === "generic" ? genericDisplayLabel(item) : (item.title || "Unknown")}
                 </div>
                 {item.assetCategory === "generic" ? (
                   <div style={{ fontSize: 10, fontWeight: 700, color: "#0a0a0a", background: "#d4af37", display: "inline-block", padding: "1px 6px", borderRadius: 4, marginBottom: 4 }}>GENERIC</div>
@@ -11440,6 +11405,10 @@ export default function App() {
   const [manualVariant, setManualVariant] = useState(''); // FIX B
   const [catalogue, setCatalogue] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
+  // UNIVERSAL U1 — a scan the classifier could not establish as a comic/book keeps ITS OWN photo here
+  // so the operator may explicitly choose SAVE AS GENERIC ASSET (never minted automatically).
+  const [unsupportedScan, setUnsupportedScan] = useState(null); // { photoDataUrl } | null
+  const [genericFromScan, setGenericFromScan] = useState(null); // photo data URL while the save sheet is open
   const [installPrompt, setInstallPrompt] = useState(null);
   const [showSafariBanner, setShowSafariBanner] = useState(false);
   const [installDismissed, setInstallDismissed] = useState(
@@ -11535,6 +11504,8 @@ export default function App() {
     setResult(null);
     setPendingDuplicate(null);
     setDuplicateWarning(null);
+    setUnsupportedScan(null);
+    setGenericFromScan(null);
     setTradePiles([]);
     activeScanRef.current = null;
     scanGenerationRef.current += 1;
@@ -12439,12 +12410,17 @@ export default function App() {
           // moved from a bare `if` into this `else if` so the book branch
           // above is checked first; a genuine comic (assetType!=='book')
           // always reaches this exact check unchanged.
-          !data.title ||
+          data.assetType === 'unsupported' ||
+            !data.title ||
             data.title.toLowerCase().includes('not a comic') ||
             data.title.toLowerCase().includes('unknown') ||
             (!data.publisher && !data.year && !data.issue && data.assetTypeConfident !== true)
         ) {
-          setError("No comic detected. Try again.");
+          // UNIVERSAL U1 — not a dead end: when this was a Scan-tab save (not Buyer mode), the
+          // operator may EXPLICITLY choose "Save as Generic asset" with the photo already captured
+          // here. Nothing is minted automatically, and no further paid classification call runs.
+          if (save) setUnsupportedScan({ photoDataUrl: b64 });
+          setError(save ? "We couldn't identify this as a comic or book." : "No comic detected. Try again.");
           setLoading(false);
           return;
         }
@@ -13580,6 +13556,7 @@ export default function App() {
   const reset = () => {
     setResult(null);
     setError(null);
+    setUnsupportedScan(null);
     setDuplicateWarning(null);
     setPendingDuplicate(null);
   };
@@ -15190,6 +15167,17 @@ export default function App() {
   return (
     <div className="app">
       {CLERK_ENABLED && <ClerkSignOutBridge signOutRef={clerkSignOutRef} />}
+      {genericFromScan && (
+        <GenericAssetCapture
+          initialPhotoDataUrl={genericFromScan}
+          onClose={() => setGenericFromScan(null)}
+          onCaptured={(entry) => {
+            setCatalogue((prev) => [normalizeItem(entry), ...prev]);
+            setGenericFromScan(null);
+            setUnsupportedScan(null);
+          }}
+        />
+      )}
       <header className="header">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
@@ -15624,6 +15612,15 @@ export default function App() {
           {error && (
             <div className="error-card">
               <div className="error-text">{error}</div>
+              {unsupportedScan && (
+                <button
+                  className="reset-btn"
+                  style={{ marginBottom: 8 }}
+                  onClick={() => { setGenericFromScan(unsupportedScan.photoDataUrl); setError(null); }}
+                >
+                  Save as Generic asset
+                </button>
+              )}
               <button className="reset-btn" onClick={reset}>Try again</button>
             </div>
           )}
@@ -16120,6 +16117,10 @@ export default function App() {
               prevTabRef.current = "collection";
             }}
             onDelete={deleteFromCatalogue}
+            onGenericChange={(entry) => {
+              setCatalogue((prev) => prev.map((x) => (x.id === entry.id ? normalizeItem(entry) : x)));
+              setSelectedItem(normalizeItem(entry));
+            }}
             onList={listOnEbay}
             onSyncEbay={syncEbayStatus}
             onRefreshMarket={refreshMarketData}
