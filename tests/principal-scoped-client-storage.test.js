@@ -63,6 +63,7 @@ copyFileSync(new URL('tests/fixtures/pre-fix-client-storage/collectionPersistenc
 copyFileSync(new URL('src/lib/collectionSync.js', ROOT), join(tmp, 'src/lib/collectionSync.js'));
 copyFileSync(new URL('src/lib/grailkeySession.js', ROOT), join(tmp, 'src/lib/grailkeySession.js'));
 copyFileSync(new URL('src/lib/assetCategories.js', ROOT), join(tmp, 'src/lib/assetCategories.js')); // collectionSync (current) imports it
+copyFileSync(new URL('src/lib/clientContract.js', ROOT), join(tmp, 'src/lib/clientContract.js')); // grailkeySession (current) imports it
 const oldDb = await import(pathToFileURL(join(tmp, 'src/db.js')).href);
 const oldPersist = await import(pathToFileURL(join(tmp, 'src/lib/collectionPersistence.js')).href);
 const oldSession = await import(pathToFileURL(join(tmp, 'src/lib/grailkeySession.js')).href);

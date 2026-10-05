@@ -43,6 +43,11 @@ import GrailKeyOperatorPanel from "./components/GrailKeyOperatorPanel.jsx";
 import ResearchMarketPanel from "./components/ResearchMarketPanel.jsx";
 import GenericAssetCapture from "./components/GenericAssetCapture.jsx";
 import GenericAssetDetail from "./components/GenericAssetDetail.jsx";
+import { OUTDATED_CLIENT_MESSAGE } from "./lib/clientContract.js";
+
+// U1 closeout — client-visible build marker (injected by vite.config.js `define`). Shown under the app
+// title so a live test can be proven to come from the CURRENT bundle, never a stale cached one.
+const CV_BUILD = typeof __CV_BUILD__ !== "undefined" ? __CV_BUILD__ : "dev";
 import { genericDisplayLabel } from "./lib/genericAssetCapture.js";
 import { useClerk } from "@clerk/react";
 import { deriveMarketCopy, NEUTRAL_MARKET_FOOTER } from "./lib/marketEvidence.js";
@@ -11405,6 +11410,8 @@ export default function App() {
   const [manualVariant, setManualVariant] = useState(''); // FIX B
   const [catalogue, setCatalogue] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
+  // U1 closeout — set when the server says THIS app version predates the mandatory-category contract.
+  const [clientOutdated, setClientOutdated] = useState(false);
   // UNIVERSAL U1 — a scan the classifier could not establish as a comic/book keeps ITS OWN photo here
   // so the operator may explicitly choose SAVE AS GENERIC ASSET (never minted automatically).
   const [unsupportedScan, setUnsupportedScan] = useState(null); // { photoDataUrl } | null
@@ -11447,6 +11454,14 @@ export default function App() {
     const onSessionExpired = () => setGrailkeyAuthed(false);
     window.addEventListener('grailkey:session-expired', onSessionExpired);
     return () => window.removeEventListener('grailkey:session-expired', onSessionExpired);
+  }, []);
+  // U1 closeout — one central listener for the stable CATEGORY_REQUIRED_CLIENT_OUTDATED refusal
+  // (src/lib/grailkeySession.js dispatches it from apiFetch/authFetch). It never clears the session and
+  // never claims the asset is invalid.
+  useEffect(() => {
+    const onOutdated = () => setClientOutdated(true);
+    window.addEventListener('grailkey:client-outdated', onOutdated);
+    return () => window.removeEventListener('grailkey:client-outdated', onOutdated);
   }, []);
   // Populated by <ClerkSignOutBridge> (only mounted when CLERK_ENABLED) so
   // the logout handler below can also end the separate Clerk session — see
@@ -15167,6 +15182,16 @@ export default function App() {
   return (
     <div className="app">
       {CLERK_ENABLED && <ClerkSignOutBridge signOutRef={clerkSignOutRef} />}
+      {clientOutdated && (
+        <div role="alert" style={{ background: "#2a1c12", border: "1px solid #e08a3c", color: "#f3c9a0", fontSize: 13, padding: "10px 12px", margin: "8px 12px", borderRadius: 6 }}>
+          <div style={{ fontWeight: 700 }}>{OUTDATED_CLIENT_MESSAGE}</div>
+          <div style={{ marginTop: 4, fontSize: 12 }}>This copy of the app is out of date. Close it completely and reopen it, or reload below.</div>
+          <button
+            style={{ marginTop: 6, background: "transparent", border: "1px solid #e08a3c", color: "#f3c9a0", borderRadius: 4, fontSize: 12, padding: "3px 10px", cursor: "pointer" }}
+            onClick={() => window.location.reload()}
+          >Reload now</button>
+        </div>
+      )}
       {genericFromScan && (
         <GenericAssetCapture
           initialPhotoDataUrl={genericFromScan}
@@ -15183,6 +15208,7 @@ export default function App() {
           <div>
             <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5 }}>GrailKey</div>
             <div style={{ fontSize: 11, color: "#999", marginTop: 2, fontWeight: 400 }}>Know what it's worth. Get paid.</div>
+            <div data-cv-build={CV_BUILD} style={{ fontSize: 9, color: "#666", marginTop: 2, fontWeight: 400, letterSpacing: 0.3 }}>build {CV_BUILD}</div>
           </div>
           <button
             onClick={handleLogout}

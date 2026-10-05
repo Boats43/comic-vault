@@ -185,6 +185,7 @@ import { writeConfirmed } from "../src/lib/identityWriteLog.js";
 import { computeAnthropicCallCostUsd } from "../src/lib/anthropicPricing.js";
 // BETA-1A.1 — shared legacy access gate, factored out of this file (see src/lib/accessGate.js)
 import { requireAuthenticatedPrincipal } from "../src/lib/accessGate.js";
+import { CATEGORY_REQUIRED_CODE, markClientContractRefusal } from "../src/lib/clientContract.js";
 import { isUnconfirmedCountryClaim, deriveEditionStanding } from "../src/lib/editionAuthority.js";
 import { buildMarketEvidence, evidenceIntegrityViolations } from "../src/lib/marketEvidence.js";
 
@@ -2595,6 +2596,14 @@ export default async function handler(req, res) {
     // allowlist (only the exact string 'comic' may be priced) refuses it. Every request site now
     // sends its category explicitly; an owned refresh is pinned to the durable category below.
     out.assetType = assetType;
+    // U1 closeout — a request with NO category that is not an owned refresh/re-identify (those are pinned to the
+    // durable category server-side) is the CLIENT-CONTRACT failure: an app version that predates the
+    // mandatory-category contract. One distinct stable code, on a response header (centrally detectable by the
+    // client) and in the body; the HTTP status and refusal-to-price behavior are unchanged.
+    if ((typeof assetType !== 'string' || !assetType) && req.body.ownedRefresh !== true && req.body.ownedReidentify !== true) {
+      markClientContractRefusal(res);
+      out.clientContractError = CATEGORY_REQUIRED_CODE;
+    }
     console.log(`[enrich-entry] assetType from req.body: ${assetType}, out.assetType: ${out.assetType}`);
 
     // ─────────────────────────────────────────────────────────────────

@@ -42,6 +42,7 @@ import {
   ValidationFailedError, AuthorizationFailedError, NotFoundError, CategoryImmutableError,
 } from '../src/modules/collection/index.js';
 import { isSupportedAssetCategory, describeSupportedCategories } from '../src/lib/assetCategories.js';
+import { CATEGORY_REQUIRED_CODE, OUTDATED_CLIENT_MESSAGE, markClientContractRefusal } from '../src/lib/clientContract.js';
 import { resolveCollectionItemLink } from '../src/modules/assets/index.js';
 import { assertPhysicalCopySaveAllowed, PhysicalCopyCandidateCheckUnavailableError } from '../src/modules/capture/index.js';
 import { respondPhysicalCopyError } from '../src/lib/physicalCopyErrors.js';
@@ -179,8 +180,13 @@ export default async function handler(req, res) {
       const { id: bodyId, assetCategory, attributes, images, gradeReceiptId } = req.body || {};
       // U1 — NO DEFAULT CATEGORY: refuse BEFORE the physical-copy check or any photo upload
       // (a refused save must leave no orphan blob and no row).
+      if (assetCategory === undefined || assetCategory === null || assetCategory === '') {
+        // The CLIENT-CONTRACT failure: this app version predates the mandatory-category contract.
+        markClientContractRefusal(res);
+        return res.status(400).json({ error: CATEGORY_REQUIRED_CODE, code: CATEGORY_REQUIRED_CODE, message: OUTDATED_CLIENT_MESSAGE });
+      }
       if (!isSupportedAssetCategory(assetCategory)) {
-        return res.status(400).json({ error: 'ASSET_CATEGORY_REQUIRED', message: `assetCategory is required and must be one of ${describeSupportedCategories()}.` });
+        return res.status(400).json({ error: 'ASSET_CATEGORY_UNSUPPORTED', message: `assetCategory must be one of ${describeSupportedCategories()}.` });
       }
       // GK-279 — SERVER-OWNED physical-copy standing for a NEW row, evaluated BEFORE
       // any photo upload or write (a refusal leaves no orphan and no row). Updates to

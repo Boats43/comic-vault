@@ -8,6 +8,8 @@
 //
 // Never logs the token or passphrase anywhere in this file.
 
+import { isOutdatedClientResponse } from './clientContract.js';
+
 const TOKEN_KEY = 'gk_session_token';
 const EXPIRES_KEY = 'gk_session_expires_at';
 
@@ -120,6 +122,19 @@ export function getPrincipalScope() {
 // ─────────────────────────────────────────────────────────────────────
 export const AUTH_EXPIRED_ERROR = 'AUTH_EXPIRED';
 
+// U1 closeout — the server refused a request because THIS app version predates the mandatory-category
+// contract (CATEGORY_REQUIRED_CLIENT_OUTDATED). One central event; App.jsx shows "Update the app and try
+// again.". Never clears the session, never retries, never says the asset is invalid.
+function signalIfOutdatedClient(res) {
+  try {
+    if (isOutdatedClientResponse(res) && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('grailkey:client-outdated'));
+    }
+  } catch {
+    // no-op
+  }
+}
+
 function authExpiredResponse() {
   return new Response(JSON.stringify({ error: AUTH_EXPIRED_ERROR, authExpired: true, message: 'Your session expired — please sign in again.' }), {
     status: 401, headers: { 'Content-Type': 'application/json', 'x-grailkey-auth-expired': '1' },
@@ -150,6 +165,7 @@ export async function apiFetch(url, options = {}) {
   const headers = { ...(options.headers || {}), Authorization: `Bearer ${session.token}` };
   const res = await fetch(url, { ...options, headers });
   if (res.status === 401) clearSessionIfStillCurrent(session.token);
+  signalIfOutdatedClient(res);
   return res;
 }
 
@@ -163,5 +179,6 @@ export async function authFetch(url, options = {}) {
   const headers = { ...(options.headers || {}), Authorization: `Bearer ${session.token}` };
   const res = await fetch(url, { ...options, headers });
   if (res.status === 401) clearSessionIfStillCurrent(session.token);
+  signalIfOutdatedClient(res);
   return res;
 }

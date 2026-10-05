@@ -25,6 +25,7 @@ import { verifyToken, InvalidTokenError } from '../modules/auth/index.js';
 import { captureFromScan, PhysicalCopyDecisionRequiredError, ValidationFailedError, ConflictError, NotFoundError, AuthorizationFailedError, IdempotencyConflictError } from '../modules/capture/index.js';
 import { checkRateLimit } from '../../api/rate-limit.js';
 import { respondPhysicalCopyError } from './physicalCopyErrors.js';
+import { CATEGORY_REQUIRED_CODE, OUTDATED_CLIENT_MESSAGE, markClientContractRefusal } from './clientContract.js';
 
 function extractBearerToken(req) {
   const header = req.headers?.authorization || req.headers?.Authorization;
@@ -57,6 +58,13 @@ export async function handleCaptureScan(req, res) {
   }
 
   const { scanPayload, photos, idempotencyKey, assetClass, copyDisposition } = req.body || {};
+
+  // U1 closeout — a MISSING category is the client-contract failure (an app version that predates the
+  // mandatory-category contract): one distinct stable code, before any work is attempted.
+  if (assetClass === undefined || assetClass === null || assetClass === '') {
+    markClientContractRefusal(res);
+    return res.status(400).json({ error: CATEGORY_REQUIRED_CODE, code: CATEGORY_REQUIRED_CODE, message: OUTDATED_CLIENT_MESSAGE });
+  }
 
   try {
     const result = await captureFromScan({ principalId, scanPayload, photos, idempotencyKey, assetClass, copyDisposition });

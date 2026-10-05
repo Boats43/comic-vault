@@ -67,6 +67,7 @@ const mintToken = (principalId) => {
 // ── network: relative /api/* -> real handlers; everything else is a counted provider stub ──
 const providerCalls = []; // { host, url }
 let routedPaths = [];
+let h8Blocked = false; // when true the real capture-scan handler runs under a production H8 block
 let afterRoute = null; // optional hook(path) awaited after a handler ran (to simulate an account switch)
 const ROUTES = {};
 const UNSUPPORTED_SCAN_JSON = JSON.stringify({
@@ -87,7 +88,18 @@ globalThis.fetch = async (url, opts = {}) => {
     res.status = (c) => { res.statusCode = c; return res; };
     res.json = (b) => { res.body = b; return res; };
     res.end = () => res;
-    await handler(req, res);
+    if (u.pathname === '/api/capture-scan' && h8Blocked) {
+      // The REAL H8 gate: production environment, MILESTONE_TEN_H8_PASS unset, no bootstrap.
+      const saved = { env: process.env.GRAILKEY_CATALOG_ENVIRONMENT, pass: process.env.MILESTONE_TEN_H8_PASS, boot: process.env.MILESTONE_TEN_H8_BOOTSTRAP };
+      process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'production'; delete process.env.MILESTONE_TEN_H8_PASS; delete process.env.MILESTONE_TEN_H8_BOOTSTRAP;
+      try { await handler(req, res); } finally {
+        process.env.GRAILKEY_CATALOG_ENVIRONMENT = saved.env;
+        if (saved.pass === undefined) delete process.env.MILESTONE_TEN_H8_PASS; else process.env.MILESTONE_TEN_H8_PASS = saved.pass;
+        if (saved.boot === undefined) delete process.env.MILESTONE_TEN_H8_BOOTSTRAP; else process.env.MILESTONE_TEN_H8_BOOTSTRAP = saved.boot;
+      }
+    } else {
+      await handler(req, res);
+    }
     routedPaths.push(u.pathname);
     if (afterRoute) await afterRoute(u.pathname);
     return { ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, json: async () => res.body };
@@ -217,7 +229,7 @@ try {
   console.log('\n3. missing / unsupported category is refused — never comic by absence');
   const noCat = `${TAG}-nocat`; createdIds.push(noCat);
   const rNo = await post('/api/collection', { id: noCat, attributes: { title: 'No category' } }, PA);
-  ok(rNo.status === 400 && rNo.body.error === 'ASSET_CATEGORY_REQUIRED', 'POST /api/collection without assetCategory -> 400 ASSET_CATEGORY_REQUIRED');
+  ok(rNo.status === 400 && rNo.body.error === 'CATEGORY_REQUIRED_CLIENT_OUTDATED', 'POST /api/collection without assetCategory -> 400 CATEGORY_REQUIRED_CLIENT_OUTDATED');
   ok((await itemOf(noCat, PA)) === null, '...and NO row (not even a "comic" one) was written');
   const rBad = await post('/api/collection', { id: noCat, assetCategory: 'merchandise', attributes: { title: 'x' } }, PA);
   ok(rBad.status === 400 && (await itemOf(noCat, PA)) === null, 'an unsupported category is refused too');
@@ -225,7 +237,7 @@ try {
     scanPayload: { correlationId: randomUUID(), collectionItemId: comic.id },
     photos: [{ bytes: stripPrefix(PNG), contentType: 'image/png', captureRole: 'capture-photo' }], idempotencyKey: randomUUID(),
   }, PA);
-  ok(capNo.status === 400 && /assetClass is required/.test(JSON.stringify(capNo.body)), 'POST /api/capture-scan without assetClass -> 400 (no default)');
+  ok(capNo.status === 400 && capNo.body.error === 'CATEGORY_REQUIRED_CLIENT_OUTDATED', 'POST /api/capture-scan without assetClass -> 400 CATEGORY_REQUIRED_CLIENT_OUTDATED (no default)');
   const flip = await post('/api/collection', { id: comic.id, assetCategory: 'generic', attributes: { title: 'Amazing Fantasy' } }, PA);
   ok(flip.status === 409 && flip.body.error === 'ASSET_CATEGORY_IMMUTABLE', 'POST that tries to change an existing comic to generic -> 409 ASSET_CATEGORY_IMMUTABLE');
   ok((await itemOf(comic.id, PA))?.asset_category === 'comic', 'the established category is untouched');
@@ -360,6 +372,28 @@ try {
   const retry = await generic.submitGenericCapture((await generic.listGenericCaptureDrafts()).find((d) => d.id === midDraft.id));
   ok(retry.ok === true && retry.gkAssetId === midAsset.id, 'A\'s retry completes against the SAME asset (no duplicate mint)');
   ok((await row('SELECT count(*)::int AS n FROM collection_item_link WHERE collection_item_id = $1', [midDraft.id]))[0].n === 1, 'exactly one link exists');
+  logout();
+
+  console.log('\n9. H8 rejects the mint AFTER the Collection row exists -> a later retry completes the SAME projection');
+  login(PA);
+  const h8Draft = await generic.createGenericCaptureDraft({ photoDataUrl: PNG, name: 'H8 retry object', description: '', acquisitionCost: null });
+  createdIds.push(h8Draft.id);
+  h8Blocked = true;
+  const blocked = await generic.submitGenericCapture(h8Draft);
+  h8Blocked = false;
+  ok(blocked.ok === false && /Milestone Ten|H8|blocked/i.test(String(blocked.error)), `the mint is refused by the real H8 gate (${String(blocked.error).slice(0, 90)})`);
+  ok((await row('SELECT 1 FROM collection_item WHERE id = $1 AND principal_id = $2', [h8Draft.id, PA])).length === 1, 'the Generic Collection row exists (GK-266 requires it first)');
+  ok((await assetOf(h8Draft.id)) === null, 'NO physical asset was minted');
+  ok((await generic.listGenericCaptureDrafts()).some((d) => d.id === h8Draft.id), 'the draft remains in the principal scope, retryable');
+  const retried = await generic.submitGenericCapture((await generic.listGenericCaptureDrafts()).find((d) => d.id === h8Draft.id));
+  ok(retried.ok === true && !!retried.gkAssetId, 'once H8 permits capture the retry completes');
+  ok((await row('SELECT 1 FROM collection_item WHERE id = $1', [h8Draft.id])).length === 1, 'still exactly ONE Collection row (no duplicate projection)');
+  ok((await row('SELECT 1 FROM collection_item_link WHERE collection_item_id = $1', [h8Draft.id])).length === 1, 'exactly ONE physical link');
+  const h8Asset = await assetOf(h8Draft.id);
+  ok(h8Asset && h8Asset.id === retried.gkAssetId && h8Asset.asset_class === 'generic', 'exactly one gkAssetId, class generic');
+  ok((await row('SELECT 1 FROM inventory_transition_event WHERE gk_asset_id = $1', [h8Asset.id])).length === 1, 'exactly ONE inventory enrollment (no duplicate)');
+  ok((await row('SELECT state FROM inventory_current_state WHERE gk_asset_id = $1', [h8Asset.id]))[0]?.state === 'AVAILABLE', 'the asset is AVAILABLE');
+  ok((await itemOf(h8Draft.id, PA)).attributes.gkAssetId === retried.gkAssetId, 'the SAME Collection row now records the gkAssetId');
   logout();
 } finally {
   for (const id of createdIds) {
