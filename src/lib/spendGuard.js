@@ -74,10 +74,36 @@ export function resolveSpendConfig(env = process.env) {
 // NODE_ENV=production, the guard uses a process-local in-memory store with the
 // identical contract. In every other process — i.e. every real deployment —
 // the durable Upstash store is the only store and its absence FAILS CLOSED.
+//
+// U1 BOUNDARY HARDENING (2026-10-05) — PERMANENT INVARIANT: PRODUCTION MUST
+// HAVE NO PATH THAT SILENTLY DISABLES DURABLE SPEND AUTHORITY. The fallback
+// engages ONLY when ALL are true: (1) process.argv[1] is a
+// `tests/<name>.test.js` script; (2) NO hosted-runtime marker is present —
+// any real Vercel/Lambda runtime variable (explicit list below); (3) NODE_ENV !== 'production'; (4)
+// GRAILKEY_CATALOG_ENVIRONMENT !== 'production'. Any marker REFUSES the
+// fallback (the durable Upstash store, or a fail-closed 503, is then the only
+// outcome). Pinned by tests/spend-guard-env-boundary.test.js.
 const HARNESS_ARGV = /[\\/]tests[\\/][^\\/]+\.test\.js$/;
+// EXPLICIT list of real hosted-runtime variables (not a `VERCEL*` prefix: dev
+// machines carry `VERCEL_OIDC_TOKEN` from `vercel env pull` and the Claude Code
+// Vercel plugin injects `VERCEL_PLUGIN_*`, neither of which is a runtime
+// marker). `VERCEL=1` is set by the hosted runtime on every invocation and is
+// by itself sufficient; the rest are belt-and-braces.
+const HOSTED_RUNTIME_EXACT = new Set([
+  'VERCEL', 'VERCEL_ENV', 'VERCEL_URL', 'VERCEL_REGION', 'VERCEL_DEPLOYMENT_ID', 'VERCEL_TARGET_ENV',
+  'VERCEL_BRANCH_URL', 'VERCEL_PROJECT_PRODUCTION_URL', 'NOW_REGION', 'AWS_EXECUTION_ENV',
+]);
+const HOSTED_RUNTIME_PREFIX = /^(VERCEL_GIT_|AWS_LAMBDA_|LAMBDA_)/;
 let harnessStore = null;
+export function hostedRuntimeMarkers(env = process.env) {
+  const hits = Object.keys(env).filter((k) => (HOSTED_RUNTIME_EXACT.has(k) || HOSTED_RUNTIME_PREFIX.test(k)) && env[k] !== undefined && env[k] !== '');
+  if (env.NODE_ENV === 'production') hits.push('NODE_ENV=production');
+  if (env.GRAILKEY_CATALOG_ENVIRONMENT === 'production') hits.push('GRAILKEY_CATALOG_ENVIRONMENT=production');
+  return hits;
+}
 export function isTestHarnessProcess(argv1 = process.argv[1], env = process.env) {
-  return HARNESS_ARGV.test(String(argv1 || '')) && !env.VERCEL && env.NODE_ENV !== 'production';
+  if (hostedRuntimeMarkers(env).length > 0) return false; // refuse on ANY marker
+  return HARNESS_ARGV.test(String(argv1 || ''));
 }
 export function defaultSpendStore(argv1 = process.argv[1], env = process.env) {
   if (hasResearchStoreOverride()) return researchStore(); // explicit test injection always wins
