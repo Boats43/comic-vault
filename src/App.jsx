@@ -20,6 +20,7 @@ import { getAssetConfirmationBadge } from "./lib/assetConfirmationBadge.js";
 import { getPricingSourceLabel, getPriceBandsSourceLabel } from "./lib/sourceLabels.js";
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
+import { spendRefusalText } from "./lib/spendRefusalMessage.js";
 import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction, detectIdentityConflict } from "./lib/dataQualityGuard.js";
 import { resolveGoverningGrade, resolveGoverningGradingFormat, validateOperatorGrade, pickGradingAuthorityFields } from "./lib/gradeAuthority.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
@@ -12381,7 +12382,7 @@ export default function App() {
           throw new Error("Your session expired — please sign in again.");
         }
 
-        if (!res.ok) throw new Error(data.error || "Failed to grade");
+        if (!res.ok) throw new Error(spendRefusalText(data, "Failed to grade"));
 
         // U6.0D (GK-252) — Book-success branch, checked BEFORE the comic
         // rejection logic below. Predicate: data.assetType==='book' AND a
@@ -13096,7 +13097,7 @@ export default function App() {
         setBulkProgress({ current: completed, total: files.length, title: data.title || file.name });
 
         if (!res.ok) {
-          const msg = data.error || `HTTP ${res.status}`;
+          const msg = spendRefusalText(data, `HTTP ${res.status}`);
           console.warn('[bulk] grade error for', file.name, msg);
           errors.push(`${file.name}: ${msg}`);
           return;
@@ -14110,7 +14111,7 @@ export default function App() {
         return;
       }
       const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody.error || "Failed to refresh market data");
+      throw new Error(spendRefusalText(errBody, "Failed to refresh market data"));
     }
     if (activeCardEnrichIdRef.current !== enrichId) {
       console.log(`[enrich] stale ignored id=${enrichId}`);
@@ -14495,7 +14496,7 @@ export default function App() {
         scanId: reidentifyOwnership.scanId,
       }),
     });
-    if (!gradeRes.ok) throw new Error("Failed to re-grade book");
+    if (!gradeRes.ok) { const gradeErrBody = await gradeRes.json().catch(() => ({})); throw new Error(spendRefusalText(gradeErrBody, "Failed to re-grade book")); }
     const gradeData = await gradeRes.json();
     if (!gradeData.title) throw new Error("Vision returned no title");
 
@@ -14540,7 +14541,7 @@ export default function App() {
       });
       if (!enrichRes.ok) {
         const errBody = await enrichRes.json().catch(() => ({}));
-        throw new Error(errBody.error || "Failed to enrich book");
+        throw new Error(spendRefusalText(errBody, "Failed to enrich book"));
       }
       enrichData = await enrichRes.json();
       // GK-254 Section C — the server could not verify durable category
@@ -14932,7 +14933,7 @@ export default function App() {
       }),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to re-analyze");
+    if (!res.ok) throw new Error(spendRefusalText(data, "Failed to re-analyze"));
 
     const photoIssue = data.issue || data.title?.match(/#(\d+)/)?.[1] || item.issue || null;
     const updated = {
@@ -15093,7 +15094,7 @@ export default function App() {
         body: JSON.stringify({ comics: catalogue }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Analysis failed");
+      if (!res.ok) throw new Error(spendRefusalText(data, "Analysis failed"));
       setAnalysis(data);
       await putAnalysis(data);
     } catch {
