@@ -23,17 +23,22 @@
 
 import { titlesLikelySameBook } from './duplicateCopyDetection.js';
 
-export const HELD_KIND = Object.freeze({ BULK_SCAN: 'BULK_SCAN', JSON_RESTORE: 'JSON_RESTORE' });
+export const HELD_KIND = Object.freeze({ BULK_SCAN: 'BULK_SCAN', JSON_RESTORE: 'JSON_RESTORE', COLLECTION_SYNC: 'COLLECTION_SYNC' });
 export const HELD_REASON = Object.freeze({
   CATALOGUE_MATCH: 'CATALOGUE_MATCH',
   IN_FLIGHT_MATCH: 'IN_FLIGHT_MATCH',
   JSON_NO_ID_MATCH: 'JSON_NO_ID_MATCH',
+  // The SERVER (409 PHYSICAL_COPY_DECISION_REQUIRED at sync) found an owned physical copy this device's
+  // local catalogue could not see (e.g. captured on another device).
+  SERVER_DECISION_REQUIRED: 'SERVER_DECISION_REQUIRED',
 });
 
 const rand6 = () => Math.random().toString(36).slice(2, 8);
 // Same shape as the single-scan ANOTHER COPY's `presetId` (App.jsx).
 export const mintItemId = () => `cv_${Date.now()}_${rand6()}`;
 export const mintHeldId = () => `held_${Date.now()}_${rand6()}`;
+// Deterministic: a repeat 409 for the same local row overwrites ONE held record, never duplicates it.
+export const syncHeldId = (collectionItemId) => `held_sync_${collectionItemId}`;
 export const mintDecisionKey = () =>
   (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `pcd-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -101,8 +106,11 @@ export function buildHeldRecord({ kind, reason, principal, fileName = null, inco
   if (kind === HELD_KIND.BULK_SCAN && (!incoming || !image)) {
     throw new Error('buildHeldRecord: a held bulk scan must retain the model result AND the image, or it cannot be resumed');
   }
-  if (kind === HELD_KIND.JSON_RESTORE && !entry) {
-    throw new Error('buildHeldRecord: a held JSON restore must retain the full restore entry, or it cannot be resumed');
+  if ((kind === HELD_KIND.JSON_RESTORE || kind === HELD_KIND.COLLECTION_SYNC) && !entry) {
+    throw new Error('buildHeldRecord: a held JSON restore / sync conflict must retain the full entry, or it cannot be resumed');
+  }
+  if (kind === HELD_KIND.COLLECTION_SYNC && !entry.id) {
+    throw new Error('buildHeldRecord: a held sync conflict must carry the local row id');
   }
   const book = kind === HELD_KIND.BULK_SCAN ? incoming : entry;
   return {
@@ -111,7 +119,9 @@ export function buildHeldRecord({ kind, reason, principal, fileName = null, inco
     kind, reason, principal: principal ?? null, fileName, createdAt: now,
     book: { title: book.title ?? null, issue: book.issue ?? null, year: book.year ?? null },
     incoming: incoming ? JSON.parse(JSON.stringify(incoming)) : null,
-    image,
+    image: image ?? (kind === HELD_KIND.COLLECTION_SYNC
+      ? ((Array.isArray(entry.images) ? entry.images : []).find((x) => typeof x === 'string' && x.startsWith('data:')) ?? null)
+      : null),
     entry: entry ? JSON.parse(JSON.stringify(entry)) : null,
     localMatchIds: matchIds,
     candidates, candidatesVerified,
@@ -149,7 +159,10 @@ export async function refreshCandidates(rec, deps) {
 // idempotent by construction, never a second collection row.
 async function ensureAttemptIds(rec, deps) {
   if (rec.presetId && rec.decisionKey) return rec;
-  const next = { ...rec, presetId: rec.presetId || mintItemId(), decisionKey: rec.decisionKey || mintDecisionKey() };
+  // A sync conflict's "new row" ALREADY EXISTS locally under its own id — that id is the one the server's
+  // standing check will see on the push, so the ANOTHER COPY decision must be recorded for exactly it.
+  const presetId = rec.presetId || (rec.kind === HELD_KIND.COLLECTION_SYNC ? rec.entry.id : mintItemId());
+  const next = { ...rec, presetId, decisionKey: rec.decisionKey || mintDecisionKey() };
   await deps.putHeld(next);
   return next;
 }
@@ -174,9 +187,16 @@ export async function resolveAnotherCopy(rec, deps) {
     } catch { recorded = false; }
     if (!recorded) return { ok: false, code: 'DECISION_NOT_RECORDED' };
   }
-  const savedId = cur.kind === HELD_KIND.JSON_RESTORE
-    ? await deps.saveEntry({ ...cur.entry, id: cur.presetId })
-    : await deps.saveScan({ ...cur.incoming, _presetId: cur.presetId }, cur.image, cur.principal);
+  let savedId;
+  if (cur.kind === HELD_KIND.COLLECTION_SYNC) {
+    // Decision recorded (if candidates exist) -> now the push the server refused will be accepted.
+    const pushed = await deps.pushEntry(cur.entry);
+    if (pushed) { await deps.markSynced(cur.entry); savedId = cur.entry.id; }
+  } else if (cur.kind === HELD_KIND.JSON_RESTORE) {
+    savedId = await deps.saveEntry({ ...cur.entry, id: cur.presetId });
+  } else {
+    savedId = await deps.saveScan({ ...cur.incoming, _presetId: cur.presetId }, cur.image, cur.principal);
+  }
   if (!savedId) return { ok: false, code: 'SAVE_FAILED' };
   let cleanupPending = false;
   try { await deps.deleteHeld(cur.id); } catch { cleanupPending = true; }
@@ -200,12 +220,16 @@ export async function resolveSameCopy(rec, selectedGkAssetId, deps) {
   try {
     const r = await post(deps, {
       action: 'same', book: cur.book, selectedGkAssetId,
-      gradeReceiptId: typeof cur.incoming?.gradeReceiptId === 'string' ? cur.incoming.gradeReceiptId : undefined,
+      gradeReceiptId: typeof cur.incoming?.gradeReceiptId === 'string' ? cur.incoming.gradeReceiptId
+        : (typeof cur.entry?._gradeReceiptId === 'string' ? cur.entry._gradeReceiptId : undefined),
       photo, idempotencyKey: cur.decisionKey,
     });
     ok = !!(r && r.ok);
   } catch { ok = false; }
   if (!ok) return { ok: false, code: 'SAME_COPY_NOT_CONFIRMED' };
+  // A sync-conflict row exists ONLY locally (the server never accepted it): SAME COPY means it is the
+  // existing asset, so the local-only duplicate row is removed — after the server has confirmed.
+  if (cur.kind === HELD_KIND.COLLECTION_SYNC) await deps.removeLocalRow(cur.entry.id);
   let cleanupPending = false;
   try { await deps.deleteHeld(cur.id); } catch { cleanupPending = true; }
   return { ok: true, cleanupPending };
@@ -222,6 +246,7 @@ export async function discardHeld(rec, deps) {
   if (!rec.candidatesVerified || (rec.candidates || []).length > 0) {
     return { ok: false, code: 'CANDIDATES_EXIST_OR_UNVERIFIED' };
   }
+  if (rec.kind === HELD_KIND.COLLECTION_SYNC) await deps.removeLocalRow(rec.entry.id);
   await deps.deleteHeld(rec.id);
   return { ok: true };
 }

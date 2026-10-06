@@ -45,7 +45,7 @@ export default function CopyReviewPanel({ records, busyId, errors, onSame, onAno
                 ))}
                 <button disabled={busy} style={ghost} onClick={() => onAnother(r)}>Another Copy</button>
                 {r.candidatesVerified && cands.length === 0 && (
-                  <button disabled={busy} style={ghost} onClick={() => onDiscard(r)}>Same book — discard this scan</button>
+                  <button disabled={busy} style={ghost} onClick={() => onDiscard(r)}>Discard this item</button>
                 )}
               </div>
             </div>

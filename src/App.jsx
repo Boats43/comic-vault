@@ -40,7 +40,7 @@ import { parsePriceNumber } from "./lib/responseContract.js";
 import { isAuthenticated, clearSession, getSession, authFetch, apiFetch, getPrincipalScope } from "./lib/grailkeySession.js";
 import { scopedGet, scopedSet } from "./lib/principalStorage.js";
 import { autoClaimProvableLegacy } from "./lib/legacyLocalClaim.js";
-import { fetchServerCollection, deleteServerCollectionItem } from "./lib/collectionSync.js";
+import { fetchServerCollection, deleteServerCollectionItem, pushCollectionItem } from "./lib/collectionSync.js";
 import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
 import { appendPhysicalMediaEvidence, getOrCreateEvidenceIdempotencyKey, retireEvidenceIdempotencyKey, retryPendingPhysicalMediaAppends } from "./lib/physicalMediaAppend.js";
 import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
@@ -15230,6 +15230,22 @@ export default function App() {
     putHeld: putCopyReviewHeld,
     deleteHeld: deleteCopyReviewHeld,
     saveScan: (data, image, principal) => addToCatalogue(data, image, principal),
+    // Sync-conflict resolution: push the CURRENT local row (it may have been enriched since the hold),
+    // mark it synced, or — for SAME COPY / discard — remove the local-only row (it never reached the server).
+    pushEntry: async (entry) => {
+      const latest = (await getAllComics()).find((c) => c.id === entry.id) || entry;
+      return pushCollectionItem(latest);
+    },
+    markSynced: async (entry) => {
+      const latest = (await getAllComics()).find((c) => c.id === entry.id) || entry;
+      const done = { ...latest, _syncStatus: "synced" };
+      await putComic(done);
+      setCatalogue((prev) => (prev.some((x) => x.id === done.id) ? prev.map((x) => (x.id === done.id ? { ...x, _syncStatus: "synced" } : x)) : [...prev, normalizeItem(done)]));
+    },
+    removeLocalRow: async (id) => {
+      await deleteComic(id);
+      setCatalogue((prev) => prev.filter((x) => x.id !== id));
+    },
     saveEntry: async (entry) => {
       const e = { ...entry, timestamp: entry.timestamp || Date.now(), images: entry.images || [] };
       await putComic(e);

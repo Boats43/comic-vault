@@ -28,8 +28,9 @@
 // engine — idempotent because pushCollectionItem's server-side upsert
 // already is (same id + same attributes never creates a duplicate row).
 
-import { putComic, getAllComics, getStorageScope, NoPrincipalScopeError } from "../db.js";
-import { pushCollectionItem } from "./collectionSync.js";
+import { putComic, getAllComics, getStorageScope, NoPrincipalScopeError, putCopyReviewHeld, getAllCopyReviewHeld } from "../db.js";
+import { pushCollectionItemDetailed } from "./collectionSync.js";
+import { HELD_KIND, HELD_REASON, buildHeldRecord, syncHeldId } from "./copyReviewHeld.js";
 
 // LIVE EXPOSURE CLOSURE (2026-10-04) — a local row may only ever be pushed
 // under the principal whose scoped database holds it. The scope is captured
@@ -48,11 +49,37 @@ export async function persistCollectionItem(entry) {
   if (!scope) throw new NoPrincipalScopeError();
   await putComic({ ...entry, _syncStatus: "pending" });
   if (scopeChanged(scope)) return { ...entry, _syncStatus: "pending", _refusedScopeChanged: true };
-  const serverResult = await pushCollectionItem(entry);
-  const finalEntry = { ...entry, _syncStatus: serverResult ? "synced" : "pending" };
+  const pushed = await pushCollectionItemDetailed(entry);
+  if (pushed.decisionRequired) {
+    // DUPLICATE ENTRY RELEASE CERTIFICATION — the SERVER says this account already owns a plausible
+    // physical copy and the operator has not yet chosen SAME COPY / ANOTHER COPY. That is not a sync
+    // failure to retry forever: it becomes ONE durable held-copy-review record (deterministic id, so a
+    // repeat 409 never duplicates it) and the local row moves to its own `copy-review` state, which the
+    // pending-retry loop never touches. The held record is written FIRST: a crash between the two
+    // writes leaves the row `pending`, which simply converts again on the next 409.
+    const finalHeld = { ...entry, _syncStatus: "copy-review" };
+    await holdSyncConflict(finalHeld, pushed.candidates, scope);
+    if (scopeChanged(scope)) return { ...finalHeld, _refusedScopeChanged: true };
+    await putComic(finalHeld);
+    return finalHeld;
+  }
+  const finalEntry = { ...entry, _syncStatus: pushed.result ? "synced" : "pending" };
   if (scopeChanged(scope)) return { ...finalEntry, _refusedScopeChanged: true };
   await putComic(finalEntry);
   return finalEntry;
+}
+
+async function holdSyncConflict(entry, candidates, scope) {
+  const id = syncHeldId(entry.id);
+  let prior = null;
+  try { prior = (await getAllCopyReviewHeld()).find((r) => r.id === id) || null; } catch { prior = null; }
+  const fresh = buildHeldRecord({
+    kind: HELD_KIND.COLLECTION_SYNC, reason: HELD_REASON.SERVER_DECISION_REQUIRED, principal: scope,
+    entry, candidates, candidatesVerified: true,
+  });
+  // Keep an in-progress attempt's ids and error text if this item was already held.
+  await putCopyReviewHeld({ ...fresh, id, createdAt: prior?.createdAt ?? fresh.createdAt, presetId: prior?.presetId ?? fresh.presetId, decisionKey: prior?.decisionKey ?? fresh.decisionKey });
+  try { if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") window.dispatchEvent(new Event("cv:copy-review-changed")); } catch { /* UI nudge only */ }
 }
 
 export async function retryPendingCollectionItems(items) {

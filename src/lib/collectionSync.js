@@ -81,7 +81,11 @@ export async function deleteServerCollectionItem(id) {
 // Best-effort, fire-and-forget-safe: callers must NEVER let this block
 // or fail the local save it accompanies (server becomes authoritative
 // over time, but a network blip must never lose a scan taken in hand).
-export async function pushCollectionItem(entry) {
+// DUPLICATE ENTRY RELEASE CERTIFICATION — the one place that tells a server "operator must choose
+// SAME COPY / ANOTHER COPY" (409 PHYSICAL_COPY_DECISION_REQUIRED) apart from every other failure.
+// Returns { result, decisionRequired, candidates }. `result` is exactly what pushCollectionItem has
+// always returned (the server row, or null on ANY failure incl. this 409), so no caller changes.
+export async function pushCollectionItemDetailed(entry) {
   try {
     // U4 — assetCategory is read from the entry itself (defaulting to
     // 'comic', unchanged for every pre-existing caller that never sets
@@ -94,7 +98,7 @@ export async function pushCollectionItem(entry) {
     const { images, _syncStatus, _pendingEvidenceAppends, _gradeReceiptId, assetCategory, ...attributes } = entry || {};
     // U1 — NO DEFAULT CATEGORY. An entry with no explicit supported category is never pushed
     // (it stays pending locally); it is never relabeled 'comic' on its way to the server.
-    if (!isSupportedAssetCategory(assetCategory)) return null;
+    if (!isSupportedAssetCategory(assetCategory)) return { result: null, decisionRequired: false, candidates: [] };
     const res = await authFetch("/api/collection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -106,9 +110,20 @@ export async function pushCollectionItem(entry) {
         gradeReceiptId: typeof _gradeReceiptId === "string" ? _gradeReceiptId : undefined,
       }),
     });
-    if (!res || !res.ok) return null;
-    return await res.json().catch(() => null);
+    if (res && res.status === 409) {
+      const b409 = await res.json().catch(() => null);
+      if (b409 && b409.error === "PHYSICAL_COPY_DECISION_REQUIRED") {
+        return { result: null, decisionRequired: true, candidates: Array.isArray(b409.candidates) ? b409.candidates : [] };
+      }
+      return { result: null, decisionRequired: false, candidates: [] };
+    }
+    if (!res || !res.ok) return { result: null, decisionRequired: false, candidates: [] };
+    return { result: await res.json().catch(() => null), decisionRequired: false, candidates: [] };
   } catch {
-    return null;
+    return { result: null, decisionRequired: false, candidates: [] };
   }
+}
+
+export async function pushCollectionItem(entry) {
+  return (await pushCollectionItemDetailed(entry)).result;
 }

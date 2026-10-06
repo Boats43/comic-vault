@@ -316,6 +316,102 @@ console.log('\nIdempotency (retry != second copy):');
   eq(server.st.decisions.size, 2, 'and its own decision');
 }
 
+// ── I. CROSS-DEVICE: server 409 PHYSICAL_COPY_DECISION_REQUIRED at sync -> durable HELD review ──
+console.log('\nI. Cross-device 409 (Device B has no local match; the SERVER owns a candidate):');
+{
+  const { persistCollectionItem, retryPendingCollectionItems } = await import('../src/lib/collectionPersistence.js');
+  const { pushCollectionItem } = await import('../src/lib/collectionSync.js');
+  await clean();
+  for (const c of await db.getAllComics()) await db.deleteComic(c.id);
+  const server = makeServer(); server.st.assets.push(ASSET_A);
+  let collectionPosts = 0; const accepted = [];
+  const realFetch = globalThis.fetch;
+  let mode = 'server'; // 'server' = faithful standing check; 'net500' = outage; 'other409' = unrelated 409
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (url === '/api/collection') {
+      collectionPosts++;
+      const j = (status, b) => ({ ok: status >= 200 && status < 300, status, json: async () => b });
+      if (mode === 'net500') return j(500, { error: 'boom' });
+      if (mode === 'other409') return j(409, { error: 'SOMETHING_ELSE' });
+      const cands = server.st.assets.filter((a) => isPlausiblePhysicalCopyCandidate(body.attributes, a));
+      const decided = [...server.st.decisions.values()].some((d) => d.choice === 'ANOTHER_COPY' && d.collectionItemId === body.id);
+      if (cands.length > 0 && !decided) return j(409, { error: 'PHYSICAL_COPY_DECISION_REQUIRED', candidates: cands });
+      accepted.push(body.id);
+      return j(200, { id: body.id });
+    }
+    return server.authFetch(url, init);
+  };
+  try {
+    const entry = { id: 'cv_B_local', assetCategory: 'comic', title: 'Howard the Duck', issue: '1', year: '1976', images: [IMG], _gradeReceiptId: 'gr_x', timestamp: Date.now() };
+    const res = await persistCollectionItem(entry);
+    eq(res._syncStatus, 'copy-review', 'the 409 is NOT left as an ordinary "pending" row — it becomes copy-review');
+    const row = (await db.getAllComics()).find((c) => c.id === 'cv_B_local');
+    eq(row?._syncStatus, 'copy-review', 'the local Collection row is durable (still in IndexedDB) and marked copy-review');
+    let held = await db.getAllCopyReviewHeld();
+    eq(held.length, 1, 'exactly one durable HELD record exists');
+    eq([held[0].id, held[0].kind, held[0].reason], ['held_sync_cv_B_local', HELD_KIND.COLLECTION_SYNC, HELD_REASON.SERVER_DECISION_REQUIRED], 'it reuses the existing copyReviewHeld store (deterministic id, sync-conflict kind)');
+    eq(held[0].candidates.map((c) => c.gkAssetId), ['gk-asset-A'], "the server's candidate ids are retained for review");
+    eq(held[0].entry.id, 'cv_B_local', 'the full local row is retained (resumable)');
+    ok(typeof held[0].image === 'string' && held[0].image.startsWith('data:'), "the row's photo is retained for SAME COPY");
+    eq(collectionPosts, 1, 'one push attempt so far');
+
+    const retried = await retryPendingCollectionItems([row]);
+    eq([retried.length, collectionPosts], [0, 1], 'NOT retried forever: the pending-retry loop never touches a copy-review row');
+
+    const createdAt = held[0].createdAt;
+    await persistCollectionItem({ ...entry, price: '$9.00' }); // e.g. a later enrich persist hits the same 409
+    held = await db.getAllCopyReviewHeld();
+    eq([held.length, held[0].createdAt], [1, createdAt], 'a repeat 409 for the same row does NOT create a second held record');
+
+    db = await import(`../src/db.js?restart409=${Date.now()}`);
+    eq([(await db.getAllCopyReviewHeld()).length, (await db.getAllComics()).find((c) => c.id === 'cv_B_local')?._syncStatus], [1, 'copy-review'], 'refresh/restart preserves BOTH the held record and the row');
+
+    // ordinary failures keep their old behaviour (pending, never held)
+    mode = 'net500';
+    const r500 = await persistCollectionItem({ id: 'cv_net', assetCategory: 'comic', title: 'Other', issue: '2', year: '1999', images: [] });
+    mode = 'other409';
+    const r409x = await persistCollectionItem({ id: 'cv_other409', assetCategory: 'comic', title: 'Other', issue: '3', year: '1999', images: [] });
+    mode = 'server';
+    eq([r500._syncStatus, r409x._syncStatus], ['pending', 'pending'], 'a network/server failure or an unrelated 409 is still an ordinary retryable pending row');
+    eq((await db.getAllCopyReviewHeld()).length, 1, '...and neither creates a held record');
+
+    // operator: ANOTHER COPY resolves it through the EXISTING action:'another' + a now-accepted push
+    const deps = {
+      ...makeDeps(server, []),
+      pushEntry: (e) => pushCollectionItem(e),
+      markSynced: async (e) => { await db.putComic({ ...e, _syncStatus: 'synced' }); },
+      removeLocalRow: (id) => db.deleteComic(id),
+    };
+    const rec = (await db.getAllCopyReviewHeld())[0];
+    const out = await resolveAnotherCopy(rec, deps);
+    ok(out.ok && out.savedId === 'cv_B_local', 'ANOTHER COPY resolves the held sync conflict');
+    eq([...server.st.decisions.values()].filter((d) => d.collectionItemId === 'cv_B_local').length, 1, "the server recorded action:'another' for exactly the local row id");
+    ok(accepted.includes('cv_B_local'), 'the server then ACCEPTED the same row (it keeps its id; nothing overwritten, nothing duplicated)');
+    eq((await db.getAllComics()).find((c) => c.id === 'cv_B_local')?._syncStatus, 'synced', 'the row is now synced');
+    eq((await db.getAllCopyReviewHeld()).length, 0, 'the held record is gone only after the server accepted the push');
+
+    // operator: SAME COPY on a second conflict removes the local-only duplicate row, adds nothing server-side
+    await persistCollectionItem({ id: 'cv_B2_local', assetCategory: 'comic', title: 'Howard the Duck', issue: '1', year: '1976', images: [IMG] });
+    const rec2 = (await db.getAllCopyReviewHeld()).find((r) => r.id === 'held_sync_cv_B2_local');
+    ok(rec2, 'a second conflicting row is held');
+    const acceptedBefore = accepted.length;
+    const same = await resolveSameCopy(rec2, 'gk-asset-A', deps);
+    ok(same.ok, "SAME COPY resolves via the existing server-validated action:'same'");
+    eq((await db.getAllComics()).some((c) => c.id === 'cv_B2_local'), false, 'the local-only duplicate row is removed (it never reached the server)');
+    eq(accepted.length, acceptedBefore, 'no second collection row was accepted by the server');
+    eq((await db.getAllCopyReviewHeld()).length, 0, 'held record dropped after server confirmation');
+
+    // discard is refused for a conflict that HAS owned candidates
+    await persistCollectionItem({ id: 'cv_B3_local', assetCategory: 'comic', title: 'Howard the Duck', issue: '1', year: '1976', images: [IMG] });
+    const rec3 = (await db.getAllCopyReviewHeld())[0];
+    const d3 = await discardHeld(rec3, deps);
+    eq([d3.ok, d3.code], [false, 'CANDIDATES_EXIST_OR_UNVERIFIED'], 'an item the server says matches an owned copy cannot be discarded away — it needs SAME or ANOTHER');
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
 // ── guardrails: payload completeness, principal, no auto-resolve ─────────────────────────────
 console.log('\nGuardrails:');
 {
@@ -340,6 +436,10 @@ console.log('\nWiring (App.jsx source):');
   ok(!/`\$\{c\.title\}\|\$\{c\.issue\}\|\$\{c\.year\}`/.test(app), 'JSON restore no longer keys on title|issue|year');
   ok(/items\.map\(\(\{ images, \.\.\.rest \}\) => rest\)/.test(app), 'the backup export spreads every field but `images`, so each exported record carries its durable catalogue `id`');
   ok(/<CopyReviewPanel/.test(app), 'the review panel is mounted');
+  const panel = readFileSync(new URL('../src/components/CopyReviewPanel.jsx', import.meta.url), 'utf8');
+  ok(/Discard this item/.test(panel) && !/Same book/i.test(panel), 'discard control uses neutral wording (never "same book"/SAME COPY)');
+  const persist = readFileSync(new URL('../src/lib/collectionPersistence.js', import.meta.url), 'utf8');
+  ok(/decisionRequired/.test(persist) && /copy-review/.test(persist), 'the sync layer converts the server 409 into held review');
   // _presetId untouched: the diff against the base must not add/remove any presetId line in App.jsx.
   let diff = '';
   try { diff = execSync('git diff origin/main -- src/App.jsx', { cwd: new URL('..', import.meta.url), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); } catch { diff = null; }
