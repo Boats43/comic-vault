@@ -12,7 +12,15 @@ import {
   putFixture,
   getAllFixtures,
   getFixtureBankDiagnostics,
+  putCopyReviewHeld,
+  getAllCopyReviewHeld,
+  deleteCopyReviewHeld,
 } from "./db.js";
+import {
+  HELD_KIND, HELD_REASON, buildHeldRecord, classifyBulkDuplicate, planJsonRestore,
+  fetchCandidates, refreshCandidates, resolveAnotherCopy, resolveSameCopy, discardHeld,
+} from "./lib/copyReviewHeld.js";
+import CopyReviewPanel from "./components/CopyReviewPanel.jsx";
 import { buildFixture } from "./lib/fixtureShape.js";
 import { computeListPriceWarning } from "./lib/listPriceWarning.js";
 import { isPcAnchorExact, pcEditionCaveat } from "./lib/pcAnchorAuthority.js";
@@ -3590,25 +3598,40 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
       const text = await file.text();
       const parsed = JSON.parse(text);
       if (!Array.isArray(parsed)) { setImportStatus("Invalid file: expected JSON array"); return; }
-      const existing = new Set(items.map((c) => `${c.title}|${c.issue}|${c.year}`));
-      let imported = 0, skipped = 0;
-      for (let i = 0; i < parsed.length; i++) {
-        const c = parsed[i];
-        if (!c || !c.title) { skipped++; continue; }
-        const key = `${c.title}|${c.issue}|${c.year}`;
-        if (existing.has(key)) { skipped++; continue; }
-        existing.add(key);
+      // DUPLICATE ENTRY CLOSEOUT — identity order: exported durable id (idempotent replay) ->
+      // no id + no match (restore) -> no id + match (HOLD for copy review). Never title|issue|year -> skip.
+      const plan = planJsonRestore({ parsed, existingItems: items });
+      const me = getPrincipalScope();
+      let imported = 0, heldCount = 0, holdFailed = 0;
+      for (const h of plan.held) {
+        try {
+          await putCopyReviewHeld(buildHeldRecord({
+            kind: HELD_KIND.JSON_RESTORE, reason: HELD_REASON.JSON_NO_ID_MATCH,
+            principal: me, entry: h.entry, matchIds: h.matchIds,
+          }));
+          heldCount++;
+        } catch { holdFailed++; }
+      }
+      for (let i = 0; i < plan.restore.length; i++) {
+        const c = plan.restore[i];
         const entry = {
           ...c,
-          id: c.id || `cv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          id: c.id,
           timestamp: c.timestamp || Date.now(),
           images: c.images || [],
         };
         await putComic(entry);
         imported++;
-        if (i % 10 === 0) setImportStatus(`Importing ${i + 1} of ${parsed.length}...`);
+        if (i % 10 === 0) setImportStatus(`Importing ${i + 1} of ${plan.restore.length}...`);
       }
-      setImportStatus(`Imported ${imported}, skipped ${skipped} duplicate${skipped !== 1 ? "s" : ""}`);
+      window.dispatchEvent(new Event("cv:copy-review-changed"));
+      setImportStatus(
+        `Imported ${imported}` +
+        (heldCount ? `, ${heldCount} held for copy review` : "") +
+        (plan.replayed ? `, ${plan.replayed} already restored (same id)` : "") +
+        (plan.invalid ? `, ${plan.invalid} unreadable` : "") +
+        (holdFailed ? `, ${holdFailed} COULD NOT BE HELD — re-import to retry` : "")
+      );
       if (imported > 0) window.location.reload();
     } catch (err) {
       setImportStatus(`Import failed: ${err.message}`);
@@ -11431,6 +11454,10 @@ export default function App() {
   const [watchMode, setWatchMode] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(null); // { current, total, title }
   const [bulkDone, setBulkDone] = useState(null); // number or null
+  const [bulkHeld, setBulkHeld] = useState(0); // items HELD for copy review by the last bulk import (not errors)
+  const [heldReview, setHeldReview] = useState([]);
+  const [heldBusyId, setHeldBusyId] = useState(null);
+  const [heldErrors, setHeldErrors] = useState({});
   const [bulkEnrichProgress, setBulkEnrichProgress] = useState(null); // { current, total }
   const [analysis, setAnalysis] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -13054,6 +13081,7 @@ export default function App() {
 
   const handleBulkImport = useCallback(async (files) => {
     setBulkDone(null);
+    setBulkHeld(0);
     setBulkProgress({ current: 1, total: files.length, title: "" });
     setBulkEnrichProgress(null);
     let added = 0;
@@ -13076,6 +13104,28 @@ export default function App() {
     // P0 HOTFIX: shared Set to prevent duplicate races (workers check before grade)
     const inFlightKeys = new Set();
     const bulkPrincipal = getPrincipalScope();
+    // DUPLICATE ENTRY CLOSEOUT — a possible duplicate is HELD durably for ONE batch review; it is
+    // never skipped and never an error. inFlightKeys below stays as the race/idempotency guard.
+    let held = 0;
+    const holdForReview = async (file, data, issue, b64, dup) => {
+      let candidates = [];
+      let candidatesVerified = false;
+      if (isAuthenticated()) {
+        const c = await fetchCandidates({ title: data.title, issue, year: data.year }, { authFetch });
+        if (c.ok) { candidates = c.candidates; candidatesVerified = true; }
+      }
+      try {
+        await putCopyReviewHeld(buildHeldRecord({
+          kind: HELD_KIND.BULK_SCAN, reason: dup.reason, principal: bulkPrincipal, fileName: file.name,
+          incoming: { ...data, issue }, image: b64, matchIds: dup.matchIds, candidates, candidatesVerified,
+        }));
+        held++;
+        console.log('[bulk] held for copy review:', data.title, '#' + issue, dup.reason);
+      } catch (e) {
+        console.warn('[bulk] could not hold for copy review:', file.name, e);
+        errors.push(`${file.name}: could not be held for copy review — NOT imported, re-import it`);
+      }
+    };
 
     // Worker function: process one file (compress → grade → save → fire enrich)
     const processFile = async (file, index) => {
@@ -13141,30 +13191,13 @@ export default function App() {
 
         const bulkIssue = data.issue || data.title?.match(/#(\d+)/)?.[1] || null;
 
-        // P0 HOTFIX: duplicate race — check in-flight Set before grading
-        // (workers now share inFlightKeys to prevent concurrent duplicates)
+        // P0 HOTFIX: duplicate race — in-flight Set (workers share it). DUPLICATE ENTRY CLOSEOUT:
+        // a match is HELD for copy review, never discarded — it may be a legitimate second physical
+        // copy. The guard still prevents duplicate EXECUTION; it just no longer deletes the item.
         const dupKey = `${titleLower}|${bulkIssue}|${data.year || ''}`;
-        if (inFlightKeys.has(dupKey)) {
-          console.log('[bulk] duplicate in-flight, skipping:', data.title, '#' + bulkIssue);
-          errors.push(`${file.name}: duplicate in-flight (${data.title} #${bulkIssue})`);
-          return;
-        }
-
-        // Duplicate detection (mirrors gradeBlob's own check, widened to
-        // fuzzy title matching GK-270 — a bulk import is a background/
-        // batch operation with no practical per-file operator prompt, so
-        // this stays a safe silent-skip (never a new row, matching Case
-        // B's own "may legitimately receive a new collection_item" only
-        // for genuinely distinct titles), just no longer defeated by a
-        // one-word OCR/Vision difference between two scans of one book).
-        const isDuplicate = catalogue.some(c =>
-          titlesLikelySameBook(c.title, data.title) &&
-          c.issue === bulkIssue &&
-          c.year === data.year
-        );
-        if (isDuplicate) {
-          console.log('[bulk] duplicate, skipping:', data.title, '#' + bulkIssue);
-          errors.push(`${file.name}: duplicate (${data.title} #${bulkIssue})`);
+        const dup = classifyBulkDuplicate({ catalogue, title: data.title, issue: bulkIssue, year: data.year, dupKey, inFlightKeys });
+        if (dup) {
+          await holdForReview(file, data, bulkIssue, b64, dup);
           return;
         }
 
@@ -13453,6 +13486,8 @@ export default function App() {
       console.warn('[bulk] errors:', errors);
       setError(`Bulk import: ${added} added, ${errors.length} failed.\n${errors.join('\n')}`);
     }
+    setBulkHeld(held);
+    window.dispatchEvent(new Event("cv:copy-review-changed"));
     setBulkDone(added);
     // Auto-switch to collection tab after a short delay
     setTimeout(() => {
@@ -15161,6 +15196,85 @@ export default function App() {
     }
   };
 
+  // DUPLICATE ENTRY CLOSEOUT — items HELD by bulk import / JSON restore live in the principal-scoped
+  // IndexedDB store `copyReviewHeld`; they are reloaded on every sign-in/reopen, never expire, never
+  // auto-resolve. Resolution reuses the server-validated /api/physical-copy authority via
+  // src/lib/copyReviewHeld.js (SAME COPY -> action:'same', ANOTHER COPY -> action:'another').
+  const loadHeldReview = useCallback(async (recheckUnverified = false) => {
+    const me = getPrincipalScope();
+    if (!me) { setHeldReview([]); return; }
+    try {
+      let all = await getAllCopyReviewHeld();
+      if (getPrincipalScope() !== me) return;
+      if (recheckUnverified) {
+        const stale = all.filter((r) => !r.candidatesVerified);
+        if (stale.length > 0) {
+          await Promise.all(stale.map((r) => refreshCandidates(r, { authFetch, putHeld: putCopyReviewHeld }).catch(() => null)));
+          all = await getAllCopyReviewHeld();
+          if (getPrincipalScope() !== me) return;
+        }
+      }
+      setHeldReview([...all].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)));
+    } catch { /* store unreadable: show nothing; the records themselves stay durable */ }
+  }, []);
+  useEffect(() => {
+    if (!grailkeyAuthed) { setHeldReview([]); return undefined; }
+    loadHeldReview(true);
+    const onChanged = () => { loadHeldReview(false); };
+    window.addEventListener("cv:copy-review-changed", onChanged);
+    return () => window.removeEventListener("cv:copy-review-changed", onChanged);
+  }, [grailkeyAuthed, loadHeldReview]);
+  const heldDeps = () => ({
+    authFetch,
+    getPrincipal: getPrincipalScope,
+    putHeld: putCopyReviewHeld,
+    deleteHeld: deleteCopyReviewHeld,
+    saveScan: (data, image, principal) => addToCatalogue(data, image, principal),
+    saveEntry: async (entry) => {
+      const e = { ...entry, timestamp: entry.timestamp || Date.now(), images: entry.images || [] };
+      await putComic(e);
+      setCatalogue((prev) => (prev.some((x) => x.id === e.id) ? prev : [...prev, normalizeItem(e)]));
+      return e.id;
+    },
+  });
+  const HELD_ERROR_TEXT = {
+    CHECK_UNAVAILABLE: "The ownership check is unavailable. Nothing was saved and the item is still held — try again in a moment.",
+    DECISION_NOT_RECORDED: "Could not record your ANOTHER COPY choice with the server — nothing was saved. Tap again to retry.",
+    SAVE_FAILED: "Could not save this book. It is still held — tap again to retry.",
+    SAME_COPY_NOT_CONFIRMED: "Could not confirm SAME COPY with the server — nothing was changed. Tap again to retry.",
+    WRONG_PRINCIPAL: "This item belongs to a different account.",
+    CANDIDATES_EXIST_OR_UNVERIFIED: "You already own a matching physical copy — choose SAME COPY or ANOTHER COPY.",
+  };
+  const runHeldAction = async (rec, fn) => {
+    setHeldBusyId(rec.id);
+    setHeldErrors((e) => ({ ...e, [rec.id]: null }));
+    try {
+      const r = await fn();
+      if (!r.ok) setHeldErrors((e) => ({ ...e, [rec.id]: HELD_ERROR_TEXT[r.code] || "Something went wrong — the item is still held." }));
+      return r;
+    } finally {
+      setHeldBusyId(null);
+      await loadHeldReview(false);
+    }
+  };
+  const handleHeldAnother = (rec) => runHeldAction(rec, async () => {
+    const r = await resolveAnotherCopy(rec, heldDeps());
+    if (r.ok && rec.kind === HELD_KIND.BULK_SCAN) {
+      // Same follow-through a normal bulk save gets: market data for the newly saved copy.
+      try {
+        const saved = (await getAllComics()).find((c) => c.id === r.savedId);
+        if (saved) refreshMarketData(normalizeItem(saved));
+      } catch { /* enrichment is best-effort; the book is saved */ }
+    }
+    return r;
+  });
+  const handleHeldSame = (rec, cand) => runHeldAction(rec, () => resolveSameCopy(rec, cand.gkAssetId, heldDeps()));
+  const handleHeldDiscard = (rec) => runHeldAction(rec, () => discardHeld(rec, heldDeps()));
+  const handleHeldRecheck = (rec) => runHeldAction(rec, async () => {
+    const r = await refreshCandidates(rec, heldDeps());
+    return r;
+  });
+
   if (!grailkeyAuthed) {
     return (
       <>
@@ -15215,6 +15329,16 @@ export default function App() {
         </div>
       </header>
 
+      <CopyReviewPanel
+        records={heldReview}
+        busyId={heldBusyId}
+        errors={heldErrors}
+        onSame={handleHeldSame}
+        onAnother={handleHeldAnother}
+        onDiscard={handleHeldDiscard}
+        onRecheck={handleHeldRecheck}
+      />
+
       {tab === "scan" && (
         <>
           {/* Bulk import progress */}
@@ -15249,6 +15373,11 @@ export default function App() {
               <div style={{ fontSize: 18, fontWeight: 700, color: "#d4af37" }}>
                 {bulkDone} comic{bulkDone === 1 ? "" : "s"} added to collection
               </div>
+              {bulkHeld > 0 && (
+                <div style={{ fontSize: 14, marginTop: 8, color: "#ffaa33" }}>
+                  {bulkHeld} item{bulkHeld === 1 ? "" : "s"} held for copy review
+                </div>
+              )}
             </div>
           )}
 

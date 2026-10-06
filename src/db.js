@@ -16,7 +16,7 @@ import { scopedGet, scopedSet } from "./lib/principalStorage.js";
 // session there is no scope: reads return empty, writes reject.
 export const LEGACY_DB_NAME = "comic-vault";
 const DB_NAME_PREFIX = "comic-vault--p-";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 export class NoPrincipalScopeError extends Error {
   constructor() {
@@ -51,6 +51,14 @@ const FIXTURE_BANK_STORE = "fixtureBank";
 // the durable truth after that point is the server (gk_asset/media/
 // collection_item), never this store.
 const GENERIC_CAPTURE_DRAFTS_STORE = "genericCaptureDrafts";
+// DUPLICATE ENTRY CLOSEOUT (2026-10-06) — durable HELD-FOR-COPY-REVIEW
+// records. A bulk-import or JSON-restore item that resembles something the
+// operator already owns is HELD here (never silently skipped) with enough
+// payload (the incoming image + the model scan result, or the full restore
+// entry) to finish the save later without re-importing the source file.
+// Additive-only, DB_VERSION 4->5. Never a catalogue store and never synced:
+// a held record is removed only by an explicit operator resolution.
+const COPY_REVIEW_HELD_STORE = "copyReviewHeld";
 const LEGACY_KEY = "cv_catalogue";
 
 // One cached open() promise per physical database name.
@@ -99,6 +107,9 @@ const openDb = () => {
       }
       if (!db.objectStoreNames.contains(GENERIC_CAPTURE_DRAFTS_STORE)) {
         db.createObjectStore(GENERIC_CAPTURE_DRAFTS_STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(COPY_REVIEW_HELD_STORE)) {
+        db.createObjectStore(COPY_REVIEW_HELD_STORE, { keyPath: "id" });
       }
     };
     req.onsuccess = () => {
@@ -336,6 +347,27 @@ export const getAllGenericCaptureDrafts = () =>
 
 export const deleteGenericCaptureDraft = (id) =>
   runMutation(GENERIC_CAPTURE_DRAFTS_STORE, (store) => store.delete(id)).then(() => undefined);
+
+// --- Held-for-copy-review (Duplicate Entry Closeout) ---
+
+// Same runMutation discipline as every mutator here: resolves only on a real
+// transaction.oncomplete, so "held" is reported only once it is durable.
+export const putCopyReviewHeld = (record) => {
+  if (!record?.id) return Promise.reject(new Error("putCopyReviewHeld: record.id is required"));
+  return runMutation(COPY_REVIEW_HELD_STORE, (store) => store.put(record)).then(() => record);
+};
+
+export const getAllCopyReviewHeld = () =>
+  openDb().then((db) => new Promise((resolve, reject) => {
+    const transaction = db.transaction(COPY_REVIEW_HELD_STORE, "readonly");
+    const store = transaction.objectStore(COPY_REVIEW_HELD_STORE);
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  }));
+
+export const deleteCopyReviewHeld = (id) =>
+  runMutation(COPY_REVIEW_HELD_STORE, (store) => store.delete(id)).then(() => undefined);
 
 // DISABLED (LIVE EXPOSURE CLOSURE, 2026-10-04). This used to copy a legacy
 // unscoped `cv_catalogue` localStorage array into the (then global)
