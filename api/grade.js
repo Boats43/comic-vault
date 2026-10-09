@@ -9,7 +9,7 @@ import {
 import { getOAuthToken } from "./comps.js";
 import { checkRateLimit } from "./rate-limit.js";
 import { enforceSpendGuard } from "../src/lib/spendGuard.js";
-import { computeAnthropicCallCostUsd, getEstimatedStaticPrefixTokens, classifyCacheEligibility } from "../src/lib/anthropicPricing.js";
+import { resolveCallCost, getEstimatedStaticPrefixTokens, classifyCacheEligibility } from "../src/lib/anthropicPricing.js";
 import { requireAuthenticatedPrincipal } from "../src/lib/accessGate.js";
 import { guardConditionClaims } from "../src/lib/conditionEvidenceGuard.js";
 
@@ -132,14 +132,15 @@ const parseResponse = (text) => {
 // measured against real comic-pool titles from this same session's logs).
 import { detectBookSignals, classifyTitle } from '../src/lib/categoryClassifier.js';
 import { issueGradeReceipt } from '../src/lib/gradeReceipt.js';
+import { selectAcceptedPassMeta } from '../src/lib/watchProvenance.js';
 import { observeGradeProvenance, classifyWriteFailure, buildPredictionEvidenceMeta, resolvePredictionKind } from '../src/lib/gradeProvenanceObservability.js';
 import { recordModelPrediction, sha256Hex } from '../src/modules/learning/index.js';
 import { randomUUID } from 'node:crypto';
 
 // GK-261 — record what the model ACTUALLY returned under an opaque,
 // principal-bound, short-TTL receipt and hand the client only the handle.
-// `model` is the model id the call site really used (null = not known,
-// recorded as UNKNOWN — never inferred). Never throws; no receipt on any
+// Model identity comes only from `ctx.meta` (callModel's per-call metadata: requested id +
+// provider-reported id); absent meta => both null, recorded as UNKNOWN — never inferred. Never throws; no receipt on any
 // failure, and a missing receipt just means no trusted baseline later.
 //
 // GK-278: the SAME server-observed result is also written, append-only, as
@@ -148,12 +149,15 @@ import { randomUUID } from 'node:crypto';
 // came from the eBay image-search consensus). Written here from the server's own response
 // object only; no client field is read. A failure to write never blocks the scan.
 const attachGradeReceipt = async (result, principalId, ctx = {}) => {
-  const { model = null, meta = null, inputHash = null, identityFromModel = false, branch = 'unknown', imageCount = 0, imageViews = null, sentDimensions = null, predictionKind = 'FIRST_GRADE' } = ctx;
+  const { meta = null, inputHash = null, identityFromModel = false, branch = 'unknown', imageCount = 0, imageViews = null, sentDimensions = null, predictionKind = 'FIRST_GRADE' } = ctx;
   const buildSha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || null;
   const resultId = randomUUID();
+  // Model provenance comes ONLY from the call metadata of the model call that produced `result`
+  // (callModel's `meta`): `model` = the REQUESTED id, `modelVersion` (stored as model_version) = the
+  // PROVIDER-REPORTED id. No call-site literal is ever accepted as evidence — absent meta => null/UNKNOWN.
   const provenance = {
-    provider: (meta?.requestedModel || model) ? 'anthropic' : null,
-    model: meta?.requestedModel || model || null,
+    provider: meta?.requestedModel ? 'anthropic' : null,
+    model: meta?.requestedModel || null,
     modelVersion: meta?.model || null,
     promptVersion: meta?.promptVersion || null,
     buildSha,
@@ -661,13 +665,18 @@ const buildImageContent = async (images) => {
 // only happens in api/enrich.js, a separate request; see
 // PATTERN-LIBRARY.md "GrailKey Dispatch 33" for the cross-request gap).
 async function logCostAndCacheAudit(model, usage, promptText, systemBlocks) {
-  const cost = computeAnthropicCallCostUsd(model, usage);
+  // costStatus separates an UNPRICED model from missing usage; cost stays null (never 0) in both.
+  const { cost, status: costStatus } = resolveCallCost(model, usage);
   console.log(
     `[cost-audit] model=${model} ` +
     `inputTokens=${usage?.input_tokens ?? 'null'} outputTokens=${usage?.output_tokens ?? 'null'} ` +
     `cacheCreationTokens=${usage?.cache_creation_input_tokens ?? 'null'} cacheReadTokens=${usage?.cache_read_input_tokens ?? 'null'} ` +
-    `totalCostUsd=${cost ? cost.totalCostUsd.toFixed(6) : 'null'}`
+    `totalCostUsd=${cost ? cost.totalCostUsd.toFixed(6) : 'null'} costStatus=${costStatus}`
   );
+  if (costStatus === 'unknown_model') {
+    // Existing structured log + Upstash daily counter (nonblocking; swallows its own failures).
+    await observeGradeProvenance({ kind: 'cost', outcome: 'unknown_model', endpoint: 'grade', branch: 'cost-audit', model, buildSha: GIT_SHA, predictionKind: null }); // null: a cost event is not a grade prediction, so it must not land in a FIRST_GRADE/RE_GRADE bucket
+  }
   // ESTIMATE only — Anthropic's countTokens API "provides an estimate
   // without using caching logic" (see anthropicPricing.js docstring).
   // The `usage.*` fields logged alongside it below are the AUTHORITATIVE
@@ -741,7 +750,9 @@ const watchPipeline = async (imageContent, voiceContext) => {
   }
 
   // Pass 1: Sonnet fast identification
+  const attemptMetas = []; // every attempted pass's own call metadata, in attempt order
   const pass1 = await callModel(HAIKU, imageContent, prompt);
+  attemptMetas.push(pass1.meta);
   const r1 = pass1.parsed;
   const conf1 = String(r1.confidence || "").toLowerCase();
   const title1 = String(r1.title || "").toLowerCase();
@@ -750,7 +761,7 @@ const watchPipeline = async (imageContent, voiceContext) => {
     r1._watchPasses = 1;
     console.log(`[watch] pass1: ${pass1.ms}ms — high confidence, done`);
     console.log(`[watch-stats] pass=1 conf=${r1.confidence} title=${r1.title ? 'present' : 'missing'}`);
-    return { result: r1, passes: 1, timings: { pass1: pass1.ms } };
+    return { result: r1, passes: 1, timings: { pass1: pass1.ms }, meta: pass1.meta, acceptedPassIndex: 1, attemptedPassCount: attemptMetas.length, attemptMetas };
   }
 
   // Pass 2: Sonnet self-correction with first-pass context
@@ -765,6 +776,7 @@ const watchPipeline = async (imageContent, voiceContext) => {
     `Return JSON only, no markdown.`;
 
   const pass2 = await callModel(HAIKU, imageContent, correctionPrompt);
+  attemptMetas.push(pass2.meta);
   const r2 = pass2.parsed;
   const conf2 = String(r2.confidence || "").toLowerCase();
   const title2 = String(r2.title || "").toLowerCase();
@@ -773,7 +785,7 @@ const watchPipeline = async (imageContent, voiceContext) => {
     r2._watchPasses = 2;
     console.log(`[watch] pass1: ${pass1.ms}ms pass2: ${pass2.ms}ms total: ${pass1.ms + pass2.ms}ms — ${conf2} confidence after correction`);
     console.log(`[watch-stats] pass=2 conf=${r2.confidence} title=${r2.title ? 'present' : 'missing'}`);
-    return { result: r2, passes: 2, timings: { pass1: pass1.ms, pass2: pass2.ms } };
+    return { result: r2, passes: 2, timings: { pass1: pass1.ms, pass2: pass2.ms }, meta: pass2.meta, acceptedPassIndex: 2, attemptedPassCount: attemptMetas.length, attemptMetas };
   }
 
   // Pass 3: Opus escalation — still low confidence after self-correction
@@ -782,6 +794,7 @@ const watchPipeline = async (imageContent, voiceContext) => {
     opusPrompt += "\nSeller said: " + voiceContext + ". Use this context to improve accuracy.";
   }
   const pass3 = await callModel(OPUS, imageContent, opusPrompt);
+  attemptMetas.push(pass3.meta);
   const r3 = pass3.parsed;
   enrichPedigree(r3);
   r3.editionWarning = detectEditionWarning(r3.reason);
@@ -789,7 +802,7 @@ const watchPipeline = async (imageContent, voiceContext) => {
   r3._watchPasses = 3;
   console.log(`[watch] pass1: ${pass1.ms}ms pass2: ${pass2.ms}ms pass3: ${pass3.ms}ms total: ${pass1.ms + pass2.ms + pass3.ms}ms — Opus escalation`);
   console.log(`[watch-stats] pass=3 (opus) conf=${r3?.confidence}`);
-  return { result: r3, passes: 3, timings: { pass1: pass1.ms, pass2: pass2.ms, pass3: pass3.ms } };
+  return { result: r3, passes: 3, timings: { pass1: pass1.ms, pass2: pass2.ms, pass3: pass3.ms }, meta: pass3.meta, acceptedPassIndex: 3, attemptedPassCount: attemptMetas.length, attemptMetas };
 };
 
 // Fast path: Claude Vision identification + grade only. ComicVine, eBay
@@ -895,10 +908,17 @@ export default async function handler(req, res) {
 
     // Watch mode: self-correcting multi-pass pipeline
     if (body.source === "watch") {
-      const { result, passes, timings } = await watchPipeline(imageContent, body.voiceContext);
+      const watchRun = await watchPipeline(imageContent, body.voiceContext);
+      const { result, passes, timings } = watchRun;
+      // Provenance association is verified, not assumed: metadata must be the accepted pass's own recorded call
+      // metadata (src/lib/watchProvenance.js); otherwise the grade is recorded UNKNOWN. Never throws, scan unchanged.
+      const watchSel = selectAcceptedPassMeta(watchRun);
+      if (!watchSel.ok) console.log(`[watch-provenance] inconsistent accepted-pass association — recording UNKNOWN: ${watchSel.reason}`);
+      const watchMeta = watchSel.meta;
       applyConditionGuard(result, Array.isArray(images) ? images.length : (image ? 1 : 0), body.imageViews);
       if (noImage) result.noImage = true;
-      await attachGradeReceipt(result, auth.principalId, { model: null, inputHash, branch: 'WATCH', ...evidenceCtx });
+      // watchMeta is the call metadata of the pass whose output IS `result` (accepted pass), not of any other pass.
+      await attachGradeReceipt(result, auth.principalId, { meta: watchMeta ?? null, inputHash, branch: 'WATCH', ...evidenceCtx });
       res.setHeader("x-watch-passes", String(passes));
       res.setHeader("x-watch-timing", JSON.stringify(timings));
       res.status(200).json(echoScanId(ensureAssetType(result), body.scanId));
@@ -971,7 +991,7 @@ export default async function handler(req, res) {
       if (noImage) result.noImage = true;
 
       console.log('[grade] eBay-first path succeeded');
-      await attachGradeReceipt(result, auth.principalId, { model: "claude-haiku-4-5-20251001", meta: gradeMeta, inputHash, identityFromModel: false, branch: 'HAIKU_EBAY_CONSENSUS', ...evidenceCtx });
+      await attachGradeReceipt(result, auth.principalId, { meta: gradeMeta, inputHash, identityFromModel: false, branch: 'HAIKU_EBAY_CONSENSUS', ...evidenceCtx });
       mark('response_sent');
       res.status(200).json(echoScanId(ensureAssetType(result), body.scanId));
       return;
@@ -1055,7 +1075,7 @@ export default async function handler(req, res) {
     applyNewsstandFallback(finalParsed);
     finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 
-    await attachGradeReceipt(finalParsed, auth.principalId, { model: "claude-sonnet-4-5-20250929", meta: finalMeta, inputHash, identityFromModel: true, branch: isBook ? 'SONNET_BOOK' : 'SONNET_VISION_FALLBACK', ...evidenceCtx });
+    await attachGradeReceipt(finalParsed, auth.principalId, { meta: finalMeta, inputHash, identityFromModel: true, branch: isBook ? 'SONNET_BOOK' : 'SONNET_VISION_FALLBACK', ...evidenceCtx });
     mark('response_sent');
     res.status(200).json(echoScanId(ensureAssetType(finalParsed, initialScan), body.scanId));
   } catch (err) {

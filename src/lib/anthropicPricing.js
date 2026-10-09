@@ -109,6 +109,25 @@ export const computeAnthropicCallCostUsd = (model, usage) => {
   };
 };
 
+/** True only when `model` has a row in PRICING_USD_PER_MTOK (own keys only). */
+export const isPricedModel = (model) =>
+  typeof model === 'string' && Object.prototype.hasOwnProperty.call(PRICING_USD_PER_MTOK, model);
+
+/**
+ * computeAnthropicCallCostUsd plus WHY a cost is absent. `cost` is never fabricated or zeroed:
+ *   'known'          -> cost is the computed object (a legitimately zero-token call is known, cost 0 totals)
+ *   'unknown_model'  -> the model has no pricing row (checked FIRST: an unpriced model with no usage is still unpriced)
+ *   'missing_usage'  -> priced model but no usage block
+ * @param {string} model
+ * @param {import('@anthropic-ai/sdk').Anthropic.Messages.Usage} usage
+ * @returns {{cost: ReturnType<typeof computeAnthropicCallCostUsd>, status: 'known'|'unknown_model'|'missing_usage'}}
+ */
+export const resolveCallCost = (model, usage) => {
+  if (!isPricedModel(model)) return { cost: null, status: 'unknown_model' };
+  if (!usage) return { cost: null, status: 'missing_usage' };
+  return { cost: computeAnthropicCallCostUsd(model, usage), status: 'known' };
+};
+
 // In-memory cache for the ESTIMATED reusable-prefix token count. Keyed
 // on (model, git SHA, prompt hash) — the static system-prompt prefix
 // only changes when the deployed code or the prompt text itself

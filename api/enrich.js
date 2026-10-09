@@ -182,7 +182,8 @@ import { randomUUID } from "node:crypto";
 import { buildPipelineAudit } from "../src/lib/pipelineAudit.js";
 import { resetTitleStripStats, logTitleStripSummary } from "../src/lib/titleStripStats.js";
 import { writeConfirmed } from "../src/lib/identityWriteLog.js";
-import { computeAnthropicCallCostUsd } from "../src/lib/anthropicPricing.js";
+import { resolveCallCost } from "../src/lib/anthropicPricing.js";
+import { observeGradeProvenance } from "../src/lib/gradeProvenanceObservability.js";
 // BETA-1A.1 — shared legacy access gate, factored out of this file (see src/lib/accessGate.js)
 import { requireAuthenticatedPrincipal } from "../src/lib/accessGate.js";
 import { CATEGORY_REQUIRED_CODE, markClientContractRefusal } from "../src/lib/clientContract.js";
@@ -381,6 +382,8 @@ const isTestMarketVariant = (title, issue, variantKey) => {
 // listing title actually matches the identified comic. Returns an array
 // of booleans in the same order as `listings`, or null on any failure so
 // the caller can silently fall back to unverified comps.
+// Single source for the verification-lane model id: request, pricing lookup and log all read this.
+const VERIFY_MODEL = "claude-haiku-4-5";
 const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) => {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   if (!Array.isArray(listings) || listings.length === 0) return null;
@@ -418,7 +421,7 @@ const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) =>
       `in the same order as the listings.`;
 
     const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5",
+      model: VERIFY_MODEL,
       max_tokens: 512,
       messages: [{ role: "user", content: prompt }],
     });
@@ -431,12 +434,16 @@ const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) =>
     // identity/condition/research cost (see PATTERN-LIBRARY.md "GrailKey
     // Dispatch 33"). No `system`/`cache_control` on this call site, so
     // there's no cache/static-prefix concept to log here — cost only.
-    const verifyCost = computeAnthropicCallCostUsd("claude-haiku-4-5", message.usage);
+    const { cost: verifyCost, status: verifyCostStatus } = resolveCallCost(VERIFY_MODEL, message.usage);
     console.log(
-      `[cost-audit] model=claude-haiku-4-5 lane=verification ` +
+      `[cost-audit] model=${VERIFY_MODEL} lane=verification ` +
       `inputTokens=${message.usage?.input_tokens ?? 'null'} outputTokens=${message.usage?.output_tokens ?? 'null'} ` +
-      `totalCostUsd=${verifyCost ? verifyCost.totalCostUsd.toFixed(6) : 'null'}`
+      `totalCostUsd=${verifyCost ? verifyCost.totalCostUsd.toFixed(6) : 'null'} costStatus=${verifyCostStatus}`
     );
+    if (verifyCostStatus === 'unknown_model') {
+      // Existing structured log + Upstash daily counter (nonblocking; swallows its own failures). Cost stays null.
+      await observeGradeProvenance({ kind: 'cost', outcome: 'unknown_model', endpoint: 'enrich', branch: 'verification', model: VERIFY_MODEL, buildSha: GIT_SHA, predictionKind: null });
+    }
     verifyCostUsd = verifyCost ? verifyCost.totalCostUsd : null;
 
     const text = (message.content || [])

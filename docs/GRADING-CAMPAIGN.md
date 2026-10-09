@@ -92,3 +92,72 @@ Initial target about 10-20 examples: LOW 0.5-2.5; MID-LOW 3.0-4.5; MID 5.0-6.5; 
 - **gk258 merge-site coverage (GK-213B scope debt):** the old self-labelled PRE-EXISTING assertion expected `governingGrade` at exactly 1 of the 8 `App.jsx` merge sites; the count is now 8, so the stale expectation (not a defect) was removed from the executable assertions and the test only logs the count.
 - **Deleted non-discriminating assertions (mutation proof: they passed with and without the protected behavior):** see the commit message of the release-hygiene commit for the per-assertion coverage statement.
 - **COVERAGE LOSS (disclosed):** the GK-254 `ownedAssetAuthRequired` fail-closed branch inside `api/enrich.js` (owned flow, missing/invalid auth -> refusedToPrice) is no longer reachable over HTTP because the GK-269 access gate refuses first, so no test exercises that internal defense-in-depth branch.
+
+
+## Repeatability — sampling is unset and `temperature: 0` is not determinism (recorded 2026-10-09, Haiku 5.5 ruling)
+
+- The grading lane (`callModel`, `api/grade.js`) does NOT explicitly set sampling temperature: no `temperature`, `top_p` or `top_k` is sent, so the provider default applies on whichever model the branch selected. The default is not recorded on any prediction.
+- The only explicit `temperature: 0` in the repo is `src/lib/claudeCheck.js:193` (the record-check lane, not grading). It was a mitigation for Incredible Hulk #181 non-determinism. `temperature: 0` reduces but does NOT guarantee deterministic output, and it is not available on every model (Haiku 5.5 rejects any `temperature` other than 1 with a 400).
+- Therefore SAME-IMAGE REPEATED INFERENCE MUST MEASURE ACTUAL VARIANCE (per branch, per model, same bytes, N repeats) before any stability claim. No parameter is to be changed on the grading lane to "fix" this; measurement comes first (campaign stage 5, not run).
+- Any future model migration of a grading lane must satisfy this campaign's predeclared acceptance thresholds (declared BEFORE the candidate is run, on the certified corpus, covering band accuracy, severe outliers, same-image stability, resolution sensitivity and identity/era priming). A cheaper or faster model is not an acceptance criterion.
+
+## Calibration cohort integrity (ruled 2026-10-09)
+
+**A governing-model or prompt change creates a new calibration cohort. Historical predictions remain immutable.**
+
+- A cohort is identified by (requested model id, provider-reported model id, prompt version, branch). Any change to any of these starts a new cohort; nothing is rewritten, relabeled or back-filled on existing `model_prediction_event` rows or grade receipts.
+- The governing model and prompt are FROZEN for the duration of the current certified calibration campaign, unless an explicitly authorized safety correction requires otherwise (that correction is itself a cohort boundary and must be recorded as one).
+- Predictions from different cohorts MUST NOT be pooled until the differences have been identified and evaluated. Unknown provenance (null model / null provider-reported model) is its own cohort, never merged into a known one.
+- Consequence: the Haiku 5.5 evaluation is deferred (see `docs/HAIKU-5-5-DISPOSITION.md`).
+
+## Model provenance — field semantics and what is still open (2026-10-09)
+
+Two fields exist end to end: `model` (the REQUESTED id, `meta.requestedModel`) and `model_version` (the PROVIDER-REPORTED id, `message.model`; despite the name it is the reported model id; null unless the provider returned one). The grade receipt and every `model_prediction_event` row for a scan are built from ONE `provenance` object derived only from the producing call's `meta`. Fixed by the WATCH provenance repair: WATCH rows now carry the accepted pass's ids; the call-site-literal fallback in `attachGradeReceipt` is gone. Still open (not in this change): non-grade lanes (`enrich` AI-verify, `claudeCheck`, `chat`, `manage`) record no provider-reported model, and `researchMarket.js` collapses requested and reported into one field. Never infer a reported model from a call-site string.
+
+## WATCH model-provenance repair — calibration provenance boundary (2026-10-09; TICKET: UNASSIGNED)
+
+- **Pre-fix WATCH records may have UNKNOWN model provenance.** Before this change `api/grade.js` passed `model: null` and no call metadata for the WATCH branch, so WATCH `model_prediction_event` rows and grade receipts carry `model` / `model_version` = NULL even though a model call produced the grade. Those rows are not wrong; they are unattributed.
+- **Post-fix WATCH records carry `model` (requested id) and `model_version` (provider-reported id) from the accepted pass's own call** (pass 1 Haiku, pass 2 Haiku, or pass 3 Opus), whenever the provider response reported one. If the provider omitted its model, `model_version` stays NULL — it is never filled from the request or from a call-site string.
+- **Unknown-provenance records MUST NOT be pooled into model-attributed calibration cohorts.** NULL model / NULL model_version is its own cohort (see "Calibration cohort integrity").
+- **Historical records remain immutable.** No backfill, migration, or reinterpretation of existing prediction events or receipts. The standard Haiku (`HAIKU_EBAY_CONSENSUS`) and Sonnet (`SONNET_*`) branches recorded the same values before and after this change (their `meta` was already supplied); only the removed call-site-literal fallback and the WATCH branch changed.
+- **Boundary marker: PENDING RELEASE.** The deployed commit SHA and UTC activation timestamp of this repair are recorded at the production release (a separate documentation update or release record) — not before, and never invented. `Deployed SHA: <PENDING RELEASE>` / `Activated at: <PENDING RELEASE>`.
+
+## Cache effectiveness — read-only findings (2026-10-09; existing evidence only, no API call, no spend)
+
+Evidence coverage: **no recorded cache-usage data exists in the repo.** `[cost-audit]`/`[cache-audit]` lines (usage incl. `cache_creation_input_tokens` / `cache_read_input_tokens`) go to Vercel runtime logs only (~24h retention) and are not persisted; no log export is on disk. Cache-read/creation distributions, zero/positive/missing row counts, and recorded prompt token counts are therefore all **unavailable** — status per lane is **insufficient usage evidence**, and nothing here claims caching did or did not occur.
+
+What the code and docs establish (measured by capturing the mocked request bodies, no network):
+
+| Lane | Model | `cache_control` on | Cached block size (chars; ≈ tokens at ~4 chars/token — an ESTIMATE, not a count) | Documented minimum | Eligibility |
+|---|---|---|---|---|---|
+| `HAIKU_EBAY_CONSENSUS` grade-only | Haiku 4.5 | 2nd system block (the grade-only prompt) | 5,864 (+250 uncached block) ≈ 1.5K | 4,096 | **likely-ineligible** (far below) |
+| WATCH pass 1/2 | Haiku 4.5 | 2nd system block | 6,484 (+250) ≈ 1.7K | 4,096 | **likely-ineligible** |
+| `SONNET_VISION_FALLBACK` / book | Sonnet 4.5 | 2nd system block (STANDARD_PROMPT) | 15,518 (+250) ≈ 3.9K | 1,024 | likely-eligible |
+| WATCH pass 3 | Opus 4.7 | 2nd system block | ≈ 3.9K (STANDARD_PROMPT) | 2,048 | likely-eligible |
+
+- Documented minimums re-confirmed against Anthropic's prompt-caching page on 2026-10-09 (Haiku 4.5 = 4,096; Sonnet 4.5 = 1,024; Opus 4.7 = 2,048; Haiku 5.5 = 512). Below the minimum, caching is silently skipped with no error and both cache usage fields read 0.
+- `cache_control` is applied to the relevant prompt block on every `callModel` lane; the 250-char `SYSTEM_PROMPT` block ahead of it is not itself a breakpoint.
+- The grade-only prompt embeds per-scan consensus fields (title, issue, year, publisher, listing agreement, confidence %), so even a hypothetically eligible prefix would differ between different books; only an identical consensus could ever read it.
+- Conclusion by evidence class: Haiku grade-only and WATCH-Haiku — **expected no cache activity (estimate-based, not observed)**; Sonnet/Opus lanes — **cache-eligible, activity unobserved**. No lane is classified **confirmed cache activity** or **observed no cache activity**: confirming either requires the real `usage` fields from the Production `[cost-audit]` lines.
+- Implication for the measured ≈ $0.004 grade-call cost and 4,370 ms model time (the 2 baseline scans in "SPEED BASELINE"): if the Haiku grade-only lane is below its minimum, its cache fields are 0 and the whole prompt bills as ordinary input; the existing evidence cannot say how much that contributes to either figure, and no saving or latency attribution is claimed. Nothing about caching, prompts, models or routing was changed.
+
+## WATCH PROVENANCE INVARIANT (certified 2026-10-09; TICKET: UNASSIGNED)
+
+**Current escalation returns the last attempted pass as the accepted result.** (Pass 1 accepted after 1 call, pass 2 after 2, pass 3 after 3; `acceptedPassIndex === attemptedPassCount` at every return.)
+
+**Any change to escalation or pass selection requires renewed provenance-attribution certification.**
+
+The invariant is asserted, not assumed: `watchPipeline` returns `acceptedPassIndex`, `attemptedPassCount` and `attemptMetas` (each attempted pass's own call metadata, in order); the handler attaches provenance only through `selectAcceptedPassMeta` (`src/lib/watchProvenance.js`), which requires the metadata to be the very object recorded for the accepted pass index. An inconsistent association is recorded as UNKNOWN (`[watch-provenance]` log line) and the scan is otherwise unchanged. If a future strategy accepts an earlier pass after further attempts, attribution follows the accepted pass index, never the last attempt. Proofs: `tests/watch-accepted-pass-authority.test.js` (association contract + real handler), `tests/model-provenance-cost-observability.test.js`, and the persisted-row proof `tests/watch-provenance-persisted-live.test.js` (real Development database; `model` = requested id, `model_version` = provider-reported id). No schema or persisted-shape change.
+
+**Cohort boundary — release step (not left open).** At the production release of this repair, record here the ACTUAL deployed commit SHA and activation timestamp (UTC): `Deployed SHA: <PENDING RELEASE>` / `Activated at: <PENDING RELEASE>`. Rows written before that instant may have UNKNOWN WATCH model provenance and form their own cohort; rows after it carry requested and provider-reported ids when the provider reports one. Historical rows remain immutable. Nothing is recorded here until a deployment is authorized and completed.
+
+## HAIKU 4.5 GRADE CACHE — STRUCTURALLY INELIGIBLE UNDER THE INSPECTED REQUEST CONSTRUCTION
+
+(Supersedes the looser wording in "Cache effectiveness" above. Classification of the code/request construction, NOT a historical production-wide measurement.)
+
+- Estimated, not measured: the cache-controlled Haiku grading prefix is ~1,500 tokens (≈5.9K chars at ~4 chars/token; no provider token count exists on disk).
+- Documented Haiku 4.5 minimum cacheable prefix: 4,096 tokens (re-confirmed 2026-10-09). Below the minimum caching is silently skipped; both cache usage fields read 0.
+- The cache-controlled prompt also embeds per-book consensus data (title, issue, year, publisher, listing agreement, confidence), which limits prefix reuse between different scans even if the length were eligible.
+- Evidence class: structural (request construction + documented threshold). NOT a measurement of production cache reads/writes — no persisted usage data exists, so no cache-hit rate is claimed.
+- The measured ≈ $0.004 per grade call (SPEED BASELINE, n=2) is the existing observed cost baseline. No uncached-cost or latency penalty is claimed or quantified; that needs real `usage` evidence.
+- Future reconsideration condition: Haiku 5.5's 512-token threshold may make a stable static prompt prefix eligible after prompt restructuring (static instructions first, per-book data after the cache breakpoint). Relevant only after certified calibration and explicit model-evaluation authorization. No prompt, caching, or model change now.

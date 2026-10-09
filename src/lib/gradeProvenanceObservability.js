@@ -51,8 +51,8 @@ const utcDay = (now = new Date()) => now.toISOString().slice(0, 10);
 
 /**
  * @param {object} e
- * @param {'prediction'|'receipt'} e.kind
- * @param {string} e.outcome   prediction: ok|write_failed ; receipt: issued|not_issued
+ * @param {'prediction'|'receipt'|'cost'} e.kind
+ * @param {string} e.outcome   prediction: ok|write_failed ; receipt: issued|not_issued ; cost: unknown_model (model has no pricing row; cost stays null)
  * @param {string} [e.endpoint] @param {string} [e.branch] @param {string|null} [e.model]
  * @param {string|null} [e.buildSha] @param {string|null} [e.errorClass] @param {'FIRST_GRADE'|'RE_GRADE'} [e.predictionKind]
  * Never throws, never blocks beyond COUNTER_TIMEOUT_MS.
