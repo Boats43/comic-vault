@@ -116,11 +116,11 @@ after sign-in. Closing the app mid-batch loses nothing already confirmed and req
 confirmations; there is no grouping, select-all, "apply to all copies of this title", default-selected suggestion, or auto-advance on Skip that writes anything.
 The legacy / suggested value is displayed as a suggestion only; the operator must tap Confirm (or edit then Confirm) for each copy.
 
-**9.6 DESIGN RISK FOUND — spend accounting.** The per-item authority write currently travels through `POST /api/enrich`, which reserves 2 spend units
+**9.6 HARD PREREQUISITE for GK-280B — bulk operator confirmation must NOT consume grading spend-guard units when no paid grading operation occurs.** (Design risk found 2026-10-10, now ruled a prerequisite.) The per-item authority write currently travels through `POST /api/enrich`, which reserves 2 spend units
 per call against the per-principal daily cap (300 units/day by default). 145 confirmations would consume ~290 of 300 units although NO paid model call is made
 (the action does not need comps or a model). GK-280B must either route operator-authority-only confirmations through a lightweight endpoint that performs
 the same validated write without the pricing pipeline (and without reserving spend), or exempt that request class from the guard — decided in the GK-280B
-ruling; the validation and the one-event-per-item write contract above must be identical either way.
+ruling; the validation and the one-event-per-item write contract above must be identical either way. The lightweight, authenticated path must preserve: one durable `operator_correction_event` per item, authorization (the signed-in principal owns the item; another principal's id is refused and writes nothing), per-item idempotency (a replay is a recorded no-op), and auditability (source, reason, build sha, before/after authority on the event). Arithmetic that makes this a prerequisite: 145 confirmations x 2 units = 290 of the 300 default daily units, leaving 10 for any real scan or enrichment that day. It is NOT implemented in GK-280A.
 
 **9.7 Additional certification tests for GK-280B.** (a) kill the page after k of N confirmations, reload and re-login: exactly N-k remain, the k events exist
 once each; (b) replay every request: no new events; (c) fail item j with a 500: j stays unresolved and listed, others unaffected, retry succeeds once; (d) 401 mid-batch:
