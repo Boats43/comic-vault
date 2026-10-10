@@ -120,7 +120,7 @@ Two fields exist end to end: `model` (the REQUESTED id, `meta.requestedModel`) a
 - **Post-fix WATCH records carry `model` (requested id) and `model_version` (provider-reported id) from the accepted pass's own call** (pass 1 Haiku, pass 2 Haiku, or pass 3 Opus), whenever the provider response reported one. If the provider omitted its model, `model_version` stays NULL — it is never filled from the request or from a call-site string.
 - **Unknown-provenance records MUST NOT be pooled into model-attributed calibration cohorts.** NULL model / NULL model_version is its own cohort (see "Calibration cohort integrity").
 - **Historical records remain immutable.** No backfill, migration, or reinterpretation of existing prediction events or receipts. The standard Haiku (`HAIKU_EBAY_CONSENSUS`) and Sonnet (`SONNET_*`) branches recorded the same values before and after this change (their `meta` was already supplied); only the removed call-site-literal fallback and the WATCH branch changed.
-- **Boundary marker: PENDING RELEASE.** The deployed commit SHA and UTC activation timestamp of this repair are recorded at the production release (a separate documentation update or release record) — not before, and never invented. `Deployed SHA: <PENDING RELEASE>` / `Activated at: <PENDING RELEASE>`.
+- **Boundary marker: RECORDED.** Activated by deployment of `653f41848b2cf9ed2bc1d29d781c6aa73d35cbda` (Production deployment `dpl_3wEzCXuTZgC13qK8DGz1HY5b3gou`, created 2026-10-10T00:05:46Z, READY and aliased 2026-10-10T00:06:21Z; verified Production alias `app.grailkey.com`, also `comic-vault-rouge.vercel.app`, serving the bundle that carries build marker `653f418`). This record was written in a subsequent documentation-only commit; that commit's SHA is NOT the activation SHA. See "MODEL PROVENANCE COHORT BOUNDARY" below.
 
 ## Cache effectiveness — read-only findings (2026-10-09; existing evidence only, no API call, no spend)
 
@@ -149,7 +149,7 @@ What the code and docs establish (measured by capturing the mocked request bodie
 
 The invariant is asserted, not assumed: `watchPipeline` returns `acceptedPassIndex`, `attemptedPassCount` and `attemptMetas` (each attempted pass's own call metadata, in order); the handler attaches provenance only through `selectAcceptedPassMeta` (`src/lib/watchProvenance.js`), which requires the metadata to be the very object recorded for the accepted pass index. An inconsistent association is recorded as UNKNOWN (`[watch-provenance]` log line) and the scan is otherwise unchanged. If a future strategy accepts an earlier pass after further attempts, attribution follows the accepted pass index, never the last attempt. Proofs: `tests/watch-accepted-pass-authority.test.js` (association contract + real handler), `tests/model-provenance-cost-observability.test.js`, and the persisted-row proof `tests/watch-provenance-persisted-live.test.js` (real Development database; `model` = requested id, `model_version` = provider-reported id). No schema or persisted-shape change.
 
-**Cohort boundary — release step (not left open).** At the production release of this repair, record here the ACTUAL deployed commit SHA and activation timestamp (UTC): `Deployed SHA: <PENDING RELEASE>` / `Activated at: <PENDING RELEASE>`. Rows written before that instant may have UNKNOWN WATCH model provenance and form their own cohort; rows after it carry requested and provider-reported ids when the provider reports one. Historical rows remain immutable. Nothing is recorded here until a deployment is authorized and completed.
+**Cohort boundary — recorded at release.** See "MODEL PROVENANCE COHORT BOUNDARY" and "COUNTER KEY-SPACE BOUNDARY" below for the actual activating deployment.
 
 ## HAIKU 4.5 GRADE CACHE — STRUCTURALLY INELIGIBLE UNDER THE INSPECTED REQUEST CONSTRUCTION
 
@@ -161,3 +161,23 @@ The invariant is asserted, not assumed: `watchPipeline` returns `acceptedPassInd
 - Evidence class: structural (request construction + documented threshold). NOT a measurement of production cache reads/writes — no persisted usage data exists, so no cache-hit rate is claimed.
 - The measured ≈ $0.004 per grade call (SPEED BASELINE, n=2) is the existing observed cost baseline. No uncached-cost or latency penalty is claimed or quantified; that needs real `usage` evidence.
 - Future reconsideration condition: Haiku 5.5's 512-token threshold may make a stable static prompt prefix eligible after prompt restructuring (static instructions first, per-book data after the cache breakpoint). Relevant only after certified calibration and explicit model-evaluation authorization. No prompt, caching, or model change now.
+
+## MODEL PROVENANCE COHORT BOUNDARY
+
+Activated by deployment of `653f41848b2cf9ed2bc1d29d781c6aa73d35cbda` (Production deployment `dpl_3wEzCXuTZgC13qK8DGz1HY5b3gou`, created 2026-10-10T00:05:46Z, READY and aliased 2026-10-10T00:06:21Z; verified Production alias `app.grailkey.com`, also `comic-vault-rouge.vercel.app`, serving the bundle that carries build marker `653f418`). This record was written in a subsequent documentation-only commit; that commit's SHA is NOT the activation SHA.
+
+- Before the activating deployment, WATCH model attribution may be UNKNOWN (`model` / `model_version` NULL).
+- From the activating deployment onward, WATCH provenance uses the accepted pass's requested (`model`) and provider-reported (`model_version`) model identifiers, subject to actual provider metadata availability (`model_version` stays NULL if the provider omitted it).
+- Historical records are immutable.
+- Do not pool unknown-provenance historical records into model-attributed calibration cohorts.
+- Evidence: the deployment was READY and aliased, with no runtime error group attributable to it at verification time. No new WATCH traffic had been observed yet, so post-activation behavior rests on the pre-release proofs (mocked-provider handler tests and the Development persisted-row proof), not on a Production observation.
+
+## COUNTER KEY-SPACE BOUNDARY
+
+Activated by deployment of `653f41848b2cf9ed2bc1d29d781c6aa73d35cbda` (Production deployment `dpl_3wEzCXuTZgC13qK8DGz1HY5b3gou`, created 2026-10-10T00:05:46Z, READY and aliased 2026-10-10T00:06:21Z; verified Production alias `app.grailkey.com`, also `comic-vault-rouge.vercel.app`, serving the bundle that carries build marker `653f418`). This record was written in a subsequent documentation-only commit; that commit's SHA is NOT the activation SHA.
+
+- From the activating deployment onward, unknown-model cost events are counted under `kind=cost`, `outcome=unknown_model` with the neutral `unknown` prediction-kind suffix (`predictionKind: null`): `gk:gradeprov:v1:<day>:cost:unknown_model:<branch>:<model>:<buildSha>:unknown`.
+- Accuracy note (deviation from the release directive's premise): no earlier Production deployment emitted any `kind=cost` counter, so no Production cost series with a default `FIRST_GRADE` suffix exists; that variant existed only in intermediate, never-deployed local builds. If a `kind=cost` key ending in `:FIRST_GRADE` is ever found in any store, it is non-Production residue and must not be aggregated with the `unknown`-suffixed series without explicit normalization.
+- Historical counter keys are not rewritten.
+- Cost events must never be mixed into FIRST_GRADE or RE_GRADE prediction denominators; cost counters and grade-prediction counters stay distinct (proof: `tests/cost-counter-denominator-isolation.test.js`).
+- Retained limitation: the enrichment verification-lane runtime behavior remains MIRRORED-WIRING-UNVERIFIED.
