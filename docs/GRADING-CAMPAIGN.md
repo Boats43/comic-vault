@@ -181,3 +181,18 @@ Activated by deployment of `653f41848b2cf9ed2bc1d29d781c6aa73d35cbda` (Productio
 - Historical counter keys are not rewritten.
 - Cost events must never be mixed into FIRST_GRADE or RE_GRADE prediction denominators; cost counters and grade-prediction counters stay distinct (proof: `tests/cost-counter-denominator-isolation.test.js`).
 - Retained limitation: the enrichment verification-lane runtime behavior remains MIRRORED-WIRING-UNVERIFIED.
+
+## Production stored-image census (read-only, 2026-10-10) — NOT a complete historical image or grading-event census
+
+Method: one read-only transaction against the verified Production database (`BEGIN READ ONLY`, SELECT-only, counts only, no identifiers/titles/grades). It counts `attributes.remoteImages` — the images the server holds for each collection item (SYNCED images only; a photo that exists only on a device is not counted).
+
+| Population | Exactly one stored image | Two or more | Zero / missing / unclassifiable |
+|---|---|---|---|
+| All collection items (198) | 196 | 0 | 2 |
+| SERVER_BASELINE_VALID items (53) | 53 | 0 | 0 |
+
+Also: SAME_COPY physical-copy decisions = 0.
+
+Interpretation rules. One stored image is evidence consistent with a SINGLE CAPTURE; it is NOT proof of a single prediction event and NOT proof that a baseline is the current governing prediction (52 of the 53 baselines remain currentness-INDETERMINATE: later GRADE predictions exist for the principal and cannot be tied to the item). Image count alone is never used to classify a baseline as current and changes no governing-grade policy.
+
+Implications. (1) Front-only grading calibration: effectively the whole existing Production population was graded from a single image, so the existing stored evidence is front-only; it contains no back / spine / pages views against which a multi-view grade could be calibrated (consistent with the PROVISIONAL front-only annotation law above). (2) The proposed 800px-versus-1600px experiment: the stored image is a client thumbnail produced by `makeThumbnail` (default longest edge 1000px; code-derived, the stored dimensions were NOT measured), while the graded input is resized to 800px (`resizeImageForVision`). The existing stored images therefore cannot supply a 1600px arm, and they are not the bytes that were graded; the experiment needs NEW captures at known source resolution (and same-capture 800px/1600px renderings), not a replay of the stored population. (3) This census does not establish how many grading events each item has had; that requires item-linked prediction evidence, which GK-280A begins to record (`currentGradePrediction`).
