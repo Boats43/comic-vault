@@ -31,6 +31,7 @@
 import { putComic, getAllComics, getStorageScope, NoPrincipalScopeError, putCopyReviewHeld, getAllCopyReviewHeld } from "../db.js";
 import { pushCollectionItemDetailed } from "./collectionSync.js";
 import { HELD_KIND, HELD_REASON, buildHeldRecord, syncHeldId } from "./copyReviewHeld.js";
+import { applyGradeClaimAck } from "./gradeClaimAck.js";
 
 // LIVE EXPOSURE CLOSURE (2026-10-04) — a local row may only ever be pushed
 // under the principal whose scoped database holds it. The scope is captured
@@ -63,7 +64,8 @@ export async function persistCollectionItem(entry) {
     await putComic(finalHeld);
     return finalHeld;
   }
-  const finalEntry = { ...entry, _syncStatus: pushed.result ? "synced" : "pending" };
+  // GK-280A — record the SERVER's grade-claim outcome on the local entry (save success != claim success).
+  const finalEntry = applyGradeClaimAck({ ...entry, _syncStatus: pushed.result ? "synced" : "pending" }, pushed.gradeClaim, !!pushed.result);
   if (scopeChanged(scope)) return { ...finalEntry, _refusedScopeChanged: true };
   await putComic(finalEntry);
   return finalEntry;

@@ -183,6 +183,7 @@ import { buildPipelineAudit } from "../src/lib/pipelineAudit.js";
 import { resetTitleStripStats, logTitleStripSummary } from "../src/lib/titleStripStats.js";
 import { writeConfirmed } from "../src/lib/identityWriteLog.js";
 import { resolveCallCost } from "../src/lib/anthropicPricing.js";
+import { verifyGradeProof } from "../src/lib/gradeReceipt.js";
 import { observeGradeProvenance } from "../src/lib/gradeProvenanceObservability.js";
 // BETA-1A.1 — shared legacy access gate, factored out of this file (see src/lib/accessGate.js)
 import { requireAuthenticatedPrincipal } from "../src/lib/accessGate.js";
@@ -2370,6 +2371,7 @@ export default async function handler(req, res) {
       collectionItemId, // GK-145 (GrailKey Dispatch 2026-08-21) — the IndexedDB collection record's own item.id, threaded through by App.jsx on collection-originated requests only (refreshMarketData, auto-refresh, reIdentifyBook, submitManualCorrection, bulk import, gradeBlob/duplicate-confirm post-save). Null on a free-standing scan not yet saved to the collection. Also snapshotted into the scanlog record below (src/lib/scanLog.js), NOT proof of physical-copy identity there — see scanLog.js's own JSDoc. GK-253/GK-254 (2026-09-24): now ALSO drives real identity/economic logic, but ONLY when paired with the explicit ownedRefresh/ownedReidentify flag below — never on its own (a bare collectionItemId with neither flag, e.g. a fresh gradeBlob/bulk-import/duplicate-confirm post-save call, is deliberately left exactly as measurement-only as before; see GK-254's own Section A trace for why those flows cannot be safely inferred from collectionItemId presence alone).
       ownedRefresh,    // GK-254 — explicit flow marker. true ONLY for refreshMarketData/auto-refresh/submitManualCorrection (App.jsx): "this request targets an already-owned Collection item and carries no fresh identification evidence that should ever be allowed to silently change its established category." Absent/false everywhere else, including every first-time-save flow (gradeBlob's initial scan, bulk import, duplicate-confirm) — those must never be gated by owned-asset fail-closed logic, since they have no established durable authority yet to protect (GK-254 Section A).
       ownedReidentify, // GK-254 — explicit flow marker. true ONLY for reIdentifyBook (App.jsx): "this request targets an already-owned Collection item AND carries a genuine fresh identification pass (real Vision + image search) whose result may legitimately conflict with established durable authority." Distinct from ownedRefresh: a conflict here must be held/refused, never silently resolved in either direction (GK-254 Section E).
+      gradeProof,      // GK-280A — the scan's signed grade proof (optional). Verified statelessly below for OBSERVABILITY ONLY; it governs nothing in GK-280A (the authoritative cutover is GK-280B).
       // GK-260 (Server-Owned Write Authority) — these five raw fields are
       // deliberately destructured but NEVER trusted to establish authority
       // (see the GK-213C resolution block below, which now reads the
@@ -2392,6 +2394,17 @@ export default async function handler(req, res) {
       operatorGradeValue,    // raw grade string, required when action is 'SET'
       gradingFormatAction,   // 'SET_RAW' | 'SET_GRADED' | 'CLEAR'
     } = req.body || {};
+
+    // GK-280A — SCAN-BOUND PROOF, OBSERVABILITY ONLY. Verifies the proof's signature, expiry and principal
+    // without needing the collection row to exist yet (the fresh-scan persist/enrich race cannot affect it).
+    // The result is logged; no price, grade, comp-admission, decision or response field depends on it.
+    if (typeof gradeProof === 'string' && gradeProof) {
+      try {
+        const gp = verifyGradeProof(gradeProof);
+        const bound = gp.ok ? (gp.claims.p === auth.principalId ? 'PRINCIPAL_OK' : 'PRINCIPAL_MISMATCH') : gp.reason;
+        console.log(`[grade-proof] enrich verification (observability only): ${gp.ok ? 'VERIFIED' : 'REJECTED'} ${bound}`);
+      } catch { /* observability must never affect a scan */ }
+    }
 
     // Track B Phase 0, Commit 3 — Safeguards 1+2. prepareManualCorrectionRequest
     // enforces the EXACT four-condition manual-authority request contract

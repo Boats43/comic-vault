@@ -22,6 +22,7 @@ import { ValidationFailedError, AuthorizationFailedError, NotFoundError, Categor
 import { isSupportedAssetCategory, describeSupportedCategories } from '../../lib/assetCategories.js';
 import { appendOperatorCorrectionEventTx } from '../learning/index.js';
 import { planGradingCorrections, planIdentityCorrection } from '../../lib/operatorCorrectionPlan.js';
+import { decideGradeClaim, buildGradePointer, GRADE_CLAIM_STATUS } from '../../lib/gradeClaimPolicy.js';
 
 function requireFields(obj, fields) {
   for (const f of fields) {
@@ -219,6 +220,81 @@ export async function applyIdentityAuthorityPatch({ principalId, id, identityAut
     },
   });
 }
+
+// GK-280A — SAVE + GRADE-PREDICTION ASSOCIATION IN ONE TRANSACTION.
+// The item write and the association commit or roll back together, serialized by an advisory lock on
+// (principal, event): there is no window in which an event is bound to two items, and a retry of an
+// interrupted request sees either nothing (and is a fresh create) or the committed pointer (idempotent).
+// `mode` is 'create' (POST: upsert) or 'update' (PUT). `claim` is built by api/collection.js from a
+// VERIFIED proof/receipt — { eventId, resultId, targetItemId, eventCreatedAtMs, baseline, via } — and is
+// never client-authored. A refused claim still saves the item (ordinary save semantics) and reports
+// { status:'REFUSED', code }; it writes no pointer and no baseline.
+export async function saveCollectionItemWithGradeClaim({ principalId, id, assetCategory, attributes, mode, claim } = {}) {
+  requireFields({ principalId, id, attributes }, ['principalId', 'id', 'attributes']);
+  if (typeof attributes !== 'object' || Array.isArray(attributes)) throw new ValidationFailedError('attributes must be a JSON object');
+  if (mode === 'create') {
+    if (!isSupportedAssetCategory(assetCategory)) {
+      throw new ValidationFailedError(`assetCategory is required and must be one of ${describeSupportedCategories()} (no default)`);
+    }
+  } else if (mode === 'update') {
+    if (assetCategory !== undefined && assetCategory !== null && !isSupportedAssetCategory(assetCategory)) {
+      throw new ValidationFailedError(`assetCategory must be one of ${describeSupportedCategories()}, got: ${JSON.stringify(assetCategory)}`);
+    }
+  } else {
+    throw new ValidationFailedError("mode must be 'create' or 'update'");
+  }
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      if (claim) await repo.lockGradeClaimItem(client, { principalId, id }); // 1st: the item (serializes same-item claims, incl. creates)
+      if (claim?.eventId) await repo.lockGradeClaim(client, { principalId, eventId: claim.eventId }); // 2nd: the event (serializes cross-item claims)
+      const before = await repo.lockItemAttributes(client, { id, principalId });
+      const existedBefore = before !== null;
+      let saved;
+      if (mode === 'create') {
+        saved = await repo.upsertItem(client, { id, principalId, assetCategory, attributes });
+        if (!saved) throw new CategoryImmutableError(`collection item ${id} already exists with a different category; category is immutable (no reclassification)`);
+      } else {
+        saved = await repo.updateItem(client, { id, principalId, assetCategory, attributes });
+        if (!saved) {
+          const existing = assetCategory ? await repo.getByPrincipalAndId(client, principalId, id) : null;
+          if (existing) throw new CategoryImmutableError(`collection item ${id} has a different category; category is immutable (no reclassification)`);
+          throw new NotFoundError(`collection item ${id} does not exist`);
+        }
+      }
+      const boundElsewhere = claim?.eventId
+        ? (await repo.findOtherItemBoundToEvent(client, { principalId, eventId: claim.eventId, excludeId: id })) !== null
+        : false;
+      const decision = decideGradeClaim({
+        id, existedBefore, currentPointer: saved.attributes?.currentGradePrediction ?? null, boundElsewhere, claim,
+      });
+      let item = saved;
+      if (decision.action === 'ASSOCIATE') {
+        const pointer = buildGradePointer({
+          previous: saved.attributes?.currentGradePrediction ?? null,
+          eventId: claim.eventId, resultId: claim.resultId, eventCreatedAtMs: claim.eventCreatedAtMs, via: claim.via,
+        });
+        item = (await repo.setGradePredictionPointer(client, { id, principalId, pointer })) || item;
+      }
+      if ((decision.action === 'ASSOCIATE' || decision.action === 'BASELINE_ONLY' || decision.action === 'NOOP') && claim?.baseline) {
+        // Write-once: predicated on no existing modelPredictedGrade, so a legacy/other baseline is never overwritten.
+        const b = await repo.claimModelBaselinePatch(client, { id, principalId, baseline: claim.baseline });
+        if (b.item) item = b.item;
+      }
+      await client.query('COMMIT');
+      return { item, claim: { status: decision.status, code: decision.code, action: decision.action } };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+export { GRADE_CLAIM_STATUS };
 
 export async function deleteCollectionItem({ principalId, id } = {}) {
   requireFields({ principalId, id }, ['principalId', 'id']);

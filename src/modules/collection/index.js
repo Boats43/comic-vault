@@ -11,6 +11,7 @@ export {
   updateCollectionItem,
   deleteCollectionItem,
   getRemoteImageUri,
+  saveCollectionItemWithGradeClaim, // GK-280A — api/collection.js only, with a VERIFIED proof/receipt; save + association in one transaction
   claimModelBaseline, // GK-261 — api/collection.js only, with a server-claimed receipt
   applyIdentityAuthorityPatch, // GK-261 — api/enrich.js only, after a validated manual correction
   applyGradingAuthorityPatch, // GK-260 — internal callers only (api/enrich.js); never wired to a public HTTP route

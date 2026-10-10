@@ -38,7 +38,7 @@
 import { verifyToken, InvalidTokenError } from '../src/modules/auth/index.js';
 import {
   listMyCollection, getMyCollectionItem, createCollectionItem,
-  updateCollectionItem, deleteCollectionItem, claimModelBaseline,
+  updateCollectionItem, deleteCollectionItem, saveCollectionItemWithGradeClaim,
   ValidationFailedError, AuthorizationFailedError, NotFoundError, CategoryImmutableError,
 } from '../src/modules/collection/index.js';
 import { isSupportedAssetCategory, describeSupportedCategories } from '../src/lib/assetCategories.js';
@@ -48,7 +48,19 @@ import { assertPhysicalCopySaveAllowed, PhysicalCopyCandidateCheckUnavailableErr
 import { respondPhysicalCopyError } from '../src/lib/physicalCopyErrors.js';
 import { put as mediaPut } from '../src/modules/media/index.js';
 import { checkRateLimit } from './rate-limit.js';
-import { claimGradeReceipt, restoreGradeReceipt } from '../src/lib/gradeReceipt.js';
+import { consumeGradeReceipt } from '../src/lib/gradeReceipt.js';
+import { resolveGradeClaim } from '../src/lib/gradeClaimResolver.js';
+import { observeGradeProvenance } from '../src/lib/gradeProvenanceObservability.js';
+import { GRADE_CLAIM_CODE } from '../src/lib/gradeClaimPolicy.js';
+
+// GK-280A amendment — every claim outcome is counted through the EXISTING provenance counters (kind 'claim').
+// The refusal reason is a BOUNDED vocabulary (GRADE_CLAIM_CODE values or OTHER); no ids, grades or titles. predictionKind null:
+// a claim is not a grade prediction and must never land in a FIRST_GRADE/RE_GRADE denominator. Never throws, never blocks.
+const CLAIM_CODES = new Set(Object.values(GRADE_CLAIM_CODE));
+const observeClaim = (outcome, code) => observeGradeProvenance({
+  kind: 'claim', outcome, endpoint: 'collection', branch: code && CLAIM_CODES.has(code) ? code : (code ? 'OTHER' : 'NONE'),
+  model: null, buildSha: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || null, predictionKind: null,
+}).catch(() => {});
 
 function extractBearerToken(req) {
   const header = req.headers?.authorization || req.headers?.Authorization;
@@ -124,22 +136,39 @@ async function withResolvedImages(attributes, images) {
 // has already been made inert by the repository's full-immunity set. A
 // missing/expired/foreign/replayed receipt changes nothing — the ordinary
 // save still succeeds and no trusted baseline is minted (UNKNOWN).
-async function claimReceiptIfPresent(principalId, itemId, gradeReceiptId, saved) {
-  if (gradeReceiptId === undefined || gradeReceiptId === null) return saved;
-  const claim = await claimGradeReceipt({ principalId, receiptId: gradeReceiptId });
-  if (!claim.ok) {
-    console.log(`[grade-receipt] not claimed: ${claim.reason}`);
-    return saved;
+// GK-280A — the model baseline and the durable currentGradePrediction pointer are associated with an item
+// ONLY inside the save's own transaction (saveCollectionItemWithGradeClaim), after the credential is
+// verified against the server's own durable event. The item id the client names is a TARGET, never proof:
+//   * a fresh-scan proof/receipt associates only when THIS request creates the row (cross-item claim refused),
+//   * a re-grade proof associates only with the item it was issued for,
+//   * an event is bound to at most one item, and a repeat for the same item is an idempotent no-op.
+// A missing/expired/foreign/invalid credential never blocks the ordinary save; the response carries an
+// additive `gradeClaim: { status, code }` so the refusal is explicit (no new HTTP error status).
+async function saveAndClaim({ principalId, mode, id, assetCategory, attributes, gradeProof, gradeReceiptId, gradeInputHash }) {
+  const plain = () => (mode === 'create'
+    ? createCollectionItem({ principalId, id, assetCategory, attributes })
+    : updateCollectionItem({ principalId, id, assetCategory, attributes }));
+  const resolved = await resolveGradeClaim({ principalId, gradeProof, gradeReceiptId, gradeInputHash });
+  if (!resolved.present) return plain();
+  if (resolved.unavailable) {
+    await observeClaim('unavailable', null);
+    // Transient durable-event lookup failure: NOT a refusal. Fail the request (nothing written) so the client's
+    // pending-sync retry presents the same credential again against a healthy lookup.
+    const err = new Error('grade claim verification temporarily unavailable');
+    err.gradeClaimUnavailable = true;
+    throw err;
   }
-  try {
-    const out = await claimModelBaseline({ principalId, id: itemId, baseline: claim.baseline });
-    console.log(`[grade-receipt] claimed written=${out.written}`);
-    return out.item || saved;
-  } catch (e) {
-    await restoreGradeReceipt({ receiptId: gradeReceiptId, record: claim.record });
-    console.log(`[grade-receipt] durable write failed, receipt restored: ${e?.message || e}`);
-    return saved;
+  if (resolved.refusal) {
+    console.log(`[grade-claim] refused: ${resolved.refusal.code}${resolved.refusal.reason ? ' (' + resolved.refusal.reason + ')' : ''}`);
+    const saved = await plain();
+    await observeClaim('refused', resolved.refusal.code);
+    return { ...saved, gradeClaim: { status: 'REFUSED', code: resolved.refusal.code } };
   }
+  const out = await saveCollectionItemWithGradeClaim({ principalId, id, assetCategory, attributes, mode, claim: resolved.claim });
+  console.log(`[grade-claim] ${out.claim.status}${out.claim.code ? ' ' + out.claim.code : ''} via=${resolved.claim.via}`);
+  await observeClaim(out.claim.status === 'REFUSED' ? 'refused' : (out.claim.status === 'ALREADY_ASSOCIATED' ? 'already_associated' : 'associated'), out.claim.code);
+  if (resolved.receiptId && out.claim.status !== 'REFUSED') await consumeGradeReceipt({ receiptId: resolved.receiptId });
+  return { ...out.item, gradeClaim: { status: out.claim.status, code: out.claim.code } };
 }
 
 export default async function handler(req, res) {
@@ -177,7 +206,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const { id: bodyId, assetCategory, attributes, images, gradeReceiptId } = req.body || {};
+      const { id: bodyId, assetCategory, attributes, images, gradeReceiptId, gradeProof, gradeInputHash } = req.body || {};
       // U1 — NO DEFAULT CATEGORY: refuse BEFORE the physical-copy check or any photo upload
       // (a refused save must leave no orphan blob and no row).
       if (assetCategory === undefined || assetCategory === null || assetCategory === '') {
@@ -204,16 +233,14 @@ export default async function handler(req, res) {
         if (isNewRow) await assertPhysicalCopySaveAllowed({ principalId, id: bodyId, attributes, assetCategory });
       }
       const resolvedAttributes = await withResolvedImages(attributes, images);
-      const created = await createCollectionItem({ principalId, id: bodyId, assetCategory, attributes: resolvedAttributes });
-      return res.status(200).json(await claimReceiptIfPresent(principalId, bodyId, gradeReceiptId, created));
+      return res.status(200).json(await saveAndClaim({ principalId, mode: 'create', id: bodyId, assetCategory, attributes: resolvedAttributes, gradeProof, gradeReceiptId, gradeInputHash }));
     }
 
     if (req.method === 'PUT' || req.method === 'PATCH') {
       if (!id) return res.status(400).json({ error: 'id query parameter is required' });
-      const { assetCategory, attributes, images, gradeReceiptId } = req.body || {};
+      const { assetCategory, attributes, images, gradeReceiptId, gradeProof, gradeInputHash } = req.body || {};
       const resolvedAttributes = await withResolvedImages(attributes, images);
-      const updated = await updateCollectionItem({ principalId, id, assetCategory, attributes: resolvedAttributes });
-      return res.status(200).json(await claimReceiptIfPresent(principalId, id, gradeReceiptId, updated));
+      return res.status(200).json(await saveAndClaim({ principalId, mode: 'update', id, assetCategory, attributes: resolvedAttributes, gradeProof, gradeReceiptId, gradeInputHash }));
     }
 
     if (req.method === 'DELETE') {
@@ -241,6 +268,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (e) {
     if (respondPhysicalCopyError(res, e, { principalId, handler: 'collection-create', req })) return;
+    if (e?.gradeClaimUnavailable === true) {
+      console.log('[grade-claim] verification unavailable -> 503, nothing written (client retries)');
+      return res.status(503).json({ error: 'GRADE_CLAIM_UNAVAILABLE', retryable: true });
+    }
     if (e instanceof ValidationFailedError) {
       return res.status(400).json({ error: e.message });
     }

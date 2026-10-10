@@ -95,7 +95,7 @@ export async function pushCollectionItemDetailed(entry) {
     // GK-261 — _gradeReceiptId is the OPAQUE handle /api/grade returned; it is sent as its
     // own top-level field (never inside attributes) and the server derives the model
     // baseline from its own receipt record. No model/grade authority value is ever sent.
-    const { images, _syncStatus, _pendingEvidenceAppends, _gradeReceiptId, assetCategory, ...attributes } = entry || {};
+    const { images, _syncStatus, _pendingEvidenceAppends, _gradeReceiptId, _gradeProof, _gradeClaimStatus, _gradeClaimCode, assetCategory, ...attributes } = entry || {};
     // U1 — NO DEFAULT CATEGORY. An entry with no explicit supported category is never pushed
     // (it stays pending locally); it is never relabeled 'comic' on its way to the server.
     if (!isSupportedAssetCategory(assetCategory)) return { result: null, decisionRequired: false, candidates: [] };
@@ -108,6 +108,9 @@ export async function pushCollectionItemDetailed(entry) {
         attributes,
         images: Array.isArray(images) && images.length > 0 ? images : undefined,
         gradeReceiptId: typeof _gradeReceiptId === "string" ? _gradeReceiptId : undefined,
+        // GK-280A — signed scan-bound proof (a credential to ASK the server for the association; the server
+        // re-verifies it against its own durable prediction event and decides). Never inside attributes.
+        gradeProof: typeof _gradeProof === "string" ? _gradeProof : undefined,
       }),
     });
     if (res && res.status === 409) {
@@ -118,7 +121,9 @@ export async function pushCollectionItemDetailed(entry) {
       return { result: null, decisionRequired: false, candidates: [] };
     }
     if (!res || !res.ok) return { result: null, decisionRequired: false, candidates: [] };
-    return { result: await res.json().catch(() => null), decisionRequired: false, candidates: [] };
+    const body = await res.json().catch(() => null);
+    // GK-280A — the save and the grade claim are separate facts; surface the claim outcome (never part of attributes).
+    return { result: body, decisionRequired: false, candidates: [], gradeClaim: body && typeof body.gradeClaim === "object" ? body.gradeClaim : null };
   } catch {
     return { result: null, decisionRequired: false, candidates: [] };
   }

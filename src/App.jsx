@@ -42,6 +42,7 @@ import { scopedGet, scopedSet } from "./lib/principalStorage.js";
 import { autoClaimProvableLegacy } from "./lib/legacyLocalClaim.js";
 import { fetchServerCollection, deleteServerCollectionItem, pushCollectionItem } from "./lib/collectionSync.js";
 import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
+import { registerPendingPersist, awaitPendingPersist } from "./lib/pendingPersist.js";
 import { appendPhysicalMediaEvidence, getOrCreateEvidenceIdempotencyKey, retireEvidenceIdempotencyKey, retryPendingPhysicalMediaAppends } from "./lib/physicalMediaAppend.js";
 import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
 import { computeFeeAmount, computeNetProfit, computeMaxBuy, evaluateAgainstMaxBuy } from "./lib/maxBuyCalculator.js";
@@ -12324,6 +12325,8 @@ export default function App() {
       // (collectionSync.js lifts it out of attributes); the server, not this client, mints
       // the durable baseline from it. Absent => the server mints nothing (UNKNOWN).
       _gradeReceiptId: typeof data.gradeReceiptId === "string" ? data.gradeReceiptId : undefined,
+      // GK-280A — signed scan-bound proof; local-only (collectionSync lifts it out of attributes).
+      _gradeProof: typeof data.gradeProof === "string" ? data.gradeProof : undefined,
     };
     try {
       await putComic(entry);
@@ -12348,9 +12351,9 @@ export default function App() {
     // fails the local save: a network failure here leaves the item
     // `_syncStatus: 'pending'` and durably local, picked up again by
     // retryPendingCollectionItems on the next authenticated load.
-    persistCollectionItem(entry).then((final) => {
-      setCatalogue((prev) => prev.map((x) => (x.id === final.id ? { ...x, _syncStatus: final._syncStatus } : x)));
-    }).catch(() => {});
+    registerPendingPersist(entry.id, persistCollectionItem(entry).then((final) => {
+      setCatalogue((prev) => prev.map((x) => (x.id === final.id ? { ...x, _syncStatus: final._syncStatus, _gradeClaimStatus: final._gradeClaimStatus, _gradeClaimCode: final._gradeClaimCode, _gradeProof: final._gradeProof, _gradeReceiptId: final._gradeReceiptId } : x)));
+    }).catch(() => {}));
     return entry.id;
   }, []);
 
@@ -12592,6 +12595,9 @@ export default function App() {
           editionType: data.editionType,
           scanId,
           collectionItemId: savedId, // GK-145 — null when not saved (buyer-mode preview / duplicate not yet confirmed), the item's own id otherwise
+          // GK-280A — the scan's signed proof travels with the enrich request so the server can verify the
+          // prediction statelessly (no dependence on the durable item having been written yet). Log-only today.
+          gradeProof: typeof data.gradeProof === "string" ? data.gradeProof : undefined,
         };
         if (!buyerMode) enrichBody.images = [b64];
         apiFetch("/api/enrich", {
@@ -14032,6 +14038,9 @@ export default function App() {
       console.log(`[Q87] skip — ID_REQUIRED unchanged at identityRevision ${item.identityRevision || 0}: "${item.title}"`);
       return;
     }
+    // GK-280A — a fresh scan's durable push is fire-and-forget; an immediate refresh is an owned-item request
+    // that the server can only verify once that row exists. Bounded wait on THIS item's own push only.
+    await awaitPendingPersist(item.id);
     cardEnrichAbortRef.current?.abort();
     const controller = new AbortController();
     cardEnrichAbortRef.current = controller;
@@ -14528,6 +14537,7 @@ export default function App() {
         gradeConfidence: item.confidence?.toUpperCase(),
         forceRegrade: true, // FIX 2: Bypass grade lock for explicit re-identification
         predictionKind: 'RE_GRADE', // observability label only, never authority
+        targetItemId: item.id, // GK-280A — a re-grade of THIS item: the proof can only be claimed for it
         scanId: reidentifyOwnership.scanId,
       }),
     });
@@ -14636,6 +14646,7 @@ export default function App() {
       title: protectedIdentity.title,
       issue: protectedIdentity.issue,
       grade: gradeData.grade,
+      _gradeProof: typeof gradeData.gradeProof === "string" ? gradeData.gradeProof : item._gradeProof, // GK-280A
       isGraded: gradeData.isGraded,
       numericGrade: gradeData.numericGrade,
       year: protectedIdentity.year,
@@ -14950,6 +14961,7 @@ export default function App() {
       body: JSON.stringify({
         images: nextPhotos,
         predictionKind: 'RE_GRADE', // observability label only, never authority
+        targetItemId: item.id, // GK-280A — a re-grade of THIS item: the proof can only be claimed for it
         // GK-271 — declared capture views, parallel to `images`. Only the
         // operator-supplied role for the photo just added is known; every
         // other entry is null (never inferred from order/count).
@@ -14978,6 +14990,7 @@ export default function App() {
       publisher: data.publisher || item.publisher,
       year: data.year || item.year,
       grade: data.grade || item.grade,
+      _gradeProof: typeof data.gradeProof === "string" ? data.gradeProof : item._gradeProof, // GK-280A
       isGraded: data.isGraded === true,
       numericGrade:
         typeof data.numericGrade === "number"

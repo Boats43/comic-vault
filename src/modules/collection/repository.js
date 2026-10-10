@@ -30,6 +30,7 @@ const PROTECTED_AUTHORITY_KEYS = [
   'modelPredictedGradeAt', 'modelPredictedProvenance',
   'operatorGrade', 'operatorGradeNumeric', 'operatorGradeSetAt', 'gradeAuthority',
   'operatorIsGraded', 'gradingFormatAuthority',
+  'currentGradePrediction', // GK-280A — server-owned pointer to the item's current model_prediction_event
 ];
 
 // GK-260 (Server-Owned Write Authority) — of the ten keys above, these six
@@ -77,6 +78,7 @@ const FULLY_PROTECTED_BASELINE_KEYS = [
   'identityAuthority',
   'modelPredictedGrade', 'modelPredictedGradeReason', 'modelPredictedGradeConfidence', 'modelPredictedAt',
   'modelPredictedGradeAt', 'modelPredictedProvenance',
+  'currentGradePrediction', // GK-280A — only setGradePredictionPointer (server claim) can write it
 ];
 const ALL_FULLY_PROTECTED_KEYS = [...FULLY_PROTECTED_GRADING_KEYS, ...FULLY_PROTECTED_BASELINE_KEYS];
 // GK-278B -- identity VALUE keys protected conditionally (only while their facet is OPERATOR_CONFIRMED).
@@ -318,4 +320,46 @@ export async function getRemoteImageUri(client, id, index) {
   );
   const arr = res.rows[0]?.remote_images;
   return Array.isArray(arr) && typeof arr[index] === 'string' ? arr[index] : null;
+}
+
+// ───────────────────────── GK-280A — grade-prediction association ─────────────────────────
+// One event is bound to at most one item per principal. Serialized by an advisory lock keyed on
+// (principal, event) so two concurrent claims of the same event cannot both pass the check below.
+export async function lockGradeClaim(client, { principalId, eventId }) {
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`gradeclaim:${principalId}:${eventId}`]);
+}
+
+// Item-level serialization for claim-bearing writes (GK-280A amendment). The row lock FOR UPDATE cannot lock a row
+// that does not exist yet, so two concurrent creates of one id — or two re-grade claims of one item with different
+// events — would otherwise interleave. Acquired BEFORE the event lock in every claim transaction (fixed order, no deadlock).
+export async function lockGradeClaimItem(client, { principalId, id }) {
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`gradeclaim-item:${principalId}:${id}`]);
+}
+
+// Any OTHER item of this principal that already references the event — as its current pointer, in a
+// pointer's history, or as a legacy receipt baseline's predictionEventId.
+export async function findOtherItemBoundToEvent(client, { principalId, eventId, excludeId }) {
+  const res = await client.query(
+    `SELECT id FROM data1_dev.collection_item
+      WHERE principal_id = $1 AND id <> $3
+        AND ( attributes->'currentGradePrediction'->>'predictionEventId' = $2
+              OR COALESCE(attributes->'currentGradePrediction'->'history', '[]'::jsonb) ? $2
+              OR attributes->'modelPredictedProvenance'->>'predictionEventId' = $2 )
+      LIMIT 1`,
+    [principalId, eventId, excludeId]
+  );
+  return res.rowCount > 0 ? res.rows[0].id : null;
+}
+
+// The ONLY writer of currentGradePrediction. Called solely from the service's claim transaction.
+export async function setGradePredictionPointer(client, { id, principalId, pointer }) {
+  const res = await client.query(
+    `UPDATE data1_dev.collection_item
+        SET attributes = COALESCE(attributes, '{}'::jsonb) || jsonb_build_object('currentGradePrediction', $3::jsonb),
+            updated_at = now()
+      WHERE principal_id = $1 AND id = $2
+      RETURNING id, asset_category, attributes, created_at, updated_at`,
+    [principalId, id, JSON.stringify(pointer)]
+  );
+  return res.rowCount > 0 ? toRow(res.rows[0]) : null;
 }

@@ -131,7 +131,7 @@ const parseResponse = (text) => {
 // eBay pool's own listing titles correctly caught it (0/12 false positives
 // measured against real comic-pool titles from this same session's logs).
 import { detectBookSignals, classifyTitle } from '../src/lib/categoryClassifier.js';
-import { issueGradeReceipt } from '../src/lib/gradeReceipt.js';
+import { issueGradeReceipt, issueGradeProof } from '../src/lib/gradeReceipt.js';
 import { selectAcceptedPassMeta } from '../src/lib/watchProvenance.js';
 import { observeGradeProvenance, classifyWriteFailure, buildPredictionEvidenceMeta, resolvePredictionKind } from '../src/lib/gradeProvenanceObservability.js';
 import { recordModelPrediction, sha256Hex } from '../src/modules/learning/index.js';
@@ -149,7 +149,7 @@ import { randomUUID } from 'node:crypto';
 // came from the eBay image-search consensus). Written here from the server's own response
 // object only; no client field is read. A failure to write never blocks the scan.
 const attachGradeReceipt = async (result, principalId, ctx = {}) => {
-  const { meta = null, inputHash = null, identityFromModel = false, branch = 'unknown', imageCount = 0, imageViews = null, sentDimensions = null, predictionKind = 'FIRST_GRADE' } = ctx;
+  const { meta = null, inputHash = null, identityFromModel = false, branch = 'unknown', imageCount = 0, imageViews = null, sentDimensions = null, predictionKind = 'FIRST_GRADE', targetItemId = null } = ctx;
   const buildSha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || null;
   const resultId = randomUUID();
   // Model provenance comes ONLY from the call metadata of the model call that produced `result`
@@ -210,9 +210,13 @@ const attachGradeReceipt = async (result, principalId, ctx = {}) => {
   }
   try {
     const receiptId = await issueGradeReceipt({
-      principalId, result, ...provenance, resultId, predictionEventId,
+      principalId, result, ...provenance, resultId, predictionEventId, inputHash, targetItemId,
     });
     if (receiptId) result.gradeReceiptId = receiptId;
+    // GK-280A — scan-bound proof (signed; verified against the durable event at claim time). Only when the
+    // prediction event really exists: no event => no proof => the grade stays UNKNOWN downstream.
+    const gradeProof = issueGradeProof({ principalId, resultId, predictionEventId, inputHash, targetItemId });
+    if (gradeProof) result.gradeProof = gradeProof;
     await observeGradeProvenance({ kind: 'receipt', outcome: receiptId ? 'issued' : 'not_issued', branch, model: provenance.model, buildSha, predictionKind });
   } catch { /* receipt is best-effort; absence == UNKNOWN */ }
   return result;
@@ -904,6 +908,9 @@ export default async function handler(req, res) {
       sentDimensions: imageContent.sentDimensions || null,
       // Observability label only (never authority): clients label a re-grade; otherwise inferred from image count.
       predictionKind: resolvePredictionKind(body.predictionKind, Array.isArray(images) ? images.length : 1),
+      // GK-280A — a re-grade of a KNOWN item names it so the proof can only be claimed for that item. A target
+      // identifier, never authority: the claim still verifies the durable event and ownership.
+      targetItemId: typeof body.targetItemId === 'string' && body.targetItemId.length > 0 && body.targetItemId.length <= 200 ? body.targetItemId : null,
     };
 
     // Watch mode: self-correcting multi-pass pipeline
