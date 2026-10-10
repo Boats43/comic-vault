@@ -182,7 +182,7 @@ Activated by deployment of `653f41848b2cf9ed2bc1d29d781c6aa73d35cbda` (Productio
 - Cost events must never be mixed into FIRST_GRADE or RE_GRADE prediction denominators; cost counters and grade-prediction counters stay distinct (proof: `tests/cost-counter-denominator-isolation.test.js`).
 - Retained limitation: the enrichment verification-lane runtime behavior remains MIRRORED-WIRING-UNVERIFIED.
 
-## Production stored-image census (read-only, 2026-10-10) — NOT a complete historical image or grading-event census
+## Production stored-image census (read-only, 2026-10-10) — HISTORICAL SNAPSHOT taken BEFORE the GK-280A live scan (198 items; production now holds 199) — NOT a complete historical image or grading-event census
 
 Method: one read-only transaction against the verified Production database (`BEGIN READ ONLY`, SELECT-only, counts only, no identifiers/titles/grades). It counts `attributes.remoteImages` — the images the server holds for each collection item (SYNCED images only; a photo that exists only on a device is not counted).
 
