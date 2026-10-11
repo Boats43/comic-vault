@@ -67,6 +67,19 @@ export async function recordModelPrediction({
   }
 }
 
+// GK-281 -- read-only: has the prediction event for THIS (principal, surface, resultId) been durably recorded?
+// Used by the grade-attempt resume path to confirm an event exists without any model call. Returns the event id or null.
+export async function findPredictionEventIdByResult({ principalId, surface = 'GRADE', resultId } = {}) {
+  if (!principalId || typeof resultId !== 'string' || !UUID_RE.test(resultId)) throw new ValidationFailedError('principalId and a uuid resultId are required');
+  const client = await acquireConnection();
+  try {
+    const row = await repo.getPredictionEventByResult(client, { principalId, surface, resultId });
+    return row ? row.id : null;
+  } finally {
+    client.release();
+  }
+}
+
 export async function getModelPredictionEvent({ principalId, id } = {}) {
   if (!principalId || !id) throw new ValidationFailedError('principalId and id are required');
   const client = await acquireConnection();

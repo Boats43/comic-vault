@@ -154,7 +154,12 @@ const PUBLIC_RAW_ALLOWED = ['src/components/ClerkAuthPanel.jsx']; // /api/auth-c
 const unexpected = rawHits.filter((h) => !PUBLIC_RAW_ALLOWED.some((a) => h.startsWith(a)));
 ok(unexpected.length === 0, `no raw authenticated fetch("/api/...") remains (unexpected: ${JSON.stringify(unexpected)})`);
 const app = readFileSync(path.join(repoRoot, 'src', 'App.jsx'), 'utf8');
-ok((app.match(/apiFetch\(\s*["']\/api\//g) || []).length === 27, 'all 27 former raw authenticated sites in App.jsx route through apiFetch');
+// GK-281: four /api/grade sites (gradeBlob, reIdentifyBook, addPhotoToComic, bulk import) now go through the attempt client,
+// which is HANDED apiFetch (runGradeAttempt({ apiFetch, ... }) / postGradeWithAttempt({ apiFetch, ... })). They still route
+// through apiFetch, just not as a literal apiFetch("/api/...") call: 23 direct + 4 via the attempt client = the same 27.
+const directApiFetch = (app.match(/apiFetch\(\s*["']\/api\//g) || []).length;
+const viaAttemptClient = (app.match(/(runGradeAttempt|postGradeWithAttempt)\(\{\s*apiFetch\b/g) || []).length;
+ok(directApiFetch + viaAttemptClient === 27 && viaAttemptClient === 4, `all 27 former raw authenticated sites in App.jsx route through apiFetch (${directApiFetch} direct + ${viaAttemptClient} via the GK-281 attempt client)`);
 ok(/import \{[^}]*\bapiFetch\b[^}]*\} from "\.\/lib\/grailkeySession\.js"/.test(app), 'App.jsx imports apiFetch from the one session module');
 ok(!/fetch\(\s*["']\/api\/(grade|enrich|chat|manage|list-ebay|delist-ebay)/.test(app.replace(/apiFetch\(/g, 'X(')), 'grade/enrich/chat/manage/list/delist never use bare fetch');
 const mc = app.slice(app.indexOf('buildManualCorrectionPayload(item, correctedValues'), app.indexOf('buildManualCorrectionPayload(item, correctedValues') + 1800);

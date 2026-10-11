@@ -11,5 +11,7 @@ export const spendRefusalText = (body, fallback = null) => {
   const code = typeof body?.error === 'string' ? body.error : null;
   const message = typeof body?.message === 'string' && body.message.trim() ? body.message.trim() : null;
   if (code && SPEND_REFUSAL_CODE_RE.test(code) && message) return message;
+  // GK-281: the grade-attempt refusals also carry a plain-language server message; show it, never the raw code.
+  if (code && /^GRADE_ATTEMPT_/.test(code) && message) return message;
   return code || fallback;
 };

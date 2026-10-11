@@ -134,8 +134,13 @@ import { detectBookSignals, classifyTitle } from '../src/lib/categoryClassifier.
 import { issueGradeReceipt, issueGradeProof } from '../src/lib/gradeReceipt.js';
 import { selectAcceptedPassMeta } from '../src/lib/watchProvenance.js';
 import { observeGradeProvenance, classifyWriteFailure, buildPredictionEvidenceMeta, resolvePredictionKind } from '../src/lib/gradeProvenanceObservability.js';
-import { recordModelPrediction, sha256Hex } from '../src/modules/learning/index.js';
+import { recordModelPrediction, sha256Hex, findPredictionEventIdByResult } from '../src/modules/learning/index.js';
 import { randomUUID } from 'node:crypto';
+// GK-281 — ONE LOGICAL SCAN ATTEMPT -> AT MOST ONE PAID GRADING WORKFLOW (src/lib/gradeAttempt.js).
+import {
+  isValidAttemptId, computeAttemptFingerprint, claimAttempt, completeRecovered, attemptEnforcement,
+  deriveResultId, observeAttempt, AttemptStoreUnavailableError, LEGACY_NO_ATTEMPT,
+} from '../src/lib/gradeAttempt.js';
 
 // GK-261 — record what the model ACTUALLY returned under an opaque,
 // principal-bound, short-TTL receipt and hand the client only the handle.
@@ -150,8 +155,10 @@ import { randomUUID } from 'node:crypto';
 // object only; no client field is read. A failure to write never blocks the scan.
 const attachGradeReceipt = async (result, principalId, ctx = {}) => {
   const { meta = null, inputHash = null, identityFromModel = false, branch = 'unknown', imageCount = 0, imageViews = null, sentDimensions = null, predictionKind = 'FIRST_GRADE', targetItemId = null } = ctx;
-  const buildSha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || null;
-  const resultId = randomUUID();
+  // GK-281 — under an attempt the result id is DETERMINISTIC (derived from principal+attemptId) and the build sha is the
+  // one captured when the workflow ran, so a resume re-runs these writes as an idempotent no-op instead of a second event.
+  const buildSha = ctx.buildSha !== undefined ? ctx.buildSha : (process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || null);
+  const resultId = ctx.resultId || randomUUID();
   // Model provenance comes ONLY from the call metadata of the model call that produced `result`
   // (callModel's `meta`): `model` = the REQUESTED id, `modelVersion` (stored as model_version) = the
   // PROVIDER-REPORTED id. No call-site literal is ever accepted as evidence — absent meta => null/UNKNOWN.
@@ -742,9 +749,12 @@ const callModel = async (model, imageContent, promptText) => {
   };
   return { parsed, ms, meta };
 };
+// GK-281 — the handler passes an attempt-tracked wrapper (writes IN_PROGRESS immediately before the first provider
+// call, classifies provider errors); watchPipeline defaults to the raw call for any other caller.
+const callModelUntracked = callModel;
 
 // Self-correcting watch pipeline: Haiku fast → Haiku self-correct → Opus escalation.
-const watchPipeline = async (imageContent, voiceContext) => {
+const watchPipeline = async (imageContent, voiceContext, callModel = callModelUntracked) => {
   const HAIKU = "claude-haiku-4-5-20251001";
   const OPUS = "claude-opus-4-7";
 
@@ -852,6 +862,7 @@ export default async function handler(req, res) {
   };
   mark('handler_entry');
 
+  let attempt = LEGACY_NO_ATTEMPT; // GK-281: replaced by the claimed handle when the request carries a valid attemptId
   try {
     const body = req.body || {};
 
@@ -883,7 +894,96 @@ export default async function handler(req, res) {
     // any paid provider call. Refuses 429/503 with a stable code and fails
     // closed if the quota store is unavailable. Placed after warmup /
     // validation / cache hits so those cost nothing.
-    if (await enforceSpendGuard(res, { principalId: auth.principalId, endpoint: body.source === "watch" ? "grade-watch" : "grade" })) return;
+    //
+    // GK-281 — ATTEMPT CLAIM, BEFORE the spend guard and before any paid call. A completed attempt replays its stored
+    // result with ZERO provider calls and ZERO spend units; an attempt in flight elsewhere answers 409 (the client
+    // waits and retries the same attemptId); an uncertain attempt is NEVER silently re-billed; the same attemptId with a
+    // different input is refused. A request with no attemptId is a counted legacy bypass (enforcement flips to
+    // 'required' by env after rollout) — it is never silently exempt.
+    const workflow = body.source === "watch" ? "watch" : "standard";
+    if (body.attemptId !== undefined && body.attemptId !== null) {
+      if (!isValidAttemptId(body.attemptId)) {
+        res.status(400).json({ error: "GRADE_ATTEMPT_ID_INVALID", message: "attemptId is malformed." });
+        return;
+      }
+      const fingerprint = computeAttemptFingerprint({
+        workflow, images, voiceContext: body.voiceContext,
+        targetItemId: body.targetItemId, predictionKind: body.predictionKind, imageViews: body.imageViews,
+      });
+      let claim;
+      try {
+        claim = await claimAttempt({ principalId: auth.principalId, attemptId: body.attemptId, fingerprint, workflow });
+      } catch (claimErr) {
+        console.error('[grade-attempt] store unavailable — failing closed before any paid call:', claimErr?.message || claimErr);
+        res.status(503).json({ error: "GRADE_ATTEMPT_UNAVAILABLE", message: "Scan accounting is temporarily unavailable — please try again shortly.", retryAfter: 30 });
+        return;
+      }
+      if (claim.kind === 'MISMATCH') {
+        await observeAttempt({ outcome: 'input_mismatch', branch: workflow });
+        res.status(409).json({ error: "GRADE_ATTEMPT_INPUT_MISMATCH", message: "This scan attempt was already used for a different photo or request. Start a new scan." });
+        return;
+      }
+      if (claim.kind === 'EXHAUSTED') {
+        res.status(409).json({ error: "GRADE_ATTEMPT_EXHAUSTED", message: "This scan attempt cannot be retried again. Start a new scan." });
+        return;
+      }
+      if (claim.kind === 'IN_FLIGHT') {
+        await observeAttempt({ outcome: 'in_flight', branch: workflow });
+        res.setHeader('retry-after', String(claim.retryAfterSeconds));
+        res.status(409).json({ error: "GRADE_ATTEMPT_IN_PROGRESS", message: "This scan is already being graded.", retryAfter: claim.retryAfterSeconds });
+        return;
+      }
+      if (claim.kind === 'REPLAY') {
+        await observeAttempt({ outcome: 'replayed', branch: workflow });
+        res.setHeader('x-grade-attempt', 'replay');
+        res.status(200).json(echoScanId({ ...claim.result, attemptReplay: true }, body.scanId));
+        return;
+      }
+      if (claim.kind === 'UNCERTAIN') {
+        const rec = claim.record;
+        if (!claim.hasCheckpoint) {
+          // A provider call may have been billed and nothing durable survives. NEVER re-invoke under this attempt.
+          let durableEventFound = false;
+          try { durableEventFound = !!(await findPredictionEventIdByResult({ principalId: auth.principalId, surface: 'GRADE', resultId: deriveResultId(auth.principalId, body.attemptId) })); } catch { /* unknown */ }
+          await observeAttempt({ outcome: 'uncertain_unrecoverable', branch: workflow });
+          res.status(409).json({
+            error: "GRADE_ATTEMPT_UNCERTAIN",
+            message: "A previous grading attempt for this scan may have been charged, and its result could not be recovered. Starting a new attempt may be billed again.",
+            requiresOperatorAuthorization: true, durableEventFound,
+          });
+          return;
+        }
+        // The finished result was checkpointed before any event was written: finish the (idempotent) durable steps
+        // and replay the original result. No provider call, no spend reservation, no second prediction event.
+        const snap = rec.checkpoint;
+        const resumed = snap.result;
+        await attachGradeReceipt(resumed, auth.principalId, { ...snap.ctx, resultId: deriveResultId(auth.principalId, body.attemptId) });
+        const recovered = ensureAssetType(resumed, snap.assetTypeInitial ?? null);
+        const needsProof = typeof recovered.grade === 'string' && recovered.grade.trim();
+        if (needsProof && !recovered.gradeProof) {
+          res.setHeader('retry-after', '5');
+          res.status(503).json({ error: "GRADE_ATTEMPT_RECOVERY_PENDING", message: "Your scan result is saved; finishing it is temporarily unavailable. Please retry shortly.", retryAfter: 5 });
+          return;
+        }
+        try { await completeRecovered({ record: rec, finalResult: recovered }); } catch (e) { console.error('[grade-attempt] could not record recovered completion (replay still served):', e?.message || e); }
+        await observeAttempt({ outcome: 'recovered', branch: workflow });
+        res.setHeader('x-grade-attempt', 'recovered');
+        res.status(200).json(echoScanId({ ...recovered, attemptReplay: true }, body.scanId));
+        return;
+      }
+      attempt = claim.handle; // OWNER: this request is the one logical workflow for this attempt
+      await observeAttempt({ outcome: 'claimed', branch: workflow });
+    } else if (attemptEnforcement() === 'required') {
+      res.status(400).json({ error: "GRADE_ATTEMPT_REQUIRED", message: "Update the app and try again." });
+      return;
+    } else {
+      // EXPLICIT BYPASS (disclosed): an older client sends no attemptId, so this request has no idempotency protection.
+      await observeAttempt({ outcome: 'legacy_no_attempt', branch: workflow });
+    }
+    if (await enforceSpendGuard(res, { principalId: auth.principalId, endpoint: body.source === "watch" ? "grade-watch" : "grade" })) {
+      await attempt.failBeforeInvocation('SPEND_REFUSED');
+      return;
+    }
     const noImage = !image;
     // GK-278 -- durable input reference for prediction events: a hash of the first image as
     // received, never the bytes.
@@ -896,6 +996,7 @@ export default async function handler(req, res) {
       imageContent = await buildImageContent(images);
     } catch (resizeErr) {
       console.error('[grade] image resize failed:', resizeErr?.message);
+      await attempt.failBeforeInvocation('IMAGE_PROCESSING_FAILED'); // no provider call has begun: safely retryable
       res.status(400).json({
         error: resizeErr?.message || "Image processing failed — please retake photo"
       });
@@ -913,9 +1014,46 @@ export default async function handler(req, res) {
       targetItemId: typeof body.targetItemId === 'string' && body.targetItemId.length > 0 && body.targetItemId.length <= 200 ? body.targetItemId : null,
     };
 
+    // GK-281 — every provider call in this request goes through here: the attempt moves to IN_PROGRESS IMMEDIATELY
+    // BEFORE the first one (a failed write aborts the call), and provider errors are classified so only a DEFINITIVE
+    // rejection with no earlier completed call is treated as unbilled.
+    const callModel = async (model, content, promptText) => {
+      await attempt.beginInvocation();
+      try {
+        const out = await callModelUntracked(model, content, promptText);
+        attempt.noteProviderSuccess();
+        return out;
+      } catch (e) {
+        attempt.noteProviderError(e);
+        throw e;
+      }
+    };
+    const attemptBuildSha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) || process.env.CV_BUILD_ID || null;
+    // GK-281 — checkpoint the finished result BEFORE any durable event is written, then write the events (deterministic
+    // resultId => idempotent), then record COMPLETED only when the proof exists. A failed checkpoint/complete write never
+    // withholds the result the operator already paid for; it only narrows what a later resume can recover (reported).
+    const finalizeResult = async (resultObj, ctx, assetTypeInitial = null) => {
+      const fullCtx = attempt.attempted ? { ...ctx, resultId: attempt.resultId, buildSha: attemptBuildSha } : ctx;
+      if (attempt.attempted) {
+        try { await attempt.checkpoint({ result: resultObj, ctx: fullCtx, assetTypeInitial }); }
+        catch (e) { console.error('[grade-attempt] checkpoint failed — result will be returned but cannot be recovered by a later resume:', e?.message || e); }
+      }
+      await attachGradeReceipt(resultObj, auth.principalId, fullCtx);
+      const out = ensureAssetType(resultObj, assetTypeInitial);
+      if (attempt.attempted) {
+        const needsProof = typeof out.grade === 'string' && out.grade.trim();
+        if (!needsProof || out.gradeProof) {
+          try { await attempt.complete(out); } catch (e) { console.error('[grade-attempt] could not record COMPLETED (result served; a retry will resume from the checkpoint):', e?.message || e); }
+        } else {
+          console.error('[grade-attempt] prediction proof unavailable — attempt left resumable (no COMPLETED), no paid call is needed to finish it');
+        }
+      }
+      return out;
+    };
+
     // Watch mode: self-correcting multi-pass pipeline
     if (body.source === "watch") {
-      const watchRun = await watchPipeline(imageContent, body.voiceContext);
+      const watchRun = await watchPipeline(imageContent, body.voiceContext, callModel);
       const { result, passes, timings } = watchRun;
       // Provenance association is verified, not assumed: metadata must be the accepted pass's own recorded call
       // metadata (src/lib/watchProvenance.js); otherwise the grade is recorded UNKNOWN. Never throws, scan unchanged.
@@ -925,10 +1063,10 @@ export default async function handler(req, res) {
       applyConditionGuard(result, Array.isArray(images) ? images.length : (image ? 1 : 0), body.imageViews);
       if (noImage) result.noImage = true;
       // watchMeta is the call metadata of the pass whose output IS `result` (accepted pass), not of any other pass.
-      await attachGradeReceipt(result, auth.principalId, { meta: watchMeta ?? null, inputHash, branch: 'WATCH', ...evidenceCtx });
+      const watchOut = await finalizeResult(result, { meta: watchMeta ?? null, inputHash, branch: 'WATCH', ...evidenceCtx });
       res.setHeader("x-watch-passes", String(passes));
       res.setHeader("x-watch-timing", JSON.stringify(timings));
-      res.status(200).json(echoScanId(ensureAssetType(result), body.scanId));
+      res.status(200).json(echoScanId(watchOut, body.scanId));
       return;
     }
 
@@ -998,9 +1136,9 @@ export default async function handler(req, res) {
       if (noImage) result.noImage = true;
 
       console.log('[grade] eBay-first path succeeded');
-      await attachGradeReceipt(result, auth.principalId, { meta: gradeMeta, inputHash, identityFromModel: false, branch: 'HAIKU_EBAY_CONSENSUS', ...evidenceCtx });
+      const ebayOut = await finalizeResult(result, { meta: gradeMeta, inputHash, identityFromModel: false, branch: 'HAIKU_EBAY_CONSENSUS', ...evidenceCtx });
       mark('response_sent');
-      res.status(200).json(echoScanId(ensureAssetType(result), body.scanId));
+      res.status(200).json(echoScanId(ebayOut, body.scanId));
       return;
     }
 
@@ -1082,10 +1220,17 @@ export default async function handler(req, res) {
     applyNewsstandFallback(finalParsed);
     finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 
-    await attachGradeReceipt(finalParsed, auth.principalId, { meta: finalMeta, inputHash, identityFromModel: true, branch: isBook ? 'SONNET_BOOK' : 'SONNET_VISION_FALLBACK', ...evidenceCtx });
+    const fallbackOut = await finalizeResult(finalParsed, { meta: finalMeta, inputHash, identityFromModel: true, branch: isBook ? 'SONNET_BOOK' : 'SONNET_VISION_FALLBACK', ...evidenceCtx }, initialScan);
     mark('response_sent');
-    res.status(200).json(echoScanId(ensureAssetType(finalParsed, initialScan), body.scanId));
+    res.status(200).json(echoScanId(fallbackOut, body.scanId));
   } catch (err) {
+    // GK-281 — record what actually happened to the attempt (never throws): unbilled -> retryable, otherwise UNCERTAIN.
+    try { await attempt.failFromError(err); } catch { /* marker is best effort */ }
+    if (err instanceof AttemptStoreUnavailableError) {
+      console.error('[grade-attempt] store unavailable mid-request — failing closed:', err?.message || err);
+      res.status(503).json({ error: "GRADE_ATTEMPT_UNAVAILABLE", message: "Scan accounting is temporarily unavailable — please try again shortly.", retryAfter: 30 });
+      return;
+    }
     console.error('[FATAL /api/grade]', err?.message || err);
     console.error('[FATAL STACK]', err?.stack || 'no stack trace');
     res.status(500).json({ error: err?.message || "Server error" });

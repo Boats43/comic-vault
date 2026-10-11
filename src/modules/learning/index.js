@@ -8,6 +8,7 @@
 export {
   recordModelPrediction,
   getModelPredictionEvent,
+  findPredictionEventIdByResult,
   appendOperatorCorrectionEventTx,
   listOperatorCorrectionEvents,
   canonicalJson,

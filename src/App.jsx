@@ -29,6 +29,10 @@ import { getPricingSourceLabel, getPriceBandsSourceLabel } from "./lib/sourceLab
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
 import { spendRefusalText } from "./lib/spendRefusalMessage.js";
+// GK-281 — ONE LOGICAL SCAN ATTEMPT -> AT MOST ONE PAID GRADING WORKFLOW (client half; the server is authoritative).
+import { runGradeAttempt, postGradeWithAttempt, KINDS as GRADE_ATTEMPT_KINDS, markConsumed as markGradeAttemptConsumed, beginBulkImport, alignBulkManifest, renewBulkAttempt, markBulkFile, singleFlight as gradeSingleFlight, fileFingerprint, mintAttemptId, ATTEMPT_STATUS as GRADE_ATTEMPT_STATUS } from "./lib/gradeAttemptClient.js";
+// Rapid double submission / duplicate change events for the SAME file: the second is ignored while the first runs.
+const gradeBlobFlights = new Set();
 import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction, detectIdentityConflict } from "./lib/dataQualityGuard.js";
 import { resolveGoverningGrade, resolveGoverningGradingFormat, validateOperatorGrade, pickGradingAuthorityFields } from "./lib/gradeAuthority.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
@@ -11087,7 +11091,8 @@ function WatchMode({ onStop }) {
             const res = await apiFetch("/api/grade", {
               method: "POST",
               headers: { "Content-Type": "application/json", ...getVaultHeaders() },
-              body: JSON.stringify({ images: [b64], source: 'watch', voiceContext: watchContextRef.current || undefined }),
+              // GK-281 — each Watch frame is its own attempt (up to 3 provider passes belong to it); never persisted/reused.
+              body: JSON.stringify({ images: [b64], source: 'watch', voiceContext: watchContextRef.current || undefined, attemptId: mintAttemptId() }),
             });
             const data = await res.json();
             if (!res.ok || !data.title) return;
@@ -12359,6 +12364,14 @@ export default function App() {
 
   const gradeBlob = useCallback(
     async (blob, { save = false, buyerMode = false } = {}) => {
+      // GK-281 — single-flight: the SAME file submitted again while its scan is still running (rapid double tap,
+      // duplicate input `change`, remount race) is ignored; the first scan owns the attempt. Released in `finally`.
+      const gradeFlightKey = `${fileFingerprint(blob)}|${buyerMode ? "b" : "s"}`;
+      if (gradeBlobFlights.has(gradeFlightKey)) {
+        console.log("[grade] duplicate submission of the same file ignored (GK-281 single-flight)");
+        return;
+      }
+      gradeBlobFlights.add(gradeFlightKey);
       // Slice 7 — mint this scan's ownership identity BEFORE any request
       // fires, so both the /api/grade and /api/enrich responses can be
       // checked against it later regardless of which resolves first
@@ -12398,12 +12411,12 @@ export default function App() {
         const gradeBody = buyerMode
           ? { images: [b64], source: 'watch', scanId }
           : { images: [b64], scanId };
-        const res = await apiFetch("/api/grade", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getVaultHeaders() },
-          body: JSON.stringify(gradeBody),
-        });
-        const data = await res.json();
+        // GK-281 — the grade request runs under a persisted ATTEMPT (src/lib/gradeAttemptClient.js): a lost response,
+        // a navigation, or a repeat pick of the same photo resumes the SAME attempt and the server replays its stored
+        // result — no second paid workflow. `res` keeps the shape the code below already reads (ok / status).
+        const gradeOut = await runGradeAttempt({ apiFetch, headers: getVaultHeaders(), body: gradeBody, kind: GRADE_ATTEMPT_KINDS.SCAN });
+        const res = gradeOut;
+        const data = gradeOut.data || {};
 
         // Handle 401 unauthorized — session missing/invalid/expired.
         if (res.status === 401) {
@@ -12551,6 +12564,7 @@ export default function App() {
         );
         setLoading(false);
         const savedId = (save && !isDuplicate) ? await addToCatalogue({ ...data, issue: issueNum }, b64, scanPrincipal) : null;
+        if (savedId) markGradeAttemptConsumed(gradeOut.digest, gradeOut.attemptId); // GK-281: a saved attempt is finished; the next pick of this photo is a NEW attempt
         // GrailKey Directive V, Task 2 (GK-88) — the item now exists;
         // mutate the SAME ownership object already stored in
         // activeScanRef.current (not a new one) so the enrich-stage
@@ -13028,6 +13042,8 @@ export default function App() {
       } catch (err) {
         setError(err.message);
         setLoading(false);
+      } finally {
+        gradeBlobFlights.delete(gradeFlightKey); // GK-281: release the single-flight slot on every exit path
       }
     },
     [addToCatalogue, catalogue]
@@ -13092,6 +13108,13 @@ export default function App() {
     setBulkEnrichProgress(null);
     let added = 0;
     const errors = [];
+    // GK-281 — ONE attempt per FILE (never per batch). An UNFINISHED batch with the same file set resumes with its
+    // ORIGINAL per-file attemptIds (the server replays completed ones: no new paid calls); a finished batch, or a
+    // different file set, is a new import with new attemptIds. Matching bytes alone never make an import "the same".
+    const bulkManifest = beginBulkImport({ files: files.map((f) => ({ fp: fileFingerprint(f) })) });
+    const bulkSlots = alignBulkManifest(files, bulkManifest.files);
+    const bulkImportId = bulkManifest.importId;
+    const settleBulkSlot = (slot) => markBulkFile({ importId: bulkImportId, fp: slot.fp, attemptId: slot.attemptId, status: GRADE_ATTEMPT_STATUS.CONSUMED });
     let enrichTotal = 0;
     let enrichDone = 0;
     const bumpEnrichFired = () => {
@@ -13136,17 +13159,37 @@ export default function App() {
     // Worker function: process one file (compress → grade → save → fire enrich)
     const processFile = async (file, index) => {
       console.log('[bulk] processing file:', file.name);
+      let bulkSlot = bulkSlots[index];
       try {
+        // GK-281: a RESUMED batch never re-processes a file it already finished (saved, held, or skipped as not-a-comic).
+        if (bulkManifest.resumed && bulkSlot.status === GRADE_ATTEMPT_STATUS.CONSUMED) {
+          completed++;
+          setBulkProgress({ current: completed, total: files.length, title: file.name });
+          console.log('[bulk] resumed import: already finished, not re-graded:', file.name);
+          return;
+        }
         // P0 HOTFIX: restore b64 definition (deleted in dc2e164)
         const rawB64 = await fileToBase64(file);
         const b64 = await makeThumbnail(rawB64, 1200, 0.85);
 
-        const res = await apiFetch("/api/grade", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...getVaultHeaders() },
-          body: JSON.stringify({ images: [b64] }),
+        const postBulkGrade = () => gradeSingleFlight(bulkSlot.attemptId, async () => {
+          const r = await postGradeWithAttempt({ apiFetch, headers: getVaultHeaders(), body: { images: [b64] }, attemptId: bulkSlot.attemptId });
+          let d = null;
+          try { d = await r.json(); } catch { d = null; }
+          return { ok: r.ok, status: r.status, data: d };
         });
-        const data = await res.json();
+        let res = await postBulkGrade();
+        if (res.data?.error === 'GRADE_ATTEMPT_UNCERTAIN') {
+          // A prior call for THIS file may already have been charged and is unrecoverable. Never silently re-bill: a new
+          // attempt needs an explicit operator OK; declining leaves the file un-imported and the batch unfinished.
+          const approved = typeof window !== 'undefined' && typeof window.confirm === 'function' &&
+            window.confirm(`"${file.name}": a previous grading attempt may already have been charged and its result could not be recovered. Start a NEW attempt? It may be billed again.`);
+          if (approved) {
+            const renewed = renewBulkAttempt({ importId: bulkImportId, fp: bulkSlot.fp, oldAttemptId: bulkSlot.attemptId });
+            if (renewed) { bulkSlot = { ...bulkSlot, attemptId: renewed, status: GRADE_ATTEMPT_STATUS.SUBMITTED }; res = await postBulkGrade(); }
+          }
+        }
+        const data = res.data || {};
 
         // P0 HOTFIX: increment progress on ALL paths (error/skip/duplicate/success)
         completed++;
@@ -13174,6 +13217,7 @@ export default function App() {
             (!data.publisher && !data.year && !data.issue && data.assetTypeConfident !== true)) {
           console.warn('[bulk] not a comic, skipping:', file.name);
           errors.push(`${file.name}: not a comic`);
+          settleBulkSlot(bulkSlot); // GK-281: a finished outcome — a resumed batch must not pay to grade it again
           return;
         }
 
@@ -13204,6 +13248,7 @@ export default function App() {
         const dup = classifyBulkDuplicate({ catalogue, title: data.title, issue: bulkIssue, year: data.year, dupKey, inFlightKeys });
         if (dup) {
           await holdForReview(file, data, bulkIssue, b64, dup);
+          settleBulkSlot(bulkSlot); // GK-281: held for copy review is a finished outcome for this attempt
           return;
         }
 
@@ -13215,6 +13260,7 @@ export default function App() {
           const savedId = await addToCatalogue({ ...data, issue: bulkIssue }, b64, bulkPrincipal);
           if (savedId) {
             added++;
+            settleBulkSlot(bulkSlot); // GK-281: saved — this attempt is finished
             console.log('[bulk] added to catalogue:', data.title, bulkIssue);
           } else {
             console.warn('[bulk] addToCatalogue returned null for', file.name);
@@ -14522,10 +14568,13 @@ export default function App() {
 
     // Step 1: Re-grade with stored image
     // FIX 2: Force regrade bypasses grade lock (user explicitly requested re-identification)
-    const gradeRes = await apiFetch("/api/grade", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...getVaultHeaders() },
-      body: JSON.stringify({
+    // GK-281 — a DELIBERATE re-grade: runs under its own attempt (never replays an earlier RECEIVED result), but a
+    // SUBMITTED attempt whose response was lost is resumed so that possibly-billed call is not paid for twice.
+    const gradeRes = await runGradeAttempt({
+      apiFetch,
+      headers: getVaultHeaders(),
+      kind: GRADE_ATTEMPT_KINDS.REGRADE,
+      body: {
         images: [b64],
         existingGrade: {
           grade: item.grade,
@@ -14539,10 +14588,10 @@ export default function App() {
         predictionKind: 'RE_GRADE', // observability label only, never authority
         targetItemId: item.id, // GK-280A — a re-grade of THIS item: the proof can only be claimed for it
         scanId: reidentifyOwnership.scanId,
-      }),
+      },
     });
-    if (!gradeRes.ok) { const gradeErrBody = await gradeRes.json().catch(() => ({})); throw new Error(spendRefusalText(gradeErrBody, "Failed to re-grade book")); }
-    const gradeData = await gradeRes.json();
+    if (!gradeRes.ok) { throw new Error(spendRefusalText(gradeRes.data || {}, "Failed to re-grade book")); }
+    const gradeData = gradeRes.data;
     if (!gradeData.title) throw new Error("Vision returned no title");
 
     // Step 2: Re-enrich with new identity + stored image
@@ -14955,10 +15004,12 @@ export default function App() {
     // the first model prediction stays preserved write-once via
     // modelPredictedGrade*, and each call writes its own model_prediction_event.
     // The material-new-evidence cost rule is HELD (docs/GRADING-CAMPAIGN.md).
-    const res = await apiFetch("/api/grade", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...getVaultHeaders() },
-      body: JSON.stringify({
+    // GK-281 — adding a photo is a DELIBERATE re-grade under its own attempt (see reIdentifyBook).
+    const res = await runGradeAttempt({
+      apiFetch,
+      headers: getVaultHeaders(),
+      kind: GRADE_ATTEMPT_KINDS.REGRADE,
+      body: {
         images: nextPhotos,
         predictionKind: 'RE_GRADE', // observability label only, never authority
         targetItemId: item.id, // GK-280A — a re-grade of THIS item: the proof can only be claimed for it
@@ -14977,9 +15028,9 @@ export default function App() {
         },
         gradeConfidence: item.confidence?.toUpperCase(),
         scanId: addPhotoOwnership.scanId,
-      }),
+      },
     });
-    const data = await res.json();
+    const data = res.data || {};
     if (!res.ok) throw new Error(spendRefusalText(data, "Failed to re-analyze"));
 
     const photoIssue = data.issue || data.title?.match(/#(\d+)/)?.[1] || item.issue || null;
