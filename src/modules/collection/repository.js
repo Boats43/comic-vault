@@ -301,25 +301,27 @@ export async function deleteItem(client, principalId, id) {
   return res.rowCount > 0;
 }
 
-// GRAILKEY — COLLECTION IMAGE SYNC (2026-09-19). Deliberately NOT
-// principal-scoped, unlike every other lookup in this file — used only
-// by api/collection-image.js's display-image proxy, which authenticates
-// by "server-side registration in a real collection_item row" rather
-// than by caller identity (see that endpoint's own header for the full
-// rationale: an id is a client-generated `cv_<timestamp>_<random>`
-// value, not a secret, and this is the same "unguessable key, no
-// further access control" trust model 'public' Blob access would have
-// given directly, now routed through this proxy because the real
-// Production Blob store turned out to be private-only). Returns ONLY
-// the one string at attributes.remoteImages[index] — nothing else about
-// the item, and never the raw `attributes` object.
-export async function getRemoteImageUri(client, id, index) {
+// GK-L1B (2026-10-11) — PRINCIPAL-SCOPED collection display-image lookups. The former unscoped
+// getRemoteImageUri(id) (`WHERE id = $1 LIMIT 1`, unauthenticated, ids are only unique PER PRINCIPAL) is
+// DELETED, not deprecated: nothing in the codebase can ask "give me item X's image" without naming the
+// principal that owns it. Both lookups below bind principal_id AND id.
+export async function getRemoteImageUriForPrincipal(client, principalId, id, index) {
   const res = await client.query(
-    `SELECT attributes->'remoteImages' AS remote_images FROM data1_dev.collection_item WHERE id = $1 LIMIT 1`,
-    [id]
+    `SELECT attributes->'remoteImages' AS remote_images FROM data1_dev.collection_item WHERE principal_id = $1 AND id = $2`,
+    [principalId, id]
   );
   const arr = res.rows[0]?.remote_images;
   return Array.isArray(arr) && typeof arr[index] === 'string' ? arr[index] : null;
+}
+
+// How many displayable remote images each of THIS principal's items has — counts only, never a URI.
+export async function getRemoteImageCountsForPrincipal(client, principalId, ids) {
+  const res = await client.query(
+    `SELECT id, CASE WHEN jsonb_typeof(attributes->'remoteImages') = 'array' THEN jsonb_array_length(attributes->'remoteImages') ELSE 0 END AS n
+       FROM data1_dev.collection_item WHERE principal_id = $1 AND id = ANY($2::text[])`,
+    [principalId, ids]
+  );
+  return res.rows.map((x) => ({ id: x.id, count: Number(x.n) || 0 }));
 }
 
 // ───────────────────────── GK-280A — grade-prediction association ─────────────────────────

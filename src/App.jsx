@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
   getAllComics,
   putComic,
@@ -42,6 +42,7 @@ import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNER
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
 import { isAuthenticated, clearSession, getSession, authFetch, apiFetch, getPrincipalScope } from "./lib/grailkeySession.js";
+import { getProtectedImageUrl, subscribeProtectedImages, installImageRecovery } from "./lib/protectedImages.js";
 import { scopedGet, scopedSet } from "./lib/principalStorage.js";
 import { autoClaimProvableLegacy } from "./lib/legacyLocalClaim.js";
 import { fetchServerCollection, deleteServerCollectionItem, pushCollectionItem } from "./lib/collectionSync.js";
@@ -918,12 +919,10 @@ const makeThumbnail = (dataUrl, maxDim = 1000, quality = 0.85) =>
 // Production store is provisioned private-only — see
 // api/collection.js's own header) — a plain <img src> pointed straight
 // at one would 401/403. This never reads `comic.remoteImages`' string
-// CONTENTS at all; it only reads its LENGTH, and builds a same-origin
-// proxy path per index (`/api/collection-image?id=...&index=n`) that
-// api/collection-image.js resolves server-side against the item's real
-// stored remoteImages[index] independently. A plain <img src> can load
-// a same-origin path with no auth header needed, so no other rendering
-// code changes.
+// CONTENTS at all; it only reads its LENGTH. GK-L1B (2026-10-11): it resolves each index to a SHORT-LIVED SIGNED
+// link minted by an authenticated call (src/lib/protectedImages.js -> api/collection-image-v2.js, principal_id AND id).
+// The old id-only proxy path (api/collection-image) was unauthenticated and is retired (410). The function stays
+// synchronous: a link that has not arrived yet yields no entry and a re-render fills it in.
 const getComicPhotos = (comic) => {
   if (!comic) return [];
   if (Array.isArray(comic.images) && comic.images.length > 0) {
@@ -931,7 +930,9 @@ const getComicPhotos = (comic) => {
   }
   if (comic.image) return [comic.image];
   if (Array.isArray(comic.remoteImages) && comic.remoteImages.length > 0 && comic.id) {
-    return comic.remoteImages.map((_, i) => `/api/collection-image?id=${encodeURIComponent(comic.id)}&index=${i}`);
+    // GK-L1B: short-lived SIGNED links minted by an authenticated call (src/lib/protectedImages.js). Synchronous by
+    // contract: a link not yet minted yields no entry now and a re-render fills it in when it arrives.
+    return comic.remoteImages.map((_, i) => getProtectedImageUrl(comic.id, i)).filter(Boolean);
   }
   return [];
 };
@@ -11478,6 +11479,14 @@ export default function App() {
   // GrailKey operator auth (Outcome #1) — reuses the existing DATA-1D
   // backend auth contract exactly.
   const [grailkeyAuthed, setGrailkeyAuthed] = useState(() => isAuthenticated());
+  // GK-L1B: signed collection-image links arrive asynchronously (getComicPhotos stays synchronous); re-render when
+  // a batch lands, and install the expired-link recovery / lifecycle hooks once.
+  const [, bumpProtectedImages] = useReducer((n) => n + 1, 0);
+  useEffect(() => {
+    const unsubscribe = subscribeProtectedImages(bumpProtectedImages);
+    const uninstall = installImageRecovery();
+    return () => { unsubscribe(); uninstall(); };
+  }, []);
   // GK-268 AUTH LAUNCH — the single centralized stale-session listener.
   // grailkeySession.js's clearSession() (called by authFetch on any 401,
   // and by every pre-existing scattered 401/ownedAssetAuthRequired handler

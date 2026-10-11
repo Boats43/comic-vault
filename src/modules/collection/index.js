@@ -10,7 +10,8 @@ export {
   createCollectionItem,
   updateCollectionItem,
   deleteCollectionItem,
-  getRemoteImageUri,
+  getRemoteImageUriForPrincipal, // GK-L1B - api/collection-image-v2.js only; principal_id AND id
+  getRemoteImageCountsForPrincipal, // GK-L1B - api/collection-image-v2.js mint path; counts only
   saveCollectionItemWithGradeClaim, // GK-280A — api/collection.js only, with a VERIFIED proof/receipt; save + association in one transaction
   claimModelBaseline, // GK-261 — api/collection.js only, with a server-claimed receipt
   applyIdentityAuthorityPatch, // GK-261 — api/enrich.js only, after a validated manual correction

@@ -309,14 +309,24 @@ export async function deleteCollectionItem({ principalId, id } = {}) {
   }
 }
 
-// GRAILKEY — COLLECTION IMAGE SYNC (2026-09-19). See
-// repository.js's getRemoteImageUri for the deliberate no-principal-scope
-// rationale. Used only by api/collection-image.js.
-export async function getRemoteImageUri({ id, index = 0 } = {}) {
-  requireFields({ id }, ['id']);
+// GK-L1B (2026-10-11) — principal-scoped display-image lookups (see repository.js). The former unscoped
+// getRemoteImageUri({id}) no longer exists.
+export async function getRemoteImageUriForPrincipal({ principalId, id, index = 0 } = {}) {
+  requireFields({ principalId, id }, ['principalId', 'id']);
   const client = await acquireConnection();
   try {
-    return await repo.getRemoteImageUri(client, id, index);
+    return await repo.getRemoteImageUriForPrincipal(client, principalId, id, index);
+  } finally {
+    client.release();
+  }
+}
+
+export async function getRemoteImageCountsForPrincipal({ principalId, ids } = {}) {
+  requireFields({ principalId }, ['principalId']);
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+  const client = await acquireConnection();
+  try {
+    return await repo.getRemoteImageCountsForPrincipal(client, principalId, ids);
   } finally {
     client.release();
   }
