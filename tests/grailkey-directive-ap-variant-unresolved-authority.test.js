@@ -42,6 +42,7 @@
 //
 // Invoke: node tests/grailkey-directive-ap-variant-unresolved-authority.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { reconcileVariantFacet } from '../src/lib/identityCore.js';
 import { deriveMarketStanding, deriveIdentityStanding, deriveActionAuthority } from '../src/lib/actionAuthority.js';
 import { deriveLocks } from '../src/lib/responseContract.js';

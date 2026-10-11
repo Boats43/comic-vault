@@ -9,6 +9,7 @@
 // What this does NOT prove: live Production behavior. The pointer is written but is NOT yet a governing
 // economic input (that is GK-280B); item 14 proves exactly that — outputs are unchanged.
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';

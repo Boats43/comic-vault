@@ -30,6 +30,7 @@
 //
 // Invoke: node tests/q-batman222-cv-zero-score.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { lookupComicVine } from '../api/enrich.js';
 import { readFileSync } from 'fs';
 import path from 'path';

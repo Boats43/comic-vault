@@ -2,6 +2,7 @@
 // Real handler invocation with an injected provider stub, in-memory guard
 // store and item loader. No network, no database, no real model spend.
 // Run: node tests/gk273-research-market.test.js
+import './helpers/spendGuardTestSetup.js';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 

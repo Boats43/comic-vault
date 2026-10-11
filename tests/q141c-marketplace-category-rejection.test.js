@@ -51,6 +51,7 @@
 //
 // Invoke: node tests/q141c-marketplace-category-rejection.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { classifyVisualMarketRow, filterByCategory, filterVisualIdentityPool } from '../src/lib/categoryClassifier.js';
 import { resolveFamilyIssueConsensus, projectCanonicalTitleFromAnchor } from '../src/lib/identityCore.js';
 import { extractIdentityFromImageSearch, extractConsensus } from '../src/lib/imageSearchIdentity.js';

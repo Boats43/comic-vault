@@ -12,6 +12,7 @@
 //
 // Invoke: node tests/grailkey-dispatch-47-gk39a-remove-fabricated-confidence.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

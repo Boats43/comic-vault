@@ -50,6 +50,7 @@
 // Invoke: node tests/grailkey-dispatch-27-fix27a-covertype-consensus.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { extractConfirmedVariant, tallyCoverTypeConsensus, evaluateCoverTypeConsensusPromotion } from '../src/lib/variantIdentity.js';
 import { extractVariantTokensByAxis } from '../src/lib/compHygiene.js';

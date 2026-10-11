@@ -13,6 +13,7 @@
 // src/lib/assetConfirmationBadge.js's getAssetConfirmationBadge(item), wired
 // into App.jsx's render site in place of the old ternary.
 
+import './helpers/spendGuardTestSetup.js';
 import { getAssetConfirmationBadge } from '../src/lib/assetConfirmationBadge.js';
 
 const tests = [];

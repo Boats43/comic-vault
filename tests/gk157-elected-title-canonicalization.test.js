@@ -37,6 +37,7 @@
 //
 // Invoke: node tests/gk157-elected-title-canonicalization.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { resolveIdentity, sanitizeSeriesTitle, canonicalizeTitleCandidate } from '../src/lib/identityCore.js';
 
 let passed = 0;

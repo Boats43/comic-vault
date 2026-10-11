@@ -4,6 +4,7 @@
 // (real byte-faithful eBay pool). No network, no database, no paid call.
 //   node tests/enrich-verification-cost-observability.test.js
 
+import './helpers/spendGuardTestSetup.js';
 delete process.env.ACCESS_CODE;
 if (!process.env.GRAILKEY_SESSION_SECRET) {
   process.env.GRAILKEY_SESSION_SECRET = (await import('node:crypto')).randomBytes(32).toString('base64url');

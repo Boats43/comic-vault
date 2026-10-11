@@ -43,6 +43,7 @@
 //
 // Invoke: node tests/q129-variant-comps-excluded-by-era.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { hasNamedVariantDescriptor, detectVariantCompsExcludedByEra, COMP_FILTER_VERSION } from '../src/lib/compHygiene.js';
 import { computeDecision, describeWarning } from '../src/lib/decisionEngine.js';
 

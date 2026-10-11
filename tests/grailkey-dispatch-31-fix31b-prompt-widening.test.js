@@ -44,6 +44,7 @@
 // Invoke: node tests/grailkey-dispatch-31-fix31b-prompt-widening.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 
 let passed = 0;

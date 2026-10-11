@@ -23,6 +23,7 @@
 // ACCESS_CODE deliberately left unset — checkAccessGate (api/enrich.js)
 // returns null (gate disabled) when the env var isn't set, so no
 // x-vault-key header is needed.
+import './helpers/spendGuardTestSetup.js';
 delete process.env.ACCESS_CODE; // GK-269: now a no-op -- the gate never reads this env var anymore, left in place as a harmless historical marker
 // GK-269 (2026-09-30, FINAL AUTH CLOSURE) -- api/enrich.js now requires a
 // verified GrailKey session unconditionally (src/lib/accessGate.js's

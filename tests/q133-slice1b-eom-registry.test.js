@@ -44,6 +44,7 @@
 //
 // Invoke: node tests/q133-slice1b-eom-registry.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   buildTitleFamilies, scoreTitleFamilies, selectTitleFamilyCandidate,
   tokenizeTitleFamily, extractPoolArtistTokens, applyDualAxisGate,

@@ -82,6 +82,7 @@
 //
 // Invoke: node tests/grailkey-directive-aq-canonical-facet-authority.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { resolveIdentity } from '../src/lib/identityCore.js';
 import { extractIdentityFromImageSearch, buildTitleFamilies, scoreTitleFamilies, mergeFragmentedTitleFamilies, selectTitleFamilyCandidate } from '../src/lib/imageSearchIdentity.js';
 import { projectIssueAuthority, deriveIssueAuthorityFromAdoption } from '../src/lib/issueAuthority.js';

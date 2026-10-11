@@ -40,6 +40,7 @@
 //
 // Invoke: node tests/perf-kv-dedup-and-oauth-cache.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { getOAuthToken } from '../api/comps.js';
 
 let passed = 0;

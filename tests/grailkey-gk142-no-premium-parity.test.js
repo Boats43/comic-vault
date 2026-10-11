@@ -26,6 +26,7 @@
 //
 // Invoke: node tests/grailkey-gk142-no-premium-parity.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';

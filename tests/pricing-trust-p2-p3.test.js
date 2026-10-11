@@ -23,6 +23,7 @@
 //
 // Invoke: node tests/pricing-trust-p2-p3.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { isMegaKeyIdentityCorroborated, getMegaKeyEntry, getMegaKeyFloor } from '../api/mega-keys.js';
 import { isCorroboratedIdentitySource } from '../src/lib/identityCore.js';

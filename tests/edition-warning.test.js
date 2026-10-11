@@ -10,6 +10,7 @@
 // Invoke: node tests/edition-warning.test.js
 // Exit: 0 all-pass, 1 any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { detectEditionWarning } from '../api/grade.js';
 
 let passed = 0;

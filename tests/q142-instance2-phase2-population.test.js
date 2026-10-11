@@ -40,6 +40,7 @@
 //
 // Invoke: node tests/q142-instance2-phase2-population.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { checkAssemblyIntegrity } from '../src/lib/identityCore.js';
 
 let passed = 0;

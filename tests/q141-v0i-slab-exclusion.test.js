@@ -49,6 +49,7 @@
 //
 // Invoke: node tests/q141-v0i-slab-exclusion.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   buildSanitizedComicSearchTitle,
   applyRawGradedSeparationFilter,

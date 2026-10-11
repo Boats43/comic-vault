@@ -44,6 +44,7 @@
 //
 // Invoke: node tests/grailkey-directive-ar-evidence-authority.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { applyDualAxisGate, selectTitleFamilyCandidate } from '../src/lib/imageSearchIdentity.js';
 import { reconcileVariantFacet } from '../src/lib/identityCore.js';
 import { deriveMarketStanding, deriveIdentityStanding, deriveActionAuthority } from '../src/lib/actionAuthority.js';

@@ -13,6 +13,7 @@
 // These are pure-function helpers extracted for testability. The actual
 // production code is inline in api/enrich.js, but we test the logic here.
 
+import './helpers/spendGuardTestSetup.js';
 const tokenize = (s, COMMON_TOKENS) =>
   String(s || '').toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')

@@ -29,6 +29,7 @@
 // Invoke: node tests/grailkey-directive-al-anchor-variant-authority.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import fs from 'fs';
 import { selectBestVariantCandidate, variantTokenOverlapScore, resolveYear } from '../src/lib/identityCore.js';
 import { applyEraConsistencyFilter } from '../api/comps.js';

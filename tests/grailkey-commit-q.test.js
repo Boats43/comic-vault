@@ -43,6 +43,7 @@
 //
 // Invoke: node tests/grailkey-commit-q.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { computeIssueAuthorityContractPatch } from '../src/lib/issueAuthority.js';
 import { parsePriceNumber } from '../src/lib/responseContract.js';
 import { TPB_MARKER_RE, IDENTITY_TPB_MARKER_RE, hasIssueNumber } from '../src/lib/compHygiene.js';

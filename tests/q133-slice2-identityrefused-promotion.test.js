@@ -27,6 +27,7 @@
 //
 // Invoke: node tests/q133-slice2-identityrefused-promotion.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { selectTitleFamilyCandidate } from '../src/lib/imageSearchIdentity.js';
 import { pcMatchConflictsWithPoolName } from '../src/lib/variantIdentity.js';
 import { computeDecision } from '../src/lib/decisionEngine.js';

@@ -33,6 +33,7 @@
 //
 // Invoke: node tests/q132-fix3-artist-conflict-surfacing.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   extractConditionReportArtistMention,
   detectConditionReportArtistConflict,

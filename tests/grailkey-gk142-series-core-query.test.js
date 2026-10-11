@@ -8,6 +8,7 @@
 //
 // Invoke: node tests/grailkey-gk142-series-core-query.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { deriveSeriesCoreQuery } from '../src/lib/identityCore.js';
 
 let passed = 0;

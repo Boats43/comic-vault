@@ -9,6 +9,7 @@
 // invisible to it: separated by the `kind` segment, by the `outcome` segment, and by a predictionKind segment that
 // is neither FIRST_GRADE nor RE_GRADE.
 
+import './helpers/spendGuardTestSetup.js';
 process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'test-anthropic-key';
 process.env.EBAY_APP_ID = process.env.EBAY_APP_ID || 'test-app-id';
 process.env.EBAY_CERT_ID = process.env.EBAY_CERT_ID || 'test-cert-id';

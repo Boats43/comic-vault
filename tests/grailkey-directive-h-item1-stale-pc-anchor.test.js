@@ -24,6 +24,7 @@
 // pcAnchorTrust was already clear-listed (Commit E1, 2026-07-29, before
 // Directive G Task 2 existed); pcAnchorYear -- new in Task 2 -- was not.
 
+import './helpers/spendGuardTestSetup.js';
 import { buildCorrectedCatalogueItem } from '../src/lib/manualCorrection.js';
 
 const tests = [];

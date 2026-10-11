@@ -89,6 +89,7 @@
 //
 // Invoke: node tests/q-trackB-commit4.3-winning-family-authority.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { resolveIdentity, resolveFamilyIssueConsensus, resolveFamilyYearConsensus, decideFieldAuthority, isPriorSourceIndependentlyTrusted, buildStandardVisionAuthorityContext } from '../src/lib/identityCore.js';
 import {
   buildTitleFamilies, scoreTitleFamilies, mergeFragmentedTitleFamilies,

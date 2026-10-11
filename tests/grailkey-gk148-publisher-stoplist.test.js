@@ -38,6 +38,7 @@
 //
 // Invoke: node tests/grailkey-gk148-publisher-stoplist.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   matchCreatorCanonicals,
   extractCreatorsFromComps,

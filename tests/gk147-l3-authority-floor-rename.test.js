@@ -25,6 +25,7 @@
 //
 // Invoke: node tests/gk147-l3-authority-floor-rename.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { computeThinPoolAnchor, computeLowGradeFloor } from '../src/lib/pricingEngine.js';
 

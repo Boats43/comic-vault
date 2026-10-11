@@ -14,6 +14,7 @@
 // Invoke: node tests/sanity-thresholds.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { computeSanityFallback } from '../api/enrich.js';
 
 let passed = 0;

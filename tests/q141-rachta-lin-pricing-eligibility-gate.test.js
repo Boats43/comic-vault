@@ -43,6 +43,7 @@
 //
 // Invoke: node tests/q141-rachta-lin-pricing-eligibility-gate.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';

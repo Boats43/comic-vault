@@ -8,6 +8,7 @@
 // Optional negative control (proves the hole was real before the fix):
 //   GK271_ENRICH_PATH=../api/enrich-head.js node tests/gk271-enrich-handler-smoke.test.js
 
+import './helpers/spendGuardTestSetup.js';
 delete process.env.KV_REST_API_URL;
 delete process.env.KV_REST_API_TOKEN;
 delete process.env.UPSTASH_REDIS_REST_URL;

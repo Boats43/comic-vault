@@ -60,6 +60,7 @@
 //
 // Invoke: node tests/grailkey-dispatch-25-fix2c-axis-check.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { resolveIdentity } from '../src/lib/identityCore.js';
 import { extractIdentityFromImageSearch, buildTitleFamilies, scoreTitleFamilies, mergeFragmentedTitleFamilies, selectTitleFamilyCandidate } from '../src/lib/imageSearchIdentity.js';
 import { familyDominatesRunnerUp } from '../src/lib/compHygiene.js';

@@ -7,6 +7,7 @@
 //
 //   node tests/gk281-browser-lifecycle.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';

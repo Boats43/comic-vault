@@ -20,6 +20,7 @@
 //
 // Invoke: node tests/tier-source-map-completeness.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { PRICE_BANDS_SOURCES, TIER_SOURCE_MAP } from '../src/lib/priceBands.js';
 
 let passed = 0;

@@ -12,6 +12,7 @@
 //
 // Invoke: node tests/q-strangeTales-containment.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   classifyEvidenceRow, buildEvidencePopulations, classifyYearEvidence, assessPhotoAuthority,
   buildPricingEligibleRows, isPricingMathEligible, PRICING_GATE_CODES,

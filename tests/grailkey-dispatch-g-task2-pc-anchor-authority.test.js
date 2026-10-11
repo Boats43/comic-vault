@@ -47,6 +47,7 @@
 // before this dispatch -- it is not evidence about what the old render
 // conditions did with data present.
 
+import './helpers/spendGuardTestSetup.js';
 import { assessPcAnchorTrust } from '../src/lib/evidenceEligibility.js';
 import { isPcAnchorExact, pcEditionCaveat } from '../src/lib/pcAnchorAuthority.js';
 

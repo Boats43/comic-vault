@@ -37,6 +37,7 @@
 // Invoke: node tests/grailkey-commit-m-pc-query-fallback.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 process.env.PRICECHARTING_TOKEN = process.env.PRICECHARTING_TOKEN || 'test-token';
 const { lookupPriceCharting } = await import('../api/enrich.js');
 

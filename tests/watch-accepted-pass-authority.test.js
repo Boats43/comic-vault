@@ -7,6 +7,7 @@
 //         last attempted pass. They exist so a future selection strategy cannot silently mis-attribute.
 // Part B: the real api/grade.js WATCH handler reports acceptedPassIndex == attempted calls, with matching receipts.
 
+import './helpers/spendGuardTestSetup.js';
 process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'test-anthropic-key';
 process.env.EBAY_APP_ID = process.env.EBAY_APP_ID || 'test-app-id';
 process.env.EBAY_CERT_ID = process.env.EBAY_CERT_ID || 'test-cert-id';

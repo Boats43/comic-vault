@@ -26,6 +26,7 @@
 //
 // Invoke: node tests/q139-godds-acronym-tokenizer.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { normalizeAcronyms, extractAcronymTokens, tokenizeTitle } from '../src/lib/compHygiene.js';
 import { tokenizeTitleFamily } from '../src/lib/imageSearchIdentity.js';
 import { pcMatchConflictsWithPoolName, pcMatchConflictsWithPoolYear } from '../src/lib/variantIdentity.js';

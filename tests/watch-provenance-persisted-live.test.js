@@ -8,6 +8,7 @@
 // fixture principal are RETAINED (never deleted); every assertion is scoped to this run's own principal/result ids.
 //   node tests/watch-provenance-persisted-live.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';

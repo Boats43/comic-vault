@@ -42,6 +42,7 @@
 //
 // Invoke: node tests/grailkey-directive-at-year-evidence.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { reconcileYear, createEvidenceSet, addEvidence } from '../src/lib/identityReconciler.js';
 import { deriveMarketStanding, deriveActionAuthority, deriveIdentityStanding } from '../src/lib/actionAuthority.js';
 import { deriveLocks } from '../src/lib/responseContract.js';

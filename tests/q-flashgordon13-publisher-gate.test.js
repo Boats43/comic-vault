@@ -18,6 +18,7 @@
 //
 // Invoke: node tests/q-flashgordon13-publisher-gate.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { isPublisherYearPlausible } from '../api/mega-keys.js';
 import { backfillPublisherFromTitles } from '../src/lib/identityCore.js';
 

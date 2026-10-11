@@ -26,6 +26,7 @@
 //
 // Invoke: node tests/q121-cv-pool-year-hint.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { lookupComicVine } from '../api/enrich.js';
 import { readFileSync } from 'fs';
 import path from 'path';

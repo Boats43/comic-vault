@@ -19,6 +19,7 @@
 //
 // Invoke: node tests/production-fixture-bank-replay.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { buildFixture, isKnownAnswerFixture, classifyEraBucket, FIXTURE_SCHEMA_VERSION } from '../src/lib/fixtureShape.js';
 import { verifySoldComps } from '../src/lib/soldVerification.js';

@@ -29,6 +29,7 @@
 //
 // Invoke: node tests/q137-slice-a3-vision-low-confidence-corroborated.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { computeDecision, describeWarning } from '../src/lib/decisionEngine.js';
 
 let passed = 0;

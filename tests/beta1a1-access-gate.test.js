@@ -21,6 +21,7 @@
 //
 // Invoke: node tests/beta1a1-access-gate.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { existsSync } from 'node:fs';

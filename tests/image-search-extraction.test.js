@@ -12,6 +12,7 @@
 // Invoke: node tests/image-search-extraction.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import {
   extractVariantTokens,
   extractIssueFromTitle,

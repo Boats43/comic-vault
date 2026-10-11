@@ -34,6 +34,7 @@
 //
 // Invoke: node tests/gk152-handler-smoke.test.js
 
+import './helpers/spendGuardTestSetup.js';
 delete process.env.ACCESS_CODE; // GK-269: now a no-op -- the gate never reads this env var anymore, left in place as a harmless historical marker
 // GK-269 (2026-09-30, FINAL AUTH CLOSURE) -- api/enrich.js now requires a
 // verified GrailKey session unconditionally (src/lib/accessGate.js's

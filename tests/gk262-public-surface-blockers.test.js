@@ -24,6 +24,7 @@
 //
 // Invoke: node tests/gk262-public-surface-blockers.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';

@@ -48,6 +48,7 @@
 //
 // Invoke: node tests/grailkey-directive-r-early-return-variant.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

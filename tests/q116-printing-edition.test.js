@@ -31,6 +31,7 @@
 //
 // Invoke: node tests/q116-printing-edition.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { detectEditionWarning, classifySpecificPrinting } from '../api/grade.js';
 import { extractVariantTokens, classifyVariantTokens } from '../src/lib/imageSearchIdentity.js';
 import { applyVariantPreferenceFilter } from '../api/comps.js';

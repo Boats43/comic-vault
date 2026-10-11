@@ -59,6 +59,7 @@
 // Invoke: node tests/grailkey-dispatch-26-fix4-zero-support-rescue.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { resolveIdentity } from '../src/lib/identityCore.js';
 import { evaluateTitleTextIndependence, escalateIssueAuthorityOnConflict, computeIssueAuthorityContractPatch } from '../src/lib/issueAuthority.js';

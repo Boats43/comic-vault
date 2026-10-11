@@ -28,6 +28,7 @@
 //
 // Invoke: node tests/merge-site-parity.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { mergeConfirmedIdentity, applyProvisionalIdentity } from '../src/lib/dataQualityGuard.js';
 
 let passed = 0;

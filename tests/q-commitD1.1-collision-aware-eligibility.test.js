@@ -11,6 +11,7 @@
 //
 // Invoke: node tests/q-commitD1.1-collision-aware-eligibility.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { classifyEvidenceRow, buildEvidencePopulations, assessCollisionRisk, isPricingMathEligible, PRICING_GATE_CODES } from '../src/lib/evidenceEligibility.js';
 
 let passed = 0;

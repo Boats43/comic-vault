@@ -10,6 +10,7 @@
 //
 // Invoke: node tests/grailkey-dispatch-50-gk67-display-truth.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

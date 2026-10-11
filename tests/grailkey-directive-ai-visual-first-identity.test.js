@@ -27,6 +27,7 @@
 //
 // Invoke: node tests/grailkey-directive-ai-visual-first-identity.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   isEligibleVisualRow,
   selectFirstEligibleVisual,

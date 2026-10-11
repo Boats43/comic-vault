@@ -46,17 +46,22 @@
 // with none, nobody is protected, so a pooled limit would throttle the real operator
 // (everyone is "ordinary"); the pre-L1A behaviour is kept in that case.
 //
-// GK-L1A (v3 amendment) - MISSING CONFIGURATION MUST NEVER SILENTLY DISABLE A SPEND INVARIANT. The paragraph above
-// described a fail-OPEN: with no operator configured, the aggregate ceiling simply vanished. In any REAL runtime (the
-// same boundary the store invariant uses: not a tests/*.test.js harness process) a spend-consuming request is now
-// REFUSED with SPEND_GUARD_MISCONFIGURED (503, nothing charged, no counter touched) when SPEND_GUARD_OPERATOR_PRINCIPAL_IDS
-// is absent, empty, malformed (any entry is not a UUID), or unrecognized (it names no real operator-kind principal).
+// GK-L1A (v3/v4 amendment) - MISSING CONFIGURATION MUST NEVER SILENTLY DISABLE A SPEND INVARIANT, IN ANY ENVIRONMENT.
+// A spend-consuming request is REFUSED with SPEND_GUARD_MISCONFIGURED (503, nothing charged, no counter touched) when
+// SPEND_GUARD_OPERATOR_PRINCIPAL_IDS is absent, empty, malformed (any entry is not a UUID), or unrecognized (it names no
+// real operator-kind principal). There is NO runtime exception for tests, for a tests/*.test.js argv, or for any
+// environment: production code contains no test sniffing at all. Tests supply their own valid configuration through
+// tests/helpers/spendGuardTestSetup.js (an explicit env value + the two explicit injection seams below).
 // Only spend-consuming calls are affected: authentication, Collection reads and the public pages never reach the guard.
-// "Unrecognized" is verified against the principal table with a cached lookup; if that lookup itself cannot be made
-// (database outage) the guard proceeds, because the aggregate ceiling still applies and a verification outage must not
-// take paid features down - it is logged. Pinned by tests/launch1a-nonoperator-spend-ceiling.test.js.
+//
+// OPERATOR CLASSIFICATION is purely: (the principal id taken from the VERIFIED session token by the handler) is a member
+// of the configured set. No request field can grant it. An operator request performs NO database lookup. "Unrecognized"
+// configuration (well-formed ids that name no operator principal) is detected by a cached principal-table lookup that
+// runs only for ORDINARY principals; if that lookup cannot be made (database outage) the request proceeds - the aggregate
+// ceiling still applies and a validation outage must not take paid features down - and the outage is logged and cached
+// briefly so a down database is not hammered.
 
-import { researchStore, hasResearchStoreOverride, createMemoryResearchStore, ResearchStoreUnavailableError } from './researchStore.js';
+import { researchStore, ResearchStoreUnavailableError } from './researchStore.js';
 
 export const SPEND_UNITS = Object.freeze({
   grade: 3,
@@ -107,55 +112,13 @@ export function resolveSpendConfig(env = process.env) {
     globalDaily: intEnv(env, 'SPEND_GUARD_GLOBAL_DAILY_UNITS', SPEND_DEFAULTS.GLOBAL_DAILY_UNITS),
     nonOperatorDaily: intEnv(env, 'SPEND_GUARD_NONOPERATOR_DAILY_UNITS', SPEND_DEFAULTS.NONOPERATOR_DAILY_UNITS),
     operatorPrincipalIds: new Set(ops),
-    // true in every real runtime; false only in a tests/*.test.js harness process (see isTestHarnessProcess)
-    requireOperatorConfig: !isTestHarnessProcess(process.argv[1], env),
   };
 }
 
-// TEST-HARNESS STORE (disclosed, narrow). ~190 pre-existing test files invoke
-// the guarded handlers directly with no Upstash configured; a fail-closed guard
-// would make every one of them 503. In a process that is literally a
-// `tests/*.test.js` script, and never on Vercel (VERCEL set) nor with
-// NODE_ENV=production, the guard uses a process-local in-memory store with the
-// identical contract. In every other process — i.e. every real deployment —
-// the durable Upstash store is the only store and its absence FAILS CLOSED.
-//
-// U1 BOUNDARY HARDENING (2026-10-05) — PERMANENT INVARIANT: PRODUCTION MUST
-// HAVE NO PATH THAT SILENTLY DISABLES DURABLE SPEND AUTHORITY. The fallback
-// engages ONLY when ALL are true: (1) process.argv[1] is a
-// `tests/<name>.test.js` script; (2) NO hosted-runtime marker is present —
-// any real Vercel/Lambda runtime variable (explicit list below); (3) NODE_ENV !== 'production'; (4)
-// GRAILKEY_CATALOG_ENVIRONMENT !== 'production'. Any marker REFUSES the
-// fallback (the durable Upstash store, or a fail-closed 503, is then the only
-// outcome). Pinned by tests/spend-guard-env-boundary.test.js.
-const HARNESS_ARGV = /[\\/]tests[\\/][^\\/]+\.test\.js$/;
-// EXPLICIT list of real hosted-runtime variables (not a `VERCEL*` prefix: dev
-// machines carry `VERCEL_OIDC_TOKEN` from `vercel env pull` and the Claude Code
-// Vercel plugin injects `VERCEL_PLUGIN_*`, neither of which is a runtime
-// marker). `VERCEL=1` is set by the hosted runtime on every invocation and is
-// by itself sufficient; the rest are belt-and-braces.
-const HOSTED_RUNTIME_EXACT = new Set([
-  'VERCEL', 'VERCEL_ENV', 'VERCEL_URL', 'VERCEL_REGION', 'VERCEL_DEPLOYMENT_ID', 'VERCEL_TARGET_ENV',
-  'VERCEL_BRANCH_URL', 'VERCEL_PROJECT_PRODUCTION_URL', 'NOW_REGION', 'AWS_EXECUTION_ENV',
-]);
-const HOSTED_RUNTIME_PREFIX = /^(VERCEL_GIT_|AWS_LAMBDA_|LAMBDA_)/;
-let harnessStore = null;
-export function hostedRuntimeMarkers(env = process.env) {
-  const hits = Object.keys(env).filter((k) => (HOSTED_RUNTIME_EXACT.has(k) || HOSTED_RUNTIME_PREFIX.test(k)) && env[k] !== undefined && env[k] !== '');
-  if (env.NODE_ENV === 'production') hits.push('NODE_ENV=production');
-  if (env.GRAILKEY_CATALOG_ENVIRONMENT === 'production') hits.push('GRAILKEY_CATALOG_ENVIRONMENT=production');
-  return hits;
-}
-export function isTestHarnessProcess(argv1 = process.argv[1], env = process.env) {
-  if (hostedRuntimeMarkers(env).length > 0) return false; // refuse on ANY marker
-  return HARNESS_ARGV.test(String(argv1 || ''));
-}
-export function defaultSpendStore(argv1 = process.argv[1], env = process.env) {
-  if (hasResearchStoreOverride()) return researchStore(); // explicit test injection always wins
-  if (isTestHarnessProcess(argv1, env)) {
-    harnessStore = harnessStore || createMemoryResearchStore();
-    return harnessStore;
-  }
+// STORE: the durable Upstash store (src/lib/researchStore.js) is the ONLY store; its absence FAILS CLOSED (503). A test that
+// needs a store injects one explicitly with setResearchStoreForTests(); production code never inspects argv or the
+// environment to decide that a spend counter may live in process memory.
+export function defaultSpendStore() {
   return researchStore();
 }
 
@@ -181,7 +144,7 @@ export async function reserveSpend({ principalId, endpoint, store, now = new Dat
 
   const cfg = config || resolveSpendConfig();
   // GK-L1A (v3): a real runtime with missing/invalid operator classification REFUSES (nothing charged, no counter touched).
-  const gate = await checkOperatorConfig(cfg, { operatorRecognizer });
+  const gate = await checkOperatorConfig(cfg, { principalId, operatorRecognizer });
   if (!gate.ok) return misconfigured(gate.reason);
   const st = store || defaultSpendStore();
   const pKey = principalDayKey(principalId, now);
@@ -265,19 +228,22 @@ const OPERATOR_UNRECOGNIZED_TTL_MS = 60 * 1000;
 let recognitionCache = { key: null, until: 0, ok: false };
 export const resetOperatorRecognitionCache = () => { recognitionCache = { key: null, until: 0, ok: false }; lastMisconfigLog = 0; };
 
-// Default recognizer: lazily imports the auth module so a harness process (which never reaches it) loads no database code.
+// Default recognizer: lazily imports the auth module so a process that never reaches it loads no database code.
 async function defaultOperatorRecognizer(id) {
   const { isOperatorPrincipal } = await import('../modules/auth/index.js');
   return isOperatorPrincipal({ principalId: id });
 }
+let recognizerOverride = null;
+/** Explicit TEST seam (like setResearchStoreForTests): replaces the principal-table lookup. Pass null to restore. */
+export const setOperatorRecognizerForTests = (fn) => { recognizerOverride = typeof fn === 'function' ? fn : null; resetOperatorRecognitionCache(); };
+
+const OUTAGE_TTL_MS = 30 * 1000;
 
 /**
  * @returns {Promise<{ok:true} | {ok:false, reason:'absent'|'empty'|'malformed'|'unrecognized'}>}
- * Never throws. Applies only when cfg.requireOperatorConfig (every real runtime).
+ * Never throws. Always applies (no environment or test exception).
  */
-export async function checkOperatorConfig(cfg, { operatorRecognizer } = {}) {
-  const required = cfg?.requireOperatorConfig ?? !isTestHarnessProcess();
-  if (!required) return { ok: true };
+export async function checkOperatorConfig(cfg, { principalId, operatorRecognizer } = {}) {
   const status = cfg?.operatorConfigStatus ?? (cfg?.operatorPrincipalIds?.size ? 'ok' : 'absent');
   const fail = (reason) => {
     const now = Date.now();
@@ -285,18 +251,19 @@ export async function checkOperatorConfig(cfg, { operatorRecognizer } = {}) {
     return { ok: false, reason };
   };
   if (status !== 'ok') return fail(status);
+  // An authenticated principal that IS in the configured set proves the configuration names a real principal: no lookup.
+  if (principalId && cfg.operatorPrincipalIds.has(principalId)) return { ok: true };
   const ids = [...cfg.operatorPrincipalIds];
   const key = ids.slice().sort().join(',');
   const now = Date.now();
   if (recognitionCache.key === key && now < recognitionCache.until) return recognitionCache.ok ? { ok: true } : fail('unrecognized');
-  const recognize = operatorRecognizer || defaultOperatorRecognizer;
+  const recognize = operatorRecognizer || recognizerOverride || defaultOperatorRecognizer;
   let any = false;
   try {
     for (const id of ids) { if (await recognize(id)) { any = true; break; } }
   } catch (e) {
-    // The principal table could not be consulted. The aggregate ceiling still applies, so do not take paid features down
-    // for a verification outage - but say so.
     console.error('[spend-guard] operator recognition unavailable (database) - proceeding; aggregate ceiling still enforced:', e?.message || e);
+    recognitionCache = { key, ok: true, until: now + OUTAGE_TTL_MS }; // do not hammer a database that is down
     return { ok: true };
   }
   recognitionCache = { key, ok: any, until: now + (any ? OPERATOR_RECOGNITION_TTL_MS : OPERATOR_UNRECOGNIZED_TTL_MS) };

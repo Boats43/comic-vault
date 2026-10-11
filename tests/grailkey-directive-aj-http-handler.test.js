@@ -28,6 +28,7 @@
 //
 // Invoke: node tests/grailkey-directive-aj-http-handler.test.js
 
+import './helpers/spendGuardTestSetup.js';
 process.env.EBAY_APP_ID = 'test-app-id';
 process.env.EBAY_CERT_ID = 'test-cert-id';
 

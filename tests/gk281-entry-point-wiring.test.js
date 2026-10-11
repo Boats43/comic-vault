@@ -4,6 +4,7 @@
 //
 //   node tests/gk281-entry-point-wiring.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

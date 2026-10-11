@@ -17,6 +17,7 @@
 //
 // Invoke: node tests/pricing-trust-commit-c.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { isMegaKeyEntryCurrentlyVerified } from '../api/mega-keys.js';
 

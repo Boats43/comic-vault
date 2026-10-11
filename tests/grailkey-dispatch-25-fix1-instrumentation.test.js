@@ -49,6 +49,7 @@
 // accordingly; this header is retained for history, not as a current
 // description of the gate's behavior.
 
+import './helpers/spendGuardTestSetup.js';
 import { classifyEvidenceRow, buildPricingEligibleRows, PRICING_GATE_CODES } from '../src/lib/evidenceEligibility.js';
 
 let passed = 0;

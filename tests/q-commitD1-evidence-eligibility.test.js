@@ -9,6 +9,7 @@
 //
 // Invoke: node tests/q-commitD1-evidence-eligibility.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { classifyEvidenceRow, buildEvidencePopulations, INCOMPLETE_COPY_RE, RESTORED_TITLE_RE } from '../src/lib/evidenceEligibility.js';
 import { verifySoldComps } from '../src/lib/soldVerification.js';
 

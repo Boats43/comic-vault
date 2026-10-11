@@ -35,6 +35,7 @@
 // Invoke: node tests/grailkey-outcome1-grading-calibration-patch.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { applyFirstModelPrediction } from '../src/lib/dataQualityGuard.js';
 

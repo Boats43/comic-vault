@@ -42,6 +42,7 @@
 //
 // Invoke: node tests/gk260-server-owned-grade-authority.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';

@@ -28,6 +28,7 @@
 //
 // Invoke: node tests/q133-two-axis-pc-anchor-gate.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { pcMatchConflictsWithPoolName, pcMatchConflictsWithPoolYear } from '../src/lib/variantIdentity.js';
 
 let passed = 0;

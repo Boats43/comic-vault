@@ -20,6 +20,7 @@
 //
 // Invoke: node tests/q-trackB-commit3-manual-correction.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   MANUAL_CORRECTION_ALLOWED_FIELDS,
   validateManualAuthority,

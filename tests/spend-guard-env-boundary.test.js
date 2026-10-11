@@ -1,8 +1,11 @@
 // tests/spend-guard-env-boundary.test.js
 //
-// UNIVERSAL U1, 0A — the spend guard's test-harness fallback must be
-// UNREACHABLE from any hosted/production runtime. Permanent invariant:
-// PRODUCTION MUST HAVE NO PATH THAT SILENTLY DISABLES DURABLE SPEND AUTHORITY.
+// UNIVERSAL U1 0A, rewritten for GK-L1A v4 -- THE SPEND GUARD HAS NO TEST EXCEPTION AND NO ENVIRONMENT EXCEPTION.
+// Permanent invariant: PRODUCTION (AND EVERY OTHER ENVIRONMENT) MUST HAVE NO PATH THAT SILENTLY DISABLES DURABLE SPEND AUTHORITY.
+//
+// This process IS a tests/*.test.js script. Under the old design that unlocked an in-memory store and exempted operator
+// configuration. It now unlocks nothing: with no explicit injection the guard FAILS CLOSED here exactly as it does on
+// Vercel, and an absent/empty/malformed/unrecognized operator configuration is refused in every environment.
 //
 // Invoke: node tests/spend-guard-env-boundary.test.js
 
@@ -22,63 +25,66 @@ const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const guard = await import('../src/lib/spendGuard.js');
 const rs = await import('../src/lib/researchStore.js');
 
-const TEST_ARGV = path.join(repoRoot, 'tests', 'anything.test.js');
-const REAL_ARGVS = ['/var/task/api/chat.js', '/var/task/___vc/__launcher/launcher.js', '/var/task/node_modules/@vercel/node/dist/launcher.js', 'C:\\app\\server.js', ''];
+const quiet = async (fn) => { const e = console.error; console.error = () => {}; try { return await fn(); } finally { console.error = e; } };
+const OPERATOR = '95b42d2e-a1d8-47de-904e-798122731b08';
+const recognizer = async () => true;
 
-console.log('1. baseline: a bare tests/*.test.js process with no markers engages the harness store');
-ok(guard.isTestHarnessProcess(TEST_ARGV, {}) === true, 'plain test process, empty env -> harness store allowed');
-ok(guard.defaultSpendStore(TEST_ARGV, {}) !== rs.researchStore(), 'and it is the in-memory store (not the durable one)');
-
-console.log('\n2. EVERY hosted/production marker, individually, refuses the in-memory fallback');
-const MARKERS = {
-  VERCEL: '1', VERCEL_ENV: 'production', VERCEL_URL: 'x.vercel.app', VERCEL_REGION: 'iad1',
-  VERCEL_DEPLOYMENT_ID: 'dpl_x', VERCEL_GIT_COMMIT_SHA: 'abc', VERCEL_PROJECT_PRODUCTION_URL: 'x',
-  AWS_LAMBDA_FUNCTION_NAME: 'fn', AWS_LAMBDA_RUNTIME_API: '127.0.0.1:9001', AWS_LAMBDA_FUNCTION_VERSION: '$LATEST',
-  LAMBDA_TASK_ROOT: '/var/task', LAMBDA_RUNTIME_DIR: '/var/runtime', AWS_EXECUTION_ENV: 'AWS_Lambda_nodejs22.x',
-  NOW_REGION: 'iad1', NODE_ENV: 'production', GRAILKEY_CATALOG_ENVIRONMENT: 'production',
-};
-for (const [k, v] of Object.entries(MARKERS)) {
-  const env = { [k]: v };
-  ok(guard.isTestHarnessProcess(TEST_ARGV, env) === false, `${k}=${v} -> fallback REFUSED even for a tests/*.test.js argv`);
-  ok(guard.defaultSpendStore(TEST_ARGV, env) === rs.researchStore(), `${k} -> the store returned is the durable (Upstash) store, never memory`);
-}
-ok(guard.isTestHarnessProcess(TEST_ARGV, { VERCEL: '' }) === true, 'an EMPTY marker value is not a marker (no false refusal of a clean test shell)');
-ok(guard.isTestHarnessProcess(TEST_ARGV, { SOME_OTHER_VERCEL_LIKE: '1', NOT_VERCEL: '1' }) === true, 'unrelated names containing the word do not trip it');
-ok(guard.isTestHarnessProcess(TEST_ARGV, { GRAILKEY_CATALOG_ENVIRONMENT: 'development', NODE_ENV: 'test' }) === true, 'a development test environment still works');
-ok(guard.isTestHarnessProcess(TEST_ARGV, { VERCEL_PLUGIN_SETUP_MODE: '1', VERCEL_PLUGIN_BOOTSTRAP_HINTS: 'x' }) === true, 'VERCEL_PLUGIN_* (Claude Code Vercel plugin, dev-machine noise) is not a hosted-runtime marker');
-ok(guard.isTestHarnessProcess(TEST_ARGV, { VERCEL_OIDC_TOKEN: 'local-dev-token-from-env-pull' }) === true, 'VERCEL_OIDC_TOKEN alone (a `vercel env pull` dev-machine artifact) is not a hosted-runtime marker');
-ok(guard.isTestHarnessProcess(TEST_ARGV, { VERCEL_OIDC_TOKEN: 'x', VERCEL: '1', VERCEL_ENV: 'production', VERCEL_REGION: 'iad1', AWS_LAMBDA_FUNCTION_NAME: 'f', LAMBDA_TASK_ROOT: '/var/task' }) === false, 'a realistic full hosted-runtime environment (OIDC token included) is refused');
-
-console.log('\n3. a real function entry point can never match, with or without markers');
-for (const argv of REAL_ARGVS) {
-  ok(guard.isTestHarnessProcess(argv, {}) === false, `argv[1]=${JSON.stringify(argv)} -> not a harness process`);
-  ok(guard.isTestHarnessProcess(argv, { VERCEL: '1' }) === false, `argv[1]=${JSON.stringify(argv)} + VERCEL -> not a harness process`);
-}
-
-console.log('\n4. end to end: with a hosted marker and NO KV configured, reservation FAILS CLOSED (503), never in-memory');
+console.log('1. the test-sniffing predicates and the in-memory fallback no longer exist');
 {
-  const saved = {};
-  for (const k of ['VERCEL', 'KV_REST_API_URL', 'KV_REST_API_TOKEN', 'SPEND_GUARD_OPERATOR_PRINCIPAL_IDS']) { saved[k] = process.env[k]; }
-  delete process.env.KV_REST_API_URL; delete process.env.KV_REST_API_TOKEN;
-  process.env.VERCEL = '1';
-  // GK-L1A (v3): a hosted runtime now also REQUIRES valid operator classification before any reservation; this block
-  // isolates the STORE invariant, so it supplies a valid operator id (recognition stubbed - no database here).
-  process.env.SPEND_GUARD_OPERATOR_PRINCIPAL_IDS = '95b42d2e-a1d8-47de-904e-798122731b08';
-  rs.setResearchStoreForTests(null); // no injected store: the real selection path
-  const errs = console.error; console.error = () => {};
-  const recognizer = async () => true;
-  const r = await guard.reserveSpend({ principalId: 'prod-like-user', endpoint: 'chat', operatorRecognizer: recognizer });
-  console.error = errs;
-  ok(r.ok === false && r.status === 503 && r.code === 'SPEND_GUARD_UNAVAILABLE', 'VERCEL set + no durable store -> 503 SPEND_GUARD_UNAVAILABLE (fail closed)');
-  const r2 = await guard.reserveSpend({ principalId: 'prod-like-user', endpoint: 'chat', operatorRecognizer: recognizer });
-  ok(r2.ok === false, 'and it keeps failing closed (nothing was silently counted in memory)');
-  delete process.env.SPEND_GUARD_OPERATOR_PRINCIPAL_IDS;
-  const r3 = await guard.reserveSpend({ principalId: 'prod-like-user', endpoint: 'chat' });
-  ok(r3.ok === false && r3.code === 'SPEND_GUARD_MISCONFIGURED', 'hosted + NO operator configuration -> SPEND_GUARD_MISCONFIGURED (refused before any store is touched)');
-  for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  ok(typeof guard.isTestHarnessProcess === 'undefined', 'isTestHarnessProcess is gone');
+  ok(typeof guard.hostedRuntimeMarkers === 'undefined', 'hostedRuntimeMarkers is gone');
+  ok(guard.defaultSpendStore() === rs.researchStore(), 'defaultSpendStore() is ALWAYS the durable store (or an explicit injection) - never a process-local one');
+  const src = readFileSync(path.join(repoRoot, 'src/lib/spendGuard.js'), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  ok(!/process\.argv|\.test\.js|harness|NODE_ENV|VERCEL|AWS_|LAMBDA/i.test(src), 'spendGuard.js (code, not comments) reads no argv and no environment marker to relax anything');
 }
 
-console.log('\n5. static: the in-memory store is referenced only by the guard fallback and its own definition');
+console.log('\n2. in EVERY environment, absent operator configuration is refused (nothing charged), tests included');
+const ENVS = {
+  'plain test process (no markers)': {},
+  VERCEL: { VERCEL: '1' }, VERCEL_ENV: { VERCEL_ENV: 'production' }, VERCEL_URL: { VERCEL_URL: 'x.vercel.app' },
+  AWS_LAMBDA_FUNCTION_NAME: { AWS_LAMBDA_FUNCTION_NAME: 'fn' }, AWS_EXECUTION_ENV: { AWS_EXECUTION_ENV: 'AWS_Lambda_nodejs22.x' },
+  'NODE_ENV=production': { NODE_ENV: 'production' }, 'NODE_ENV=development': { NODE_ENV: 'development' },
+  'GRAILKEY_CATALOG_ENVIRONMENT=production': { GRAILKEY_CATALOG_ENVIRONMENT: 'production' },
+  'GRAILKEY_CATALOG_ENVIRONMENT=development': { GRAILKEY_CATALOG_ENVIRONMENT: 'development' },
+};
+const KEYS = ['SPEND_GUARD_OPERATOR_PRINCIPAL_IDS', 'KV_REST_API_URL', 'KV_REST_API_TOKEN', ...new Set(Object.values(ENVS).flatMap((e) => Object.keys(e)))];
+const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
+const restore = () => { for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } };
+const withEnv = async (over, fn) => { restore(); for (const k of KEYS) delete process.env[k]; Object.assign(process.env, over); try { return await fn(); } finally { restore(); } };
+for (const [label, over] of Object.entries(ENVS)) {
+  for (const [cfgLabel, cfgVal] of [['unset', undefined], ['empty', ''], ['malformed', 'admin'], ['unrecognized', OPERATOR]]) {
+    const r = await withEnv({ ...over, ...(cfgVal === undefined ? {} : { SPEND_GUARD_OPERATOR_PRINCIPAL_IDS: cfgVal }) }, () => quiet(() => {
+      rs.setResearchStoreForTests(rs.createMemoryResearchStore()); // a perfectly good injected store: the refusal must not depend on the store
+      guard.resetOperatorRecognitionCache();
+      return guard.reserveSpend({ principalId: 'user-1', endpoint: 'chat', operatorRecognizer: cfgLabel === 'unrecognized' ? async () => false : recognizer });
+    }));
+    ok(r.ok === false && r.status === 503 && r.code === 'SPEND_GUARD_MISCONFIGURED', `${label} + ${cfgLabel} operator configuration -> 503 SPEND_GUARD_MISCONFIGURED`);
+  }
+}
+rs.setResearchStoreForTests(null);
+
+console.log('\n3. a VALID configuration with NO durable store fails closed everywhere (no in-memory fallback)');
+for (const [label, over] of Object.entries(ENVS)) {
+  const r = await withEnv({ ...over, SPEND_GUARD_OPERATOR_PRINCIPAL_IDS: OPERATOR }, () => quiet(() => {
+    rs.setResearchStoreForTests(null);
+    guard.resetOperatorRecognitionCache();
+    return guard.reserveSpend({ principalId: 'user-1', endpoint: 'chat', operatorRecognizer: recognizer });
+  }));
+  ok(r.ok === false && r.status === 503 && r.code === 'SPEND_GUARD_UNAVAILABLE', `${label}: valid operator config, no store -> 503 SPEND_GUARD_UNAVAILABLE`);
+  const r2 = await withEnv({ ...over, SPEND_GUARD_OPERATOR_PRINCIPAL_IDS: OPERATOR }, () => quiet(() => guard.reserveSpend({ principalId: 'user-1', endpoint: 'chat', operatorRecognizer: recognizer })));
+  ok(r2.ok === false, `${label}: ...and it keeps failing closed`);
+}
+
+console.log('\n4. a valid configuration WITH an explicitly injected store works in this very test process (the only way a test gets a store)');
+{
+  const st = rs.createMemoryResearchStore();
+  rs.setResearchStoreForTests(st);
+  const r = await withEnv({ SPEND_GUARD_OPERATOR_PRINCIPAL_IDS: OPERATOR }, () => { guard.resetOperatorRecognitionCache(); return guard.reserveSpend({ principalId: 'user-1', endpoint: 'chat', operatorRecognizer: recognizer }); });
+  ok(r.ok === true, 'explicit injection + valid configuration -> reservation granted');
+  rs.setResearchStoreForTests(null);
+}
+
+console.log('\n5. static: the in-memory store is defined in researchStore.js and referenced by NO production file that could select it');
 {
   const hits = [];
   const walk = (dir) => {
@@ -91,11 +97,10 @@ console.log('\n5. static: the in-memory store is referenced only by the guard fa
     }
   };
   walk(path.join(repoRoot, 'src')); walk(path.join(repoRoot, 'api'));
-  hits.sort();
-  ok(JSON.stringify(hits) === JSON.stringify(['src/lib/researchStore.js', 'src/lib/spendGuard.js']), `createMemoryResearchStore appears only in researchStore.js (definition) and spendGuard.js (guarded fallback) (got ${JSON.stringify(hits)})`);
+  ok(JSON.stringify(hits.sort()) === JSON.stringify(['src/lib/researchStore.js']), `createMemoryResearchStore appears only in its own definition file (${hits.join(', ')})`);
   const guardSrc = readFileSync(path.join(repoRoot, 'src/lib/spendGuard.js'), 'utf8');
-  ok(/hostedRuntimeMarkers\(env\)\.length > 0\) return false/.test(guardSrc), 'the refusal on any hosted-runtime marker is in the source');
   ok(!/process\.env\.[A-Z_]*(DISABLE|BYPASS|SKIP)[A-Z_]*SPEND/i.test(guardSrc) && !/SPEND_GUARD_(OFF|DISABLED|BYPASS)/.test(guardSrc), 'there is no env-var bypass switch for the guard');
+  ok(/export const setOperatorRecognizerForTests/.test(guardSrc) && !/setOperatorRecognizerForTests\(/.test(readFileSync(path.join(repoRoot, 'api/chat.js'), 'utf8')), 'the explicit test seam exists and no handler calls it');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

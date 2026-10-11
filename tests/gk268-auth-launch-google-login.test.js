@@ -31,6 +31,7 @@
 //
 // Invoke: node tests/gk268-auth-launch-google-login.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';

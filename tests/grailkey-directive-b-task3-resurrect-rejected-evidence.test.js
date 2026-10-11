@@ -28,6 +28,7 @@
 // Invoke: node tests/grailkey-directive-b-task3-resurrect-rejected-evidence.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 let passed = 0;
 let failed = 0;
 const failures = [];

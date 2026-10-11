@@ -41,6 +41,7 @@
 //
 // Invoke: node tests/q-trackB-commit4.3.1-retention-decline-fail-closed.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { resolveIdentity, resolveFamilyIssueConsensus } from '../src/lib/identityCore.js';
 import { extractIdentityFromImageSearch, buildTitleFamilies, scoreTitleFamilies, mergeFragmentedTitleFamilies, selectTitleFamilyCandidate, buildRetentionFamilyEvidenceLog } from '../src/lib/imageSearchIdentity.js';
 import {

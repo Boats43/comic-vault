@@ -38,6 +38,7 @@
 //
 // Invoke: node tests/q142-assembly-integrity-family-population.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { checkAssemblyIntegrity } from '../src/lib/identityCore.js';
 
 let passed = 0;

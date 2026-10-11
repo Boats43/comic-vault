@@ -28,6 +28,7 @@
 //
 // Invoke: node tests/q134-provisional-override-boolean.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { resolveIdentity, isProvisionalRefusedIdentity } from '../src/lib/identityCore.js';
 
 let passed = 0;

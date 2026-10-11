@@ -38,6 +38,7 @@
 //
 // Invoke: node tests/gk270-canonical-collection-projection.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';

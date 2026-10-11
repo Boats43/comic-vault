@@ -29,6 +29,7 @@
 //
 // Invoke: node tests/gk258-fail-closed-grade-authority.test.js
 
+import './helpers/spendGuardTestSetup.js';
 process.env.EBAY_APP_ID = process.env.EBAY_APP_ID || 'test-app-id';
 process.env.EBAY_CERT_ID = process.env.EBAY_CERT_ID || 'test-cert-id';
 process.env.PRICECHARTING_TOKEN = process.env.PRICECHARTING_TOKEN || 'test-pc-token';

@@ -10,6 +10,7 @@
 //
 // Invoke: node tests/gk168-edition-facet.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { reconcileEditionFacet, PRINTING_CLASS_VALUES } from '../src/lib/identityCore.js';
 import { classifyPrintingClassFromEditionWarning, detectEditionWarning } from '../api/grade.js';
 import { validateManualAuthority, MANUAL_CORRECTION_ALLOWED_FIELDS, PRINTING_CLASS_ENUM } from '../src/lib/manualCorrection.js';

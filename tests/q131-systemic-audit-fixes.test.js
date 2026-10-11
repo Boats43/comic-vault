@@ -31,6 +31,7 @@
 //
 // Invoke: node tests/q131-systemic-audit-fixes.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { isProvisionalRefusedIdentity, resolveYear } from '../src/lib/identityCore.js';
 
 let passed = 0;

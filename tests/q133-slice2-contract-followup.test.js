@@ -30,6 +30,7 @@
 //
 // Invoke: node tests/q133-slice2-contract-followup.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { computeDecision } from '../src/lib/decisionEngine.js';
 import { finalizeResponse } from '../src/lib/responseContract.js';
 

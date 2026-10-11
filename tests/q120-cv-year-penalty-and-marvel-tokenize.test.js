@@ -45,6 +45,7 @@
 //
 // Invoke: node tests/q120-cv-year-penalty-and-marvel-tokenize.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { lookupComicVine } from '../api/enrich.js';
 import { tokenizeTitle, hasSufficientTitleOverlap } from '../src/lib/compHygiene.js';
 import { stripMetadataTokens } from '../src/lib/titleHygiene.js';

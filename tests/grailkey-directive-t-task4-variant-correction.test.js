@@ -11,6 +11,7 @@
 //
 // Invoke: node tests/grailkey-directive-t-task4-variant-correction.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   MANUAL_CORRECTION_ALLOWED_FIELDS,
   validateManualAuthority,

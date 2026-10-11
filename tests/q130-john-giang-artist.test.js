@@ -31,6 +31,7 @@
 //
 // Invoke: node tests/q130-john-giang-artist.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   selectTitleFamilyCandidate,
   applyDualAxisGate,

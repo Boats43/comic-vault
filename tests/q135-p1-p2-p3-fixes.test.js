@@ -32,6 +32,7 @@
 //
 // Invoke: node tests/q135-p1-p2-p3-fixes.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { isEnumeratedIssueList, isValidIssueRange, LOT_RE, TPB_MARKER_RE } from '../src/lib/compHygiene.js';
 import { applyProvisionalIdentity } from '../src/lib/dataQualityGuard.js';
 import { computeDecision } from '../src/lib/decisionEngine.js';

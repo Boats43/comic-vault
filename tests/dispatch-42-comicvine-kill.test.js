@@ -12,6 +12,7 @@
 //
 // Invoke: node tests/dispatch-42-comicvine-kill.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

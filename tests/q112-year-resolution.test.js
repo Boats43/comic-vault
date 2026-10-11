@@ -21,6 +21,7 @@
 //
 // Invoke: node tests/q112-year-resolution.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { deriveCvYear, resolveYear } from '../src/lib/identityCore.js';
 
 let passed = 0;

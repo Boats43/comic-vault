@@ -9,6 +9,7 @@
 //
 // Invoke: node tests/gk278b-identity-correction-integrity.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';

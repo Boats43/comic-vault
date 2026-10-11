@@ -19,6 +19,7 @@
 //
 // Invoke: node tests/second-principal-capture-certification.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import 'fake-indexeddb/auto';
 import { readFileSync } from 'node:fs';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';

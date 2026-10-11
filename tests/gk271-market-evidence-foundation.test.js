@@ -1,5 +1,6 @@
 // GK-271 — Multi-source market evidence foundation: unit/static proof.
 // Run: node tests/gk271-market-evidence-foundation.test.js
+import './helpers/spendGuardTestSetup.js';
 import fs from 'node:fs';
 import {
   EVIDENCE_CLASS, normalizePcSoldRow, normalizeActiveAsk, normalizeLadderEntry,

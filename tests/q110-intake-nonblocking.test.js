@@ -24,6 +24,7 @@
 //
 // Invoke: node tests/q110-intake-nonblocking.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { computeDecision, describeWarning, describeBlocker } from '../src/lib/decisionEngine.js';
 import { finalizeResponse } from '../src/lib/responseContract.js';
 

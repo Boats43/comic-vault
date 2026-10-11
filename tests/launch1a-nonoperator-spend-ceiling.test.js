@@ -7,10 +7,11 @@
 //   * a store failure part-way through leaves no partial consumption (fail closed)
 //   * adversarially interleaved concurrency (yielding store) cannot breach any ceiling
 //   * the UTC day boundary resets the aggregate
-//   * misconfiguration is clamped; with no operator configured the old behaviour is untouched
+//   * misconfiguration is clamped; with no operator configured EVERY spend request is refused (v4: in every environment)
 //
 // Invoke: node tests/launch1a-nonoperator-spend-ceiling.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { setImmediate as tick } from 'node:timers/promises';
 
 let passed = 0, failed = 0;
@@ -143,10 +144,13 @@ console.log('\n[7] misconfiguration and legacy behaviour');
   eq(r.code, 'SPEND_NONOPERATOR_DAILY_CAP', 'when global == operator reserve, ordinary accounts get nothing (reserve is structurally untouchable)');
   const st2 = createMemoryResearchStore();
   const cfgNoOp = CFG({ operatorPrincipalIds: new Set() });
-  let granted = 0;
-  for (let i = 0; i < 100; i += 1) { const x = await guard.reserveSpend({ principalId: `u${i}`, endpoint: 'chat', store: st2, now: NOW, config: cfgNoOp }); if (x.ok) granted += 1; }
-  eq(granted, 100, 'no operator configured: pooled limit is NOT imposed (ordinary quotas behave exactly as before)');
-  eq(st2._dump()[guard.nonOperatorDayKey(NOW)] ?? 0, 0, 'no aggregate counter is written when no operator is configured');
+  const origErr7 = console.error; console.error = () => {};
+  let granted = 0; let refused7 = 0;
+  for (let i = 0; i < 100; i += 1) { const x = await guard.reserveSpend({ principalId: `u${i}`, endpoint: 'chat', store: st2, now: NOW, config: cfgNoOp }); if (x.ok) granted += 1; else if (x.code === 'SPEND_GUARD_MISCONFIGURED') refused7 += 1; }
+  console.error = origErr7;
+  eq(granted, 0, 'no operator configured: NOTHING is granted (v4: no legacy pass-through, in any environment)');
+  eq(refused7, 100, 'no operator configured: every request refused with SPEND_GUARD_MISCONFIGURED');
+  eq(Object.keys(st2._dump()).length, 0, 'no operator configured: no counter of any kind was written');
   const st3 = createMemoryResearchStore();
   const x = await guard.reserveSpend({ principalId: OP, endpoint: 'grade', store: st3, now: NOW, config: CFG() });
   ok(x.ok && x.principalCap === 5000 && x.globalCap === 6000, 'success shape unchanged (principalCap 5000, globalCap 6000)');
@@ -166,13 +170,13 @@ console.log('\n[8] FAIL-CLOSED operator configuration (v3): absent / empty / mal
   eq(p(` ${UUID} , ${UUID2} `).ids.length, 2, 'two valid uuids (spaces, mixed case) -> ok');
 
   const HOSTED = { VERCEL: '1' };
-  eq(guard.resolveSpendConfig({ ...HOSTED }).requireOperatorConfig, true, 'a hosted runtime REQUIRES operator configuration');
+  for (const env of [{}, { ...HOSTED }, { NODE_ENV: 'production' }, { NODE_ENV: 'development' }, { GRAILKEY_CATALOG_ENVIRONMENT: 'production' }, { GRAILKEY_CATALOG_ENVIRONMENT: 'development' }]) {
+    eq(guard.resolveSpendConfig(env).operatorConfigStatus, 'absent', `${JSON.stringify(env)}: absent in EVERY environment (no test or environment exemption)`);
+    ok(!('requireOperatorConfig' in guard.resolveSpendConfig(env)), `${JSON.stringify(env)}: there is no "required?" switch to turn off`);
+  }
   eq(guard.resolveSpendConfig({ ...HOSTED }).operatorConfigStatus, 'absent', 'hosted, variable unset -> absent');
   eq(guard.resolveSpendConfig({ ...HOSTED, SPEND_GUARD_OPERATOR_PRINCIPAL_IDS: '' }).operatorConfigStatus, 'empty', 'hosted, empty string -> empty');
   eq(guard.resolveSpendConfig({ ...HOSTED, SPEND_GUARD_OPERATOR_PRINCIPAL_IDS: 'root' }).operatorConfigStatus, 'malformed', 'hosted, junk -> malformed');
-  eq(guard.resolveSpendConfig({ NODE_ENV: 'production' }).requireOperatorConfig, true, 'NODE_ENV=production also requires it');
-  eq(guard.resolveSpendConfig({ GRAILKEY_CATALOG_ENVIRONMENT: 'production' }).requireOperatorConfig, true, 'GRAILKEY_CATALOG_ENVIRONMENT=production also requires it');
-  eq(guard.resolveSpendConfig({}).requireOperatorConfig, false, 'only a tests/*.test.js harness process is exempt (this process)');
 
   const spyStore = () => { const inner = createMemoryResearchStore(); const spy = { calls: 0 }; const w = {}; for (const k of Object.keys(inner)) w[k] = (...a) => { spy.calls += 1; return inner[k](...a); }; w._dump = inner._dump; w.spy = spy; return w; };
   const hostedCfg = (envOver) => ({ ...guard.resolveSpendConfig({ ...HOSTED, ...envOver }), principalDaily: 100, operatorDaily: 5000, globalDaily: 6000, nonOperatorDaily: 1000 });
@@ -227,6 +231,67 @@ console.log('\n[8] FAIL-CLOSED operator configuration (v3): absent / empty / mal
   for (const f of ['api/auth-clerk.js', 'api/collection.js', 'api/assets.js', 'api/collection-image-v2.js', 'api/collection-image.js', 'api/asset-media.js']) {
     ok(!/spendGuard/.test(readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')), `${f} never imports the spend guard (authentication, Collection reads and images stay available)`);
   }
+}
+
+console.log('\n[9] v4: operator classification = verified principal in the configured set; NO lookup for operators; DB outage tolerated for both');
+{
+  const UUID = '95b42d2e-a1d8-47de-904e-798122731b08';
+  const cfg = { ...guard.resolveSpendConfig({ SPEND_GUARD_OPERATOR_PRINCIPAL_IDS: UUID }), principalDaily: 100, operatorDaily: 5000, globalDaily: 6000, nonOperatorDaily: 1000 };
+  const mk = () => { const n = { calls: 0 }; return { n, fn: async () => { n.calls += 1; return true; } }; };
+  // operator: zero lookups, ever
+  guard.resetOperatorRecognitionCache();
+  let rec = mk(); const st = createMemoryResearchStore();
+  for (let i = 0; i < 20; i += 1) { const r = await guard.reserveSpend({ principalId: UUID, endpoint: 'chat', store: st, now: NOW, config: cfg, operatorRecognizer: rec.fn }); if (!r.ok) throw new Error('operator refused'); }
+  eq(rec.n.calls, 0, 'an operator request performs NO principal-table lookup (20 requests, 0 lookups)');
+  ok(st._dump()[guard.nonOperatorDayKey(NOW)] === undefined, 'and an operator reservation never touches the non-operator aggregate');
+  // operator is served during a database outage (the lookup is never attempted)
+  let boom = 0; const down = async () => { boom += 1; throw new Error('database down'); };
+  guard.resetOperatorRecognitionCache();
+  const opOut = await guard.reserveSpend({ principalId: UUID, endpoint: 'grade', store: createMemoryResearchStore(), now: NOW, config: cfg, operatorRecognizer: down });
+  ok(opOut.ok === true && boom === 0, 'database outage: the OPERATOR is served and the failing lookup was never even called');
+  // ordinary during an outage: proceeds, aggregate still enforced, outage verdict cached (no hammering)
+  const errs9 = console.error; const logged9 = []; console.error = (...a) => { logged9.push(a.join(' ')); };
+  guard.resetOperatorRecognitionCache(); boom = 0;
+  const stO = createMemoryResearchStore();
+  const results = []; for (let i = 0; i < 15; i += 1) results.push(await guard.reserveSpend({ principalId: `ord-${i}`, endpoint: 'chat', store: stO, now: NOW, config: cfg, operatorRecognizer: down }));
+  console.error = errs9;
+  ok(results.every((r) => r.ok), 'database outage: ORDINARY requests proceed (a validation outage does not take paid features down)');
+  eq(boom, 1, 'database outage: the failing lookup is attempted once and the outage verdict is cached (15 requests, 1 attempt)');
+  eq(stO._dump()[guard.nonOperatorDayKey(NOW)], 15, 'database outage: the aggregate ceiling is STILL enforced (counter written)');
+  ok(logged9.some((l) => /recognition unavailable/.test(l)) && !logged9.some((l) => l.includes(UUID)), 'the outage is logged without printing configured ids');
+  // aggregate still binds during the outage
+  const stBind = createMemoryResearchStore(); let granted = 0;
+  guard.resetOperatorRecognitionCache(); console.error = () => {};
+  for (let i = 0; i < 12; i += 1) for (let u = 0; u < 100; u += 1) { const r = await guard.reserveSpend({ principalId: `bind-${i}`, endpoint: 'chat', store: stBind, now: NOW, config: cfg, operatorRecognizer: down }); if (r.ok) granted += 1; }
+  console.error = errs9;
+  eq(granted, 1000, 'database outage: ordinary users are still bounded by the 1000-unit aggregate (never more)');
+  // NEVER a request-supplied id: handlers pass the id from the VERIFIED token only
+  const { readFileSync } = await import('node:fs');
+  for (const f of ['api/chat.js', 'api/manage.js', 'api/comps.js', 'api/enrich.js', 'api/grade.js']) {
+    const src = readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+    const calls = src.match(/enforceSpendGuard\(res, \{[^}]*\}/g) || [];
+    ok(calls.length >= 1 && calls.every((c) => /principalId:\s*auth\.principalId/.test(c)), `${f}: every spend call takes principalId from auth.principalId (the verified token), never from the request`);
+  }
+  const gsrc = readFileSync(new URL('../src/lib/spendGuard.js', import.meta.url), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  ok(!/req\.|headers|body\.|query/.test(gsrc), 'spendGuard.js itself never reads a request, header, body or query');
+  // and through the real handler: a forged body naming the operator id is charged to the ORDINARY principal
+  const { issueToken } = await import('../src/modules/auth/token.js');
+  process.env.GRAILKEY_SESSION_SECRET = process.env.GRAILKEY_SESSION_SECRET && process.env.GRAILKEY_SESSION_SECRET.length >= 32 ? process.env.GRAILKEY_SESSION_SECRET : 'x'.repeat(40);
+  const rs = await import('../src/lib/researchStore.js');
+  const stH = createMemoryResearchStore(); rs.setResearchStoreForTests(stH);
+  process.env.SPEND_GUARD_OPERATOR_PRINCIPAL_IDS = UUID;
+  guard.setOperatorRecognizerForTests(async () => true);
+  globalThis.fetch = async () => new Response(JSON.stringify({ id: 'm', type: 'message', role: 'assistant', model: 'claude-haiku-4-5-20251001', content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-test-not-real';
+  const { default: chat } = await import('../api/chat.js');
+  const ordinary = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+  const res = { code: null, body: null, h: {}, setHeader(k, v) { this.h[k] = v; }, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
+  await chat({ method: 'POST', headers: { authorization: 'Bearer ' + issueToken({ principalId: ordinary }).token, 'x-forwarded-for': '10.7.7.7', 'x-operator': 'true', 'x-principal-id': UUID }, query: { operator: 'true', principalId: UUID }, body: { message: 'hi', collection: [], history: [], principalId: UUID, operator: true, isOperator: true, operatorPrincipalId: UUID } }, res);
+  const dump = stH._dump();
+  ok(res.code === 200, 'real handler served the ordinary principal');
+  ok(dump['sg:v1:p:' + ordinary + ':' + NOW.toISOString().slice(0, 10)] === undefined ? Object.keys(dump).some((k) => k.includes(ordinary)) : true, 'the charge was recorded against the ORDINARY principal');
+  ok(!Object.keys(dump).some((k) => k.includes(UUID)), 'forged body/header/query naming the operator id never charged or classified as the operator');
+  ok(Object.keys(dump).some((k) => k.startsWith('sg:v1:n:')), 'the ordinary request went through the non-operator aggregate');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

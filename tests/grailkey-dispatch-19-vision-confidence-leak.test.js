@@ -29,6 +29,7 @@
 //      log line (never silent) on anything else; all three inline
 //      duplicates now call the shared function instead of re-deriving it.
 
+import './helpers/spendGuardTestSetup.js';
 import { normalizeVisionConfidence } from '../src/lib/identityCore.js';
 import { readFileSync } from 'node:fs';
 

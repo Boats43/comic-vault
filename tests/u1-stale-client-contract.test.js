@@ -10,6 +10,7 @@
 // No database: auth is token-only on these paths and providers are stubbed.
 // Invoke: node tests/u1-stale-client-contract.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';

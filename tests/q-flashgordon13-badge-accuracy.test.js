@@ -22,6 +22,7 @@
 //
 // Invoke: node tests/q-flashgordon13-badge-accuracy.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { computeMatchConfidence } from '../api/comps.js';
 
 let passed = 0;

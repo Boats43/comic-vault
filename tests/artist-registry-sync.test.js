@@ -29,6 +29,7 @@
 //
 // Invoke: node tests/artist-registry-sync.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { ARTIST_PATTERNS, ARTIST_SURNAME_WORDS, tokenizeTitle } from '../src/lib/compHygiene.js';
 import { LEGACY_CREATOR_NOISE_WORDS } from '../src/lib/identityCore.js';
 import { STRIP_VARIANT_NOISE_CREATOR_NAMES_1, STRIP_VARIANT_NOISE_CREATOR_NAMES_2 } from '../src/lib/imageSearchIdentity.js';

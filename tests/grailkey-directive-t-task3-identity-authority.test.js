@@ -23,6 +23,7 @@
 //
 // Invoke: node tests/grailkey-directive-t-task3-identity-authority.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { mergeConfirmedIdentity, mergeIdentityAuthority } from '../src/lib/dataQualityGuard.js';
 import { buildCorrectedCatalogueItem } from '../src/lib/manualCorrection.js';
 

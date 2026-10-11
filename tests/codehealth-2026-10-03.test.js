@@ -10,6 +10,7 @@
 //     and still exposes its handler after the dead legacy helpers were removed.
 //
 // Invoke: node tests/codehealth-2026-10-03.test.js
+import './helpers/spendGuardTestSetup.js';
 import { randomBytes, createHmac } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';

@@ -37,6 +37,7 @@
 //
 // Invoke: node tests/grailkey-commit-r.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { IDENTITY_TPB_MARKER_RE, TPB_MARKER_RE, hasContaminatedMember } from '../src/lib/compHygiene.js';
 
 let passed = 0;

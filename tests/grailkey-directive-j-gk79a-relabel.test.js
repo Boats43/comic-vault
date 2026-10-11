@@ -19,6 +19,7 @@
 //
 // Invoke: node tests/grailkey-directive-j-gk79a-relabel.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import path from 'path';

@@ -6,6 +6,7 @@
 // Invoke: node tests/variant-allowlist.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { normalizeTitle } from '../api/mega-keys.js';
 
 let passed = 0;

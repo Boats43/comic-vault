@@ -49,6 +49,7 @@
 // Invoke: node tests/grailkey-commit-n-variant-anchor-ordering.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { classifyPromotableVariantDescriptor } from '../src/lib/compHygiene.js';
 import { selectBestVariantCandidate, variantTokenOverlapScore } from '../src/lib/identityCore.js';
 import { verifySoldComps } from '../src/lib/soldVerification.js';

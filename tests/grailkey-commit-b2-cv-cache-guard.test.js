@@ -29,6 +29,7 @@
 // consistent with this codebase's own "production and tests share one
 // implementation" convention (issueAuthority.js's own module header).
 
+import './helpers/spendGuardTestSetup.js';
 import { canUseExactIssuePricingCache } from '../src/lib/issueAuthority.js';
 
 const tests = [];

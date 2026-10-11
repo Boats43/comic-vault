@@ -45,6 +45,7 @@
 //
 // Invoke: node tests/q128-era-tolerance-consolidation.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   getEraYearTolerance,
   isVolumeLabelYear,

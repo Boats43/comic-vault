@@ -1,5 +1,6 @@
 // tests/decision-engine.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { computeDecision } from '../src/lib/decisionEngine.js';
 
 const tests = [];

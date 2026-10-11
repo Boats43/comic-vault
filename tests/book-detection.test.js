@@ -3,6 +3,7 @@
 // Session 4B — Book detection test
 // Verifies detectBookSignals() logic and assetType routing
 
+import './helpers/spendGuardTestSetup.js';
 const tests = [];
 let passed = 0;
 let failed = 0;

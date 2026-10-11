@@ -27,6 +27,7 @@
 //
 // Invoke: node tests/q-commitE1-catalog-ladder-authority.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { assessCatalogLadderReference, assessPcAnchorTrust, assessGradeBasis } from '../src/lib/evidenceEligibility.js';
 import { computeDecision } from '../src/lib/decisionEngine.js';
 import { assembleContract, finalizeResponse } from '../src/lib/responseContract.js';

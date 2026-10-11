@@ -25,6 +25,7 @@
 //      instance of the drifted-duplicate-constant class this codebase has
 //      already hit multiple times (Q119/Q127/Q128, GK-37).
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';

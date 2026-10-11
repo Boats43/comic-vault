@@ -10,6 +10,7 @@
 // For now, duplicate the logic inline since api/enrich.js doesn't export them.
 // In production, these would be imported from a shared lib or tested via HTTP.
 
+import './helpers/spendGuardTestSetup.js';
 const tests = [];
 let passed = 0;
 let failed = 0;

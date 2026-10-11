@@ -40,6 +40,7 @@
 // protocol; this file's assertions differ by which POOL SHAPE won, which
 // is exactly the signal that distinguishes pre-fix from post-fix.)
 
+import './helpers/spendGuardTestSetup.js';
 import { fetchComps } from '../api/comps.js';
 
 let passed = 0;

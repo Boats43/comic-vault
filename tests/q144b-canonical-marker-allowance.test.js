@@ -30,6 +30,7 @@
 //
 // Invoke: node tests/q144b-canonical-marker-allowance.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { detectSeriesMarkers, hasSufficientTitleOverlap } from '../src/lib/compHygiene.js';
 
 let passed = 0;

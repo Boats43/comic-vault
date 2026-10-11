@@ -11,6 +11,7 @@
 // Negative control: GK272_ENRICH_PATH=../api/enrich-head.js (a copy of the
 // pre-fix file) must FAIL the "no 500" assertions.
 
+import './helpers/spendGuardTestSetup.js';
 delete process.env.KV_REST_API_URL;
 delete process.env.KV_REST_API_TOKEN;
 delete process.env.UPSTASH_REDIS_REST_URL;

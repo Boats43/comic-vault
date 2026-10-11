@@ -25,6 +25,7 @@
 //
 // Invoke: node tests/pricing-trust-p1.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { enhanceKeyIssue } from '../src/lib/autoKeyDetector.js';
 import { computeDecision } from '../src/lib/decisionEngine.js';

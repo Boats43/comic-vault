@@ -13,6 +13,7 @@
 //
 // Invoke: node tests/grailkey-dispatch-50-gk66-ladder-authority-removed.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

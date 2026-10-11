@@ -64,6 +64,7 @@
 // Invoke: node tests/grailkey-commit-d3-variant-axis-separation.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { verifySoldComps } from '../src/lib/soldVerification.js';
 import { extractVariantTokensByAxis, classifyArtistMatch } from '../src/lib/compHygiene.js';
 import { classifyEvidenceRow } from '../src/lib/evidenceEligibility.js';

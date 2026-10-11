@@ -28,6 +28,7 @@
 //
 // Invoke: node tests/q144a-family-discriminator-gate.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   pcMatchMissingFamilyDiscriminator,
   pcMatchConflictsWithPoolName,

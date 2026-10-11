@@ -61,6 +61,7 @@
 //
 // Invoke: node tests/grailkey-directive-au-dellotto-1963.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { reconcileVariantFacet } from '../src/lib/identityCore.js';
 import { reconcileYear, createEvidenceSet, addEvidence } from '../src/lib/identityReconciler.js';
 import { matchCreatorCanonicals } from '../src/lib/premiumCreators.js';

@@ -37,6 +37,7 @@
 //
 // Invoke: node tests/q133-slice1c-publisher-gate.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { backfillPublisherFromTitles } from '../src/lib/identityCore.js';
 import { assessIdentityConfidence } from '../src/lib/identityGate.js';
 import { computeDecision } from '../src/lib/decisionEngine.js';

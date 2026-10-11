@@ -33,6 +33,7 @@
 //
 // Invoke: node tests/gk253-durable-category-authority.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';

@@ -38,6 +38,7 @@
 //
 // Invoke: node tests/grailkey-directive-ae-cache-identity-atomicity.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { execSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';

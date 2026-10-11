@@ -8,6 +8,7 @@
 // so the Anthropic SDK client binds to it). No network. Invoke:
 //   node tests/gk271-grade-handler-smoke.test.js
 
+import './helpers/spendGuardTestSetup.js';
 process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'test-anthropic-key';
 process.env.EBAY_APP_ID = process.env.EBAY_APP_ID || 'test-app-id';
 process.env.EBAY_CERT_ID = process.env.EBAY_CERT_ID || 'test-cert-id';

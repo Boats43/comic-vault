@@ -8,6 +8,7 @@
 //
 // Invoke: node tests/outcome1-runtime-bridge-unit.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   attemptOutcome1, attemptOutcome1Production, parseFmtUsd, buildDecisionReasonCodes, OUTCOME1_DECLINE_REASONS,
   parseOutcome1ProductionAllowlist, isOutcome1ProductionAssetAllowed, isRealBuildSha, computeEconomicDecisionFingerprint,

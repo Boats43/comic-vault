@@ -45,6 +45,7 @@
 // Invoke: node tests/grailkey-commit-d1-d2-printing-axis-injection.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { extractConfirmedVariant, validateVisionPrintingClaim } from '../src/lib/variantIdentity.js';
 import { verifySoldComps } from '../src/lib/soldVerification.js';
 

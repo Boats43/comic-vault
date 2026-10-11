@@ -22,6 +22,7 @@
 // its ABSENCE instead, matching the standing "absence assertion matters
 // more than presence" discipline (Dispatch 29/30).
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 
 let passed = 0;

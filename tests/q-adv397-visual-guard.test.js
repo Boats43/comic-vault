@@ -28,6 +28,7 @@
 //
 // Invoke: node tests/q-adv397-visual-guard.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { extractIdentityFromImageSearch, extractConsensus } from '../src/lib/imageSearchIdentity.js';
 
 let passed = 0;

@@ -34,6 +34,7 @@
 //
 // Invoke: node tests/grailkey-commit-p2.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   deriveIssueAuthorityFromAdoption,
   computeIssueAuthorityContractPatch,

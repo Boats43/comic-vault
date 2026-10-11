@@ -32,6 +32,7 @@
 //
 // Invoke: node tests/grailkey-commit-e.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';

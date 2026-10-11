@@ -10,6 +10,7 @@
 // Invoke: node tests/ship26-integration.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import handler from '../api/enrich.js';
 
 let passed = 0;

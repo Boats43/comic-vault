@@ -32,6 +32,7 @@
 //
 // Invoke: node tests/grailkey-directive-p-task3-variant-on-card.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import path from 'path';

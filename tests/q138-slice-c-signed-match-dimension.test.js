@@ -26,6 +26,7 @@
 //
 // Invoke: node tests/q138-slice-c-signed-match-dimension.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { applySignedPreferenceFilter } from '../api/comps.js';
 import { verifySoldComps } from '../src/lib/soldVerification.js';
 import { extractConfirmedVariant } from '../src/lib/variantIdentity.js';

@@ -82,6 +82,7 @@
 //
 // Invoke: node tests/q-trackB-commit4.2-fingerprint-year-restamp.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { normalizeOptionalYear } from '../src/lib/yearEvidence.js';
 import { resolveFamilyYearConsensus, resolveIdentity } from '../src/lib/identityCore.js';
 import {

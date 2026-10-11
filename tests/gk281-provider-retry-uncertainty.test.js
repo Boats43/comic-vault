@@ -8,6 +8,7 @@
 //
 //   node tests/gk281-provider-retry-uncertainty.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';

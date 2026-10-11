@@ -60,6 +60,7 @@
 //
 // Invoke: node tests/gk157-158-handler-smoke.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { fetchComps } from '../api/comps.js';
 import { deriveMarketStanding } from '../src/lib/actionAuthority.js';
 import { deriveLocks, assembleContract } from '../src/lib/responseContract.js';

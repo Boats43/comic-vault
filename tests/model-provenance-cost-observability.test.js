@@ -7,6 +7,7 @@
 // object and spreads it into BOTH the model_prediction_event rows (`...base`) and issueGradeReceipt, so the
 // receipt's provider/model/modelVersion are the same values the prediction event receives (asserted statically below).
 
+import './helpers/spendGuardTestSetup.js';
 process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'test-anthropic-key';
 process.env.EBAY_APP_ID = process.env.EBAY_APP_ID || 'test-app-id';
 process.env.EBAY_CERT_ID = process.env.EBAY_CERT_ID || 'test-cert-id';

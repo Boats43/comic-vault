@@ -46,6 +46,7 @@
 // Invoke: node tests/grailkey-dispatch-28-variant-pricing-wiring.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { buildVerifiedActivePool, computePriceBands } from '../src/lib/priceBands.js';
 import { verifySoldComps } from '../src/lib/soldVerification.js';

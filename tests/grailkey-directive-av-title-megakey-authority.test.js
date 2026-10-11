@@ -30,6 +30,7 @@
 //
 // Invoke: node tests/grailkey-directive-av-title-megakey-authority.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { resolveIdentity, isCorroboratedIdentitySource } from '../src/lib/identityCore.js';
 import { reconcileTitle, createEvidenceSet, addEvidence } from '../src/lib/identityReconciler.js';
 import { deriveMarketStanding, deriveActionAuthority } from '../src/lib/actionAuthority.js';

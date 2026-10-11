@@ -61,6 +61,7 @@
 // Invoke: node tests/grailkey-dispatch-29-fix3a-vision-prompt.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 
 let passed = 0;

@@ -26,6 +26,7 @@
 //
 // Invoke: node tests/gk184-cache-provenance-integration.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   captureEvidenceObservedAt,
   stampEvidenceObservedAt,

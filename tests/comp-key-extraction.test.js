@@ -6,6 +6,7 @@
 // Invoke: node tests/comp-key-extraction.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import {
   COMP_KEY_PATTERNS,
   extractKeyFromComps,

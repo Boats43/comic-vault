@@ -49,6 +49,7 @@
 // ['user-correction']) carries no such reason and stays
 // non-escalatable. Sections 9-12 below prove this directly.
 
+import './helpers/spendGuardTestSetup.js';
 import { evaluateUnanimousConsensusPromotion, evaluateUnanimousYearConsensusPromotion, escalateIssueAuthorityOnConflict } from '../src/lib/issueAuthority.js';
 
 let passed = 0;

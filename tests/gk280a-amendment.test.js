@@ -5,6 +5,7 @@
 //
 //   node tests/gk280a-amendment.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import 'fake-indexeddb/auto';
 import './helpers/installBrowserSession.js';
 import { readFileSync } from 'node:fs';

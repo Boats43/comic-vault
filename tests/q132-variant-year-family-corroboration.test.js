@@ -49,6 +49,7 @@
 //
 // Invoke: node tests/q132-variant-year-family-corroboration.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { detectVariantPoolYearConflict, detectFamilyOverrideConflict } from '../src/lib/variantIdentity.js';
 import { computeDecision, describeWarning } from '../src/lib/decisionEngine.js';
 

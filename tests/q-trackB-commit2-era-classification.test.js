@@ -41,6 +41,7 @@
 //
 // Invoke: node tests/q-trackB-commit2-era-classification.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { applyEraConsistencyFilter, fetchComps } from '../api/comps.js';
 import { classifyYearEvidence } from '../src/lib/evidenceEligibility.js';
 

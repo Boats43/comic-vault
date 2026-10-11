@@ -31,6 +31,7 @@
 //
 // Invoke: node tests/q117-cv-title-axis-field.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { computeConvergenceScore } from '../src/lib/convergenceScore.js';
 
 let passed = 0;

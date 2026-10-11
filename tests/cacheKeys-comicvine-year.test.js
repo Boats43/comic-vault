@@ -10,6 +10,7 @@
 //
 // Invoke: node tests/cacheKeys-comicvine-year.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { buildComicVineCacheKey, parseCacheKeyIssueSegment } from '../src/lib/cacheKeys.js';
 
 let passed = 0;

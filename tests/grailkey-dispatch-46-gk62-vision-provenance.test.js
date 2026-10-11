@@ -21,6 +21,7 @@
 //
 // Invoke: node tests/grailkey-dispatch-46-gk62-vision-provenance.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

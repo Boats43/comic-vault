@@ -9,6 +9,7 @@
 //
 // Invoke: node tests/gk268-auth-recovery-ux.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';

@@ -14,6 +14,7 @@
 //
 // Invoke: node tests/pipeline-audit.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { buildPipelineAudit } from '../src/lib/pipelineAudit.js';
 
 let passed = 0;

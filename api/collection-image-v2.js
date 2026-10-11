@@ -20,6 +20,7 @@ import { getRemoteImageUriForPrincipal } from '../src/modules/collection/index.j
 import * as media from '../src/modules/media/index.js';
 import { mintImageCredential, verifyImageCredential, readCookie, buildSetCookie, buildClearCookie } from '../src/lib/collectionImageUrl.js';
 import { checkRateLimit } from './rate-limit.js';
+import { acquireImageRead } from '../src/lib/imageReadLimiter.js';
 
 const MAX_ID_LEN = 128;
 const MAX_INDEX = 99;
@@ -27,10 +28,10 @@ const MAX_INDEX = 99;
 const noStore = (res) => { res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff'); };
 
 export default async function handler(req, res) {
-  // RATE LIMITING: the credential MINT is limited per principal (it is called once per ~10 minutes). Image GETs are NOT put
-  // through the shared 30-requests/10-minutes limiter: a single Collection screen legitimately loads dozens of thumbnails,
-  // and that limiter would turn them into 429 broken images. A GET needs a valid, principal-bound, 10-minute credential
-  // and can only ever return the credential holder's OWN images, so the cost it can cause is bounded by their own data.
+  // RATE LIMITING: the credential MINT is limited per principal (it is called once per ~10 minutes). Image GETs are limited
+  // PER VERIFIED PRINCIPAL by src/lib/imageReadLimiter.js (token bucket 300 burst / 1 per second refill, max 40 in flight) -
+  // sized from real Collection loading (a 199-item screen = 199 reads) and NOT by the shared 30-requests/10-minutes IP
+  // limiter, which would turn one screen of thumbnails into 429 broken images and would throttle users behind one address.
   if (req.method === 'POST') {
     noStore(res);
     const auth = requireAuthenticatedPrincipal(req);
@@ -62,8 +63,11 @@ export default async function handler(req, res) {
     const p = typeof q.p === 'string' ? q.p : '';
     const id = typeof q.id === 'string' ? q.id : '';
     const index = Number.parseInt(q.i, 10);
-    if (!p || !id || id.length > MAX_ID_LEN || !Number.isInteger(index) || index < 0 || index > MAX_INDEX) {
-      return res.status(400).json({ error: 'p, id and a non-negative integer i are required' });
+    // DEFINED fail-closed behaviour for malformed addressing: no credential work, no lookup, no bytes. A MISSING p is a 400
+    // with its own code (the URL's p is only a consistency check - the principal always comes from the verified credential).
+    if (!p) return res.status(400).json({ error: 'IMAGE_PRINCIPAL_REQUIRED' });
+    if (!id || id.length > MAX_ID_LEN || !Number.isInteger(index) || index < 0 || index > MAX_INDEX) {
+      return res.status(400).json({ error: 'id and a non-negative integer i are required' });
     }
     const v = verifyImageCredential(readCookie(req.headers?.cookie || req.headers?.Cookie));
     if (!v.ok) {
@@ -73,6 +77,11 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'IMAGE_LINK_INVALID' });
     }
     if (v.principalId !== p) return res.status(403).json({ error: 'IMAGE_PRINCIPAL_MISMATCH' });
+    const lease = acquireImageRead(v.principalId);
+    if (!lease.ok) {
+      res.setHeader('Retry-After', String(lease.retryAfterSeconds));
+      return res.status(429).json({ error: 'IMAGE_RATE_LIMITED', reason: lease.reason, retryAfter: lease.retryAfterSeconds });
+    }
     try {
       const objectUri = await getRemoteImageUriForPrincipal({ principalId: v.principalId, id, index });
       if (!objectUri) return res.status(404).json({ error: 'No stored display image for this item/index' });
@@ -88,6 +97,8 @@ export default async function handler(req, res) {
     } catch (e) {
       console.error('[collection-image-v2] read failed:', e?.message || e);
       return res.status(500).json({ error: 'Internal error' });
+    } finally {
+      lease.release();
     }
   }
 

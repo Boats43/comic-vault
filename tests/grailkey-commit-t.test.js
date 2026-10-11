@@ -54,6 +54,7 @@
 //
 // Invoke: node tests/grailkey-commit-t.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { titleOverlapsProduct, isCorroboratedIdentitySource, projectCanonicalTitleFromAnchor } from '../src/lib/identityCore.js';
 import { tokenizeTitle, hasSufficientTitleOverlap, FAMILY_OVERRIDE_DECISIONS } from '../src/lib/compHygiene.js';
 import { readFileSync } from 'fs';

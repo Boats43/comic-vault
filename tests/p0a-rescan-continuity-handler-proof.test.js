@@ -20,6 +20,7 @@
 //
 // Invoke: node tests/p0a-rescan-continuity-handler-proof.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';

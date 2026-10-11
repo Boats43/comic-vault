@@ -38,6 +38,7 @@
 //
 // Invoke: node tests/q-trackB-commit4-adoption-provisional.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { resolveFamilyIssueConsensus, detectVisualIssueDivergence } from '../src/lib/identityCore.js';
 import {
   deriveIssueAuthorityFromAdoption,

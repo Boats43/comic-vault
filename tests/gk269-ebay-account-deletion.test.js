@@ -10,6 +10,7 @@
 //
 // Invoke: node tests/gk269-ebay-account-deletion.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { createHash, createSign, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';

@@ -8,6 +8,7 @@
 //
 // Invoke: node tests/spend-guard.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { randomBytes } from 'node:crypto';
 
 process.env.GRAILKEY_SESSION_SECRET = randomBytes(32).toString('base64url');
@@ -59,7 +60,10 @@ const call = async (handler, principalId, body) => {
 };
 const chatBody = (extra = {}) => ({ message: 'hi', collection: [], history: [], ...extra });
 const freshStore = () => { const s = store.createMemoryResearchStore(); store.setResearchStoreForTests(s); return s; };
-const setCaps = ({ principal, operator, global, operatorIds = '' }) => {
+const OP_FILLER = '00000000-0000-4000-8000-0000000000b9'; // a VALID operator id that no test principal uses
+const OP1 = '11111111-1111-4111-8111-111111111111';
+const OP2 = '22222222-2222-4222-8222-222222222222';
+const setCaps = ({ principal, operator, global, operatorIds = OP_FILLER }) => {
   process.env.SPEND_GUARD_PRINCIPAL_DAILY_UNITS = String(principal);
   process.env.SPEND_GUARD_OPERATOR_DAILY_UNITS = String(operator);
   process.env.SPEND_GUARD_GLOBAL_DAILY_UNITS = String(global);
@@ -90,32 +94,34 @@ console.log('1. per-principal cap refuses BEFORE the provider call (real api/cha
 console.log('2. operator cap is independent and higher');
 {
   freshStore();
-  setCaps({ principal: 2, operator: 6, global: 100, operatorIds: 'operator-1, other-op' });
+  setCaps({ principal: 2, operator: 6, global: 100, operatorIds: `${OP1}, ${OP2}` });
   providerCalls = 0;
   const results = [];
-  for (let i = 0; i < 7; i++) results.push((await call(chat, 'operator-1', chatBody())).statusCode);
+  for (let i = 0; i < 7; i++) results.push((await call(chat, OP1, chatBody())).statusCode);
   eq(results, [200, 200, 200, 200, 200, 200, 429], 'operator gets 6 units, 7th refused');
   const user = [];
   for (let i = 0; i < 3; i++) user.push((await call(chat, 'plain-user', chatBody())).statusCode);
   eq(user, [200, 200, 429], 'non-operator principal still capped at 2 in the same instance');
-  const forged = await call(chat, 'plain-user', chatBody({ operator: true, principalId: 'operator-1', isOperator: true }));
+  const forged = await call(chat, 'plain-user', chatBody({ operator: true, principalId: OP1, isOperator: true }));
   eq(forged.statusCode, 429, 'a client cannot self-declare operator status or choose principalId in the body');
 }
 
-console.log('3. global ceiling refuses across principals');
+console.log('3. global ceiling refuses across principals (ordinary use is clamped below it, so two operators fill it)');
 {
-  const s = freshStore();
-  setCaps({ principal: 50, operator: 50, global: 3 });
+  const s3 = freshStore();
+  setCaps({ principal: 50, operator: 2, global: 3, operatorIds: `${OP1},${OP2}` });
   providerCalls = 0;
   const codes = [];
-  for (const p of ['g1', 'g2', 'g3', 'g4', 'g1']) codes.push((await call(chat, p, chatBody())).statusCode);
-  eq(codes, [200, 200, 200, 429, 429], 'fourth and fifth calls (different principals) refused at the global ceiling');
-  const refused = await call(chat, 'g5', chatBody());
+  for (const p of [OP1, OP1, OP2]) codes.push((await call(chat, p, chatBody())).statusCode);
+  eq(codes, [200, 200, 200], 'two operators consume the whole global budget (3 of 3)');
+  const refused = await call(chat, 'g4', chatBody());
+  eq(refused.statusCode, 429, 'an ordinary principal is refused at the global ceiling');
   eq(refused.body.error, 'SPEND_GLOBAL_DAILY_CAP', 'stable global refusal code');
   eq(providerCalls, 3, 'REFUSED BEFORE the provider: only the 3 allowed calls reached it');
-  const dump = s._dump();
+  const dump = s3._dump();
   eq(dump[guard.globalDayKey()], 3, 'global counter == ceiling (refused calls refunded)');
   eq(dump[guard.principalDayKey('g4')], 0, 'a globally-refused call also refunded the principal slot');
+  eq(dump[guard.nonOperatorDayKey()], 0, 'and refunded the non-operator aggregate slot');
 }
 
 console.log('4. durable counter unavailable -> refuses BEFORE the provider call (fails closed)');
@@ -144,7 +150,7 @@ console.log('4. durable counter unavailable -> refuses BEFORE the provider call 
 console.log('5. concurrent calls cannot exceed the cap');
 {
   const s = store.createMemoryResearchStore();
-  const cfg = { principalDaily: 20, operatorDaily: 20, globalDaily: 30, operatorPrincipalIds: new Set() };
+  const cfg = { principalDaily: 20, operatorDaily: 0, globalDaily: 30, nonOperatorDaily: 1000, operatorPrincipalIds: new Set([OP_FILLER]) };
   const burst = await Promise.all(Array.from({ length: 60 }, () => guard.reserveSpend({ principalId: 'racer', endpoint: 'chat', store: s, config: cfg })));
   eq(burst.filter((r) => r.ok).length, 20, 'exactly 20 of 60 simultaneous reservations succeed (cap 20)');
   eq(s._dump()[guard.principalDayKey('racer')], 20, 'counter settles at the cap, never above');
@@ -193,12 +199,21 @@ console.log('7. AUTH — principal comes only from the verified token');
   eq(res.statusCode, 401, 'no token -> 401 (guard is behind authentication)');
 }
 
-console.log('8. harness-store scope is narrow');
+console.log('8. NO test exception exists in the production spend guard (v4)');
 {
-  ok(guard.isTestHarnessProcess('C:\\repo\\tests\\x.test.js', {}) === true, 'a tests/*.test.js process may use the in-memory store');
-  ok(guard.isTestHarnessProcess('/repo/tests/x.test.js', { VERCEL: '1' }) === false, 'never on Vercel');
-  ok(guard.isTestHarnessProcess('/repo/tests/x.test.js', { NODE_ENV: 'production' }) === false, 'never with NODE_ENV=production');
-  ok(guard.isTestHarnessProcess('/var/task/api/chat.js', {}) === false, 'a real function entry point never matches');
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../src/lib/spendGuard.js', import.meta.url), 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  ok(typeof guard.isTestHarnessProcess === 'undefined' && typeof guard.hostedRuntimeMarkers === 'undefined', 'the harness predicates no longer exist');
+  ok(!/process\.argv|\.test\.js|harness/i.test(src), 'spendGuard.js (code, not comments) never inspects argv or names a test');
+  // With NO injected store and NO Upstash configured, even a valid operator configuration FAILS CLOSED in this very test process.
+  const saved = { u: process.env.KV_REST_API_URL, t: process.env.KV_REST_API_TOKEN };
+  delete process.env.KV_REST_API_URL; delete process.env.KV_REST_API_TOKEN;
+  store.setResearchStoreForTests(null);
+  const errs = console.error; console.error = () => {};
+  const r = await guard.reserveSpend({ principalId: 'someone', endpoint: 'chat' });
+  console.error = errs;
+  ok(r.ok === false && r.status === 503 && r.code === 'SPEND_GUARD_UNAVAILABLE', 'a tests/*.test.js process gets NO in-memory fallback: no store -> 503 SPEND_GUARD_UNAVAILABLE');
+  if (saved.u !== undefined) process.env.KV_REST_API_URL = saved.u; if (saved.t !== undefined) process.env.KV_REST_API_TOKEN = saved.t;
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

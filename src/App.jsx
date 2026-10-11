@@ -28,7 +28,7 @@ import { getAssetConfirmationBadge } from "./lib/assetConfirmationBadge.js";
 import { getPricingSourceLabel, getPriceBandsSourceLabel } from "./lib/sourceLabels.js";
 import { runAutoFix } from "./lib/autoFix.js";
 import { generatePacket } from "./lib/marketplacePackets.js";
-import { spendRefusalText } from "./lib/spendRefusalMessage.js";
+import { spendRefusalText, spendRefusalError } from "./lib/spendRefusalMessage.js";
 // GK-281 — ONE LOGICAL SCAN ATTEMPT -> AT MOST ONE PAID GRADING WORKFLOW (client half; the server is authoritative).
 import { runGradeAttempt, postGradeWithAttempt, KINDS as GRADE_ATTEMPT_KINDS, markConsumed as markGradeAttemptConsumed, beginBulkImport, alignBulkManifest, renewBulkAttempt, markBulkFile, singleFlight as gradeSingleFlight, fileFingerprint, mintAttemptId, ATTEMPT_STATUS as GRADE_ATTEMPT_STATUS } from "./lib/gradeAttemptClient.js";
 // Rapid double submission / duplicate change events for the SAME file: the second is ignored while the first runs.
@@ -11431,6 +11431,8 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState(null);
+  // GK-L1A v4: a daily-capacity or configuration refusal cannot be fixed by retrying, so the screen must not offer "Try again".
+  const [errorNoRetryText, setErrorNoRetryText] = useState(null); // the EXACT message that is non-retryable; any other message gets a retry control again
   const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualTitle, setManualTitle] = useState('');
@@ -12434,7 +12436,7 @@ export default function App() {
           throw new Error("Your session expired — please sign in again.");
         }
 
-        if (!res.ok) throw new Error(spendRefusalText(data, "Failed to grade"));
+        if (!res.ok) throw spendRefusalError(data, "Failed to grade");
 
         // U6.0D (GK-252) — Book-success branch, checked BEFORE the comic
         // rejection logic below. Predicate: data.assetType==='book' AND a
@@ -13053,6 +13055,7 @@ export default function App() {
           .finally(() => setEnriching(false));
       } catch (err) {
         setError(err.message);
+        setErrorNoRetryText(err?.nonRetryable === true ? err.message : null);
         setLoading(false);
       } finally {
         gradeBlobFlights.delete(gradeFlightKey); // GK-281: release the single-flight slot on every exit path
@@ -13664,6 +13667,7 @@ export default function App() {
   const reset = () => {
     setResult(null);
     setError(null);
+    setErrorNoRetryText(null);
     setUnsupportedScan(null);
     setDuplicateWarning(null);
     setPendingDuplicate(null);
@@ -15859,7 +15863,11 @@ export default function App() {
                   Save as Generic asset
                 </button>
               )}
-              <button className="reset-btn" onClick={reset}>Try again</button>
+              {errorNoRetryText !== null && error === errorNoRetryText ? (
+                <button className="reset-btn" onClick={reset}>OK</button>
+              ) : (
+                <button className="reset-btn" onClick={reset}>Try again</button>
+              )}
             </div>
           )}
           {result && !loading && !bulkProgress && (
@@ -16305,7 +16313,11 @@ export default function App() {
           {error && (
             <div className="error-card">
               <div className="error-text">{error}</div>
-              <button className="reset-btn" onClick={reset}>Try again</button>
+              {errorNoRetryText !== null && error === errorNoRetryText ? (
+                <button className="reset-btn" onClick={reset}>OK</button>
+              ) : (
+                <button className="reset-btn" onClick={reset}>Try again</button>
+              )}
             </div>
           )}
           {result && !loading && (

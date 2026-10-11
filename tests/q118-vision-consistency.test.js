@@ -24,6 +24,7 @@
 //
 // Invoke: node tests/q118-vision-consistency.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   checkTitleConsistency,
   checkGradingStatusConsistency,

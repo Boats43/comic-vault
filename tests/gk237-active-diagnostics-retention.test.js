@@ -48,6 +48,7 @@
 //
 // Invoke: node tests/gk237-active-diagnostics-retention.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import 'fake-indexeddb/auto';
 import './helpers/installBrowserSession.js';
 import { readFileSync } from 'node:fs';

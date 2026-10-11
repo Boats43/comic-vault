@@ -18,6 +18,7 @@
 // Prereq: `npm run build` (dist/) and, for check 6, an old build in OLD_DIST (default C:/gk281/impl/dist) - skipped loudly if absent.
 // Invoke: node tests/launch1b-browser-certification.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import http from 'node:http';
 import zlib from 'node:zlib';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';

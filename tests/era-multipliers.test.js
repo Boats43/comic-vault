@@ -5,6 +5,7 @@
 // Invoke: node tests/era-multipliers.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import {
   CGC_MULTIPLIERS,
   RAW_MULTIPLIERS,

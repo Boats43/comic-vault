@@ -22,6 +22,7 @@
 //
 // Invoke: node tests/q136-slice-a-artist-axis.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { applyVariantPreferenceFilter, applyArtistPreferenceNarrowing } from '../api/comps.js';
 import { extractArtist, classifyArtistMatch } from '../src/lib/compHygiene.js';
 

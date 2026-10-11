@@ -39,6 +39,7 @@
 //
 // Invoke: node tests/q132-layer4b-confirmedyear-correction.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { pcMatchConflictsWithPoolYear } from '../src/lib/variantIdentity.js';
 import { FAMILY_OVERRIDE_DECISIONS } from '../src/lib/compHygiene.js';
 import { computeDecision, describeWarning } from '../src/lib/decisionEngine.js';

@@ -2,6 +2,7 @@
 // server-payload authority, declared capture views, and the static proof that
 // condition flags have no path to grade or price.
 // Run: node tests/gk271b-evidence-contract.test.js
+import './helpers/spendGuardTestSetup.js';
 import fs from 'node:fs';
 import {
   normalizePcSoldRow, buildMarketEvidence, deriveMarketCopy,

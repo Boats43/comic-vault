@@ -15,6 +15,7 @@
 //
 // Invoke: node tests/gk276-enrich-canary-handler-smoke.test.js
 
+import './helpers/spendGuardTestSetup.js';
 delete process.env.ACCESS_CODE;
 if (!process.env.GRAILKEY_SESSION_SECRET) {
   process.env.GRAILKEY_SESSION_SECRET = (await import('node:crypto')).randomBytes(32).toString('base64url');

@@ -6,6 +6,7 @@
 //
 //   node tests/gk281-grade-attempt-idempotency.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';

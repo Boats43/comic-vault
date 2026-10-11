@@ -27,6 +27,7 @@
 //
 // Invoke: node tests/gk156-poolyearhint-eralock-rawtitle.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

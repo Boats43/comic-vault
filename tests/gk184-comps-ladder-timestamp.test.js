@@ -20,6 +20,7 @@
 //
 // Invoke: node tests/gk184-comps-ladder-timestamp.test.js
 
+import './helpers/spendGuardTestSetup.js';
 const OAUTH_ENDPOINT = 'https://api.ebay.com/identity/v1/oauth2/token';
 const BROWSE_ENDPOINT = 'https://api.ebay.com/buy/browse/v1/item_summary/search';
 

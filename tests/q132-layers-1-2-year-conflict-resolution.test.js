@@ -45,6 +45,7 @@
 //
 // Invoke: node tests/q132-layers-1-2-year-conflict-resolution.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { FAMILY_OVERRIDE_DECISIONS } from '../src/lib/compHygiene.js';
 import { detectVariantPoolYearConflict, extractConfirmedVariant, filterItemsByIssue } from '../src/lib/variantIdentity.js';
 

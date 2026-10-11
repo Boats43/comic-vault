@@ -51,6 +51,7 @@
 //
 // Invoke: node tests/q131-refused-identity-conflict-provisional.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   resolveIdentity,
   buildIdentityRefusedFallbackPool,

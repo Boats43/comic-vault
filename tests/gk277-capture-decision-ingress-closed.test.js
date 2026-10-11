@@ -13,6 +13,7 @@
 //
 // Invoke: node tests/gk277-capture-decision-ingress-closed.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';

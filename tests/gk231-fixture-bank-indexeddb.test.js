@@ -12,6 +12,7 @@
 //
 // Invoke: node tests/gk231-fixture-bank-indexeddb.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import 'fake-indexeddb/auto';
 import './helpers/installBrowserSession.js';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';

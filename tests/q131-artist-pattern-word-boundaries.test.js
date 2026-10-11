@@ -18,6 +18,7 @@
 //
 // Invoke: node tests/q131-artist-pattern-word-boundaries.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { ARTIST_PATTERNS, COMP_FILTER_VERSION } from '../src/lib/compHygiene.js';
 import { extractPoolArtistTokens } from '../src/lib/imageSearchIdentity.js';
 import { extractConfirmedVariant } from '../src/lib/variantIdentity.js';

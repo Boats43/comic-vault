@@ -22,6 +22,7 @@
 // changes -- making the raise real is pricing-math, a separate
 // greenlight (Directive F remedy #4 / GK-75).
 
+import './helpers/spendGuardTestSetup.js';
 import { describeWarning } from '../src/lib/decisionEngine.js';
 
 const tests = [];

@@ -8,6 +8,7 @@
 //
 // Invoke: node tests/u1-explicit-category-writers.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

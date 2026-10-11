@@ -24,6 +24,7 @@
 //
 // Invoke: node tests/q111-variant-token-specificity.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { extractIdentityFromImageSearch, extractConsensus, classifyVariantTokens } from '../src/lib/imageSearchIdentity.js';
 import { applyVariantPreferenceFilter } from '../api/comps.js';
 

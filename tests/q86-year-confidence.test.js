@@ -10,6 +10,7 @@
 //
 // Invoke: node tests/q86-year-confidence.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { resolveYear } from '../src/lib/identityCore.js';
 
 process.env.PRICECHARTING_TOKEN = process.env.PRICECHARTING_TOKEN || 'test-token';

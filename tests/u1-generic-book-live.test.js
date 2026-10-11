@@ -19,6 +19,7 @@
 //
 // Invoke: node tests/u1-generic-book-live.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import 'fake-indexeddb/auto';
 import { readFileSync } from 'node:fs';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -246,7 +247,7 @@ try {
   ok((await itemOf(book.id, PA))?.asset_category === 'book', 'the book is still a book');
 
   console.log('\n4. PHOTO -> unsupported -> explicit SAVE AS GENERIC (one paid classification attempt, zero more)');
-  rs.setResearchStoreForTests(null);
+  rs.setResearchStoreForTests(rs.createMemoryResearchStore()); // v4: an explicit store (the old harness fallback is gone)
   providerCalls.length = 0; routedPaths = [];
   // A real, decodable image (the resize step rejects an undecodable one before any provider call).
   const Jimp = (await import('jimp')).default;

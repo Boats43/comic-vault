@@ -18,6 +18,7 @@
 //
 // Invoke: node tests/grailkey-directive-ab-evidence-applicability.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { execSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';

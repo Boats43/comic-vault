@@ -18,6 +18,7 @@
 //
 // Invoke: node tests/gk226-capture-outcome-price.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { buildCaptureOutcomePrice } from '../src/lib/captureOutcomeMapping.js';
 
 let passed = 0, failed = 0;

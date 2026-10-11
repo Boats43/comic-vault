@@ -3,6 +3,7 @@
 // The wiring half is STATIC source-text evidence (labelled as such); the behavioural proof is
 // tests/gk280a-grade-proof-claim.test.js (real handlers + real Development database).
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { decideGradeClaim, buildGradePointer, GRADE_CLAIM_CODE as C, GRADE_POINTER_HISTORY_CAP } from '../src/lib/gradeClaimPolicy.js';
 

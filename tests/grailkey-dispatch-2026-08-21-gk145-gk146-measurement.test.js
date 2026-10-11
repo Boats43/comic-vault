@@ -21,6 +21,7 @@
 //
 // Invoke: node tests/grailkey-dispatch-2026-08-21-gk145-gk146-measurement.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { buildScanLogRecord } from '../src/lib/scanLog.js';
 
 delete process.env.ACCESS_CODE; // GK-269: now a no-op -- the gate never reads this env var anymore, left in place as a harmless historical marker

@@ -27,6 +27,7 @@
 // Invoke: node tests/grailkey-directive-am-variant-custody-real.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import { reconcileVariantFacet, extractFirstEligibleVariantCandidate } from '../src/lib/identityCore.js';

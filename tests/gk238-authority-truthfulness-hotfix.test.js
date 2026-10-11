@@ -15,6 +15,7 @@
 //
 // Invoke: node tests/gk238-authority-truthfulness-hotfix.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { verifySoldComps } from '../src/lib/soldVerification.js';
 import { deriveMarketStanding, deriveActionAuthority } from '../src/lib/actionAuthority.js';
 import { deriveLocks, assembleContract, finalizeResponse } from '../src/lib/responseContract.js';

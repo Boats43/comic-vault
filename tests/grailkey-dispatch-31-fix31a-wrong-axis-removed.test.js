@@ -42,6 +42,7 @@
 // Invoke: node tests/grailkey-dispatch-31-fix31a-wrong-axis-removed.test.js
 // Exit code: 0 on all-pass, 1 on any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
 import { shouldLiftAssetTypeAdvisoryLock } from '../src/lib/imageSearchIdentity.js';
 

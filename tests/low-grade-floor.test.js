@@ -11,6 +11,7 @@
 // Invoke: node tests/low-grade-floor.test.js
 // Exit: 0 all-pass, 1 any failure.
 
+import './helpers/spendGuardTestSetup.js';
 import { computeLowGradeFloor } from '../api/enrich.js';
 
 let passed = 0;

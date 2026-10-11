@@ -37,6 +37,7 @@
 //
 // Invoke: node tests/q127-variant-pool-year-conflict.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { extractConfirmedVariant, filterItemsByIssue, detectVariantPoolYearConflict } from '../src/lib/variantIdentity.js';
 
 let passed = 0;

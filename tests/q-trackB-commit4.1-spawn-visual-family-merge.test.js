@@ -56,6 +56,7 @@
 //
 // Invoke: node tests/q-trackB-commit4.1-spawn-visual-family-merge.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import {
   mergeFragmentedTitleFamilies,
   selectTitleFamilyCandidate,

@@ -5,6 +5,7 @@
 //
 //   node tests/gk281-grade-attempt-client.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import './helpers/installBrowserSession.js';
 import { signInTestPrincipal } from './helpers/installBrowserSession.js';
 import { readFileSync } from 'node:fs';

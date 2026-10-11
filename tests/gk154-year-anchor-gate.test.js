@@ -40,6 +40,7 @@
 //
 // Invoke: node tests/gk154-year-anchor-gate.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';

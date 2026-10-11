@@ -22,6 +22,7 @@
 //
 // Invoke: node tests/q136-slice-a2-identity-incomplete-provisional.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { computeDecision } from '../src/lib/decisionEngine.js';
 
 let passed = 0;

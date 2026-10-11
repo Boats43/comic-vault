@@ -2,6 +2,7 @@
 // not condition; client gradeLocked cannot skip Vision; prediction-provenance failures are
 // OBSERVED (never refused) this pass. Real api/grade.js handler, fetch stubbed, no paid calls.
 //   node tests/grade-authority-control-plane.test.js
+import './helpers/spendGuardTestSetup.js';
 process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'test-anthropic-key';
 process.env.EBAY_APP_ID = process.env.EBAY_APP_ID || 'test-app-id';
 process.env.EBAY_CERT_ID = process.env.EBAY_CERT_ID || 'test-cert-id';

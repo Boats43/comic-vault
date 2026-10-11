@@ -59,6 +59,7 @@
 //
 // Invoke: node tests/grailkey-directive-ah-sold-fallback-authority.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import { verifySoldComps } from '../src/lib/soldVerification.js';
 import { computePriceBands, TIER_SOURCE_MAP } from '../src/lib/priceBands.js';
 import { deriveMarketStanding, deriveIdentityStanding, deriveActionAuthority } from '../src/lib/actionAuthority.js';

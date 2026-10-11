@@ -110,6 +110,7 @@
 //
 // Invoke: node tests/q140-issue-consensus-corrective.test.js
 
+import './helpers/spendGuardTestSetup.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
