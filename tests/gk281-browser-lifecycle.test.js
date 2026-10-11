@@ -44,8 +44,9 @@ execSync(`npx vite build --outDir "${outDir}" --emptyOutDir`, { cwd: repoRoot, s
 // ── provider stub with a call counter ──
 let providerCalls = 0;
 let providerDelayMs = 0;
+let nextProvider = null; // one-shot scripted provider behavior: 'fail' | 'unusable'
 const json = (b, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'content-type': 'application/json' } });
-const NAMES = ['Creepy', 'Eerie', 'Vampirella', 'Haunt Of Fear', 'Tales Of Suspense', 'Strange Adventures', 'Weird Wonder'];
+const NAMES = ['Creepy', 'Eerie', 'Vampirella', 'Haunt Of Fear', 'Tales Of Suspense', 'Strange Adventures', 'Weird Wonder', 'Mystery In Space', 'Forbidden Worlds', 'House Of Mystery', 'Unexpected Tales', 'Dark Mansion', 'Sleepwalker Saga', 'Thunder Agents', 'Blue Beetle', 'Captain Atom', 'Doom Patrol Zero', 'Metamorpho Prime', 'Sugar And Spike', 'Rex The Wonder Dog'];
 const VISION = { title: 'Creepy', issue: '1', publisher: 'Warren', year: '1964', assetTypeConfident: true, foreignEdition: false, isReprint: false, editionType: 'original', grade: 'VG 4.0', isGraded: false, numericGrade: null, certNumber: null, labelType: null, labelNotes: null, keyIssue: null, variant: null, creator: null, price: '$20', priceLow: '$10', priceHigh: '$30', reason: 'Light spine wear.', confidence: 'medium', detectedPrice: null, restoration: null, defectPenalty: null, cgcPenaltyFlags: null };
 global.fetch = async (url) => {
   const u = String(url);
@@ -53,6 +54,8 @@ global.fetch = async (url) => {
   if (u.includes('api.anthropic.com')) {
     providerCalls += 1;
     if (providerDelayMs) await sleep(providerDelayMs);
+    if (nextProvider === 'fail') { nextProvider = null; throw new TypeError('fetch failed'); } // connection lost mid-call: provider execution UNCERTAIN
+    if (nextProvider === 'unusable') { nextProvider = null; return json({ id: 'm', type: 'message', role: 'assistant', model: 'claude-sonnet-4-5-20250929', content: [{ type: 'text', text: JSON.stringify({ ...VISION, title: 'Unknown', publisher: null, year: null, issue: null, assetTypeConfident: false }) }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 10 } }); }
     return json({ id: 'm', type: 'message', role: 'assistant', model: 'claude-sonnet-4-5-20250929', content: [{ type: 'text', text: JSON.stringify({ ...VISION, title: NAMES[(providerCalls - 1) % NAMES.length] }) }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 10 } });
   }
   if (u.includes('oauth')) return json({ access_token: 'x', expires_in: 7200, token_type: 'Application Access Token' });
@@ -221,6 +224,80 @@ await waitFor(async () => providerCalls === callsE + 1, 20000);
 await sleep(1800);
 providerDelayMs = 0;
 ok(providerCalls - callsE === 1 && gradeReqs() - reqsE === 1, `switching tabs mid-scan does not start another workflow (requests=${gradeReqs() - reqsE}, calls=${providerCalls - callsE})`);
+
+section('G. an UNUSABLE result the operator rejects: retaking the same photo is an explicit NEW attempt (not a replay of the junk)');
+await gotoApp();
+const photoG = await jpeg(0x55aa77ff);
+const callsG = providerCalls, reqsG = gradeReqs();
+nextProvider = 'unusable';
+await pick(photoG);
+await waitFor(async () => gradeReqs() === reqsG + 1);
+await sleep(500);
+await gotoApp();
+await pick(photoG);
+await waitFor(async () => gradeReqs() === reqsG + 2 && providerCalls === callsG + 2);
+const gReqs = gradeLog.slice(reqsG);
+ok(gReqs.length === 2 && gReqs[0].attemptId !== gReqs[1].attemptId && gReqs[1].replay !== true, 'the retake used a NEW attemptId and was not answered as a replay');
+ok(providerCalls - callsG === 2, 'two paid calls: the first was rejected by the operator, the second is a deliberate retry');
+
+section('H. UNCERTAIN operator confirmation (real dialog): decline sends nothing; accept starts one new, possibly billed, attempt');
+await gotoApp();
+const photoH = await jpeg(0x7733ccff);
+const callsH = providerCalls, reqsH = gradeReqs(), itemsH = await itemCount();
+nextProvider = 'fail';
+await pick(photoH);
+await waitFor(async () => gradeReqs() === reqsH + 1);
+await sleep(600);
+ok(providerCalls - callsH === 1, 'the provider connection failed mid-call: ONE raw POST (no hidden SDK retry)');
+await gotoApp();
+await pick(photoH);
+await waitFor(async () => gradeReqs() === reqsH + 2);
+await sleep(500);
+const hReqs = gradeLog.slice(reqsH);
+ok(hReqs[1].attemptId === hReqs[0].attemptId && hReqs[1].error === 'GRADE_ATTEMPT_UNCERTAIN', 'the repeat resumes the SAME attempt and the server answers UNCERTAIN');
+ok(providerCalls - callsH === 1, 'the UNCERTAIN answer made ZERO provider POSTs');
+ok((await page.locator('body').innerText()).toLowerCase().includes('charged'), 'the operator is told the earlier attempt may already have been charged');
+const uncState = await attemptStore();
+ok(Object.values(uncState.entries).some((e) => e.status === 'uncertain'), 'the client remembers the attempt as uncertain');
+await gotoApp();
+let dialogText = null;
+page.once('dialog', async (d) => { dialogText = d.message(); await d.dismiss(); });
+const reqsDecl = gradeReqs();
+await pick(photoH);
+await sleep(1200);
+ok(dialogText && /may be billed/i.test(dialogText), 'a confirmation dialog warns the new attempt may be billed again');
+ok(gradeReqs() === reqsDecl && providerCalls - callsH === 1, 'DECLINING sends no request and makes no provider call');
+await gotoApp();
+page.once('dialog', async (d) => { await d.accept(); });
+await pick(photoH);
+const savedH = await waitFor(async () => (await itemCount()) >= itemsH + 1);
+const hAll = gradeLog.slice(reqsH);
+ok(savedH && hAll.length === 3 && hAll[2].attemptId !== hAll[0].attemptId && hAll[2].status === 200, 'ACCEPTING started exactly one NEW attempt, which completed and saved ' + JSON.stringify({ savedH, n: hAll.length, log: hAll.map((x) => [x.status, x.error, x.replay]), body: (await page.locator('body').innerText()).slice(0, 200) }));
+ok(providerCalls - callsH === 2, 'total paid provider POSTs: the failed one plus the one the operator explicitly authorized');
+
+section('I. enforcement=required: a STALE client (no attemptId) fails safely; the current client still scans');
+await gotoApp();
+process.env.GRADE_ATTEMPT_ENFORCEMENT = 'required';
+await page.route('**/api/grade', async (route) => {
+  const b = route.request().postDataJSON?.();
+  if (b && !b.warmup) { delete b.attemptId; await route.continue({ postData: JSON.stringify(b) }); } // emulate a bundle that predates GK-281
+  else await route.continue();
+});
+const callsI = providerCalls, reqsI = gradeReqs();
+await pick(await jpeg(0x1199ddff));
+await waitFor(async () => gradeReqs() === reqsI + 1);
+await sleep(600);
+const iLog = gradeLog[gradeLog.length - 1];
+ok(iLog.status === 400 && iLog.error === 'GRADE_ATTEMPT_REQUIRED', 'the stale client is refused with GRADE_ATTEMPT_REQUIRED');
+ok(providerCalls === callsI, 'the refusal happened BEFORE any paid provider call (no unprotected paid workflow)');
+ok((await page.locator('body').innerText()).includes('Update the app and try again'), 'the operator sees the plain-language update message, not a raw code');
+await page.unroute('**/api/grade');
+await gotoApp();
+const itemsI = await itemCount();
+await pick(await jpeg(0xdd9911ff));
+const okI = await waitFor(async () => (await itemCount()) >= itemsI + 1);
+ok(okI && gradeLog[gradeLog.length - 1].status === 200 && !!gradeLog[gradeLog.length - 1].attemptId, 'the CURRENT client keeps scanning normally under enforcement=required (it sends an attemptId)');
+delete process.env.GRADE_ATTEMPT_ENFORCEMENT;
 
 section('F. no leakage of credentials into persisted client attempt state');
 const dump = JSON.stringify(await attemptStore());

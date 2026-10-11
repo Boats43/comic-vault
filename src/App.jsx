@@ -12472,6 +12472,9 @@ export default function App() {
           // UNIVERSAL U1 — not a dead end: when this was a Scan-tab save (not Buyer mode), the
           // operator may EXPLICITLY choose "Save as Generic asset" with the photo already captured
           // here. Nothing is minted automatically, and no further paid classification call runs.
+          // GK-281: the operator has SEEN this result and rejected it. Release the attempt so retaking the same photo is an
+          // explicit NEW attempt (a deliberate retry, billed as such) instead of replaying the same unusable answer.
+          markGradeAttemptConsumed(gradeOut.digest, gradeOut.attemptId);
           if (save) setUnsupportedScan({ photoDataUrl: b64 });
           setError(save ? "We couldn't identify this as a comic or book." : "No comic detected. Try again.");
           setLoading(false);

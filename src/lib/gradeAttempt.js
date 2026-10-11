@@ -107,9 +107,12 @@ export function computeAttemptFingerprint({ workflow, images, voiceContext = nul
   return `sha256:${sha256(canon)}`;
 }
 
-// A provider "definitive rejection": the provider returned an HTTP error status, so no completed (billed) call exists.
-// Timeouts, resets and a parse failure AFTER a successful response are NOT definitive (a billed call may exist).
-export const isDefinitiveProviderRejection = (err) => Number.isInteger(err?.status) && err.status >= 400 && err.status <= 599;
+// A provider "definitive rejection": the provider answered with an error status that is returned BEFORE it processes the
+// request, so no completed (billed) call exists. This is an ALLOWLIST, not "any 4xx/5xx": a 408/409 (timeout/lock), a
+// 500, 502, 503 or 504 can be produced by a gateway or after the model already ran, so they stay UNCERTAIN, as do
+// timeouts, connection resets (no status), and a parse failure AFTER a successful response.
+export const DEFINITIVE_REJECTION_STATUSES = Object.freeze([400, 401, 402, 403, 404, 413, 422, 429, 529]);
+export const isDefinitiveProviderRejection = (err) => Number.isInteger(err?.status) && DEFINITIVE_REJECTION_STATUSES.includes(err.status);
 
 const wrapStore = async (fn) => {
   try { return await fn(); } catch (e) {

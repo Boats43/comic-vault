@@ -64,6 +64,9 @@ ok(count(grade, /await attachGradeReceipt\(/g) === 2, 'attachGradeReceipt runs f
 ok(/resultId = ctx\.resultId \|\| randomUUID\(\)/.test(grade), 'the prediction result id is the attempt-derived id when an attempt exists');
 ok(/failFromError\(err\)/.test(grade), 'the catch block records what happened to the attempt');
 
+ok(/new Anthropic\(\{[^}]*maxRetries:\s*0/.test(grade), 'the grading provider client disables SDK-level retries (maxRetries: 0)');
+ok(/markGradeAttemptConsumed\(gradeOut\.digest, gradeOut\.attemptId\);\s*\n\s*if \(save\) setUnsupportedScan/.test(app), 'a result the operator rejects as unidentifiable releases the attempt (the retake is an explicit new attempt)');
+
 section('4. client contract');
 ok(count(client, /postGradeWithAttempt\(/g) >= 2 && /attemptId/.test(client), 'the client library posts every grade request with an attemptId');
 ok(!/localStorage\./.test(client), 'persistence goes only through the principal-scoped storage helper');

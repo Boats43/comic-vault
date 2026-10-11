@@ -391,6 +391,7 @@ const c19b = anthropicCalls;
 const rq = await grade(tokA, { images: [await nextPng()] });
 delete process.env.GRADE_ATTEMPT_ENFORCEMENT;
 ok(rq.statusCode === 400 && rq.body.error === 'GRADE_ATTEMPT_REQUIRED' && anthropicCalls === c19b, 'with enforcement=required a request without an attemptId is refused before any paid call');
+ok(rq.headers['x-grailkey-client-contract'] === 'CATEGORY_REQUIRED_CLIENT_OUTDATED', 'and it carries the stable stale-client header, so a current bundle shows "Update the app and try again."');
 const bad = await grade(tokA, { images: [await nextPng()], attemptId: 'short' });
 ok(bad.statusCode === 400 && bad.body.error === 'GRADE_ATTEMPT_ID_INVALID', 'a malformed attemptId is a 400');
 getFault = true;

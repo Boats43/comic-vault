@@ -11,9 +11,14 @@ import { checkRateLimit } from "./rate-limit.js";
 import { enforceSpendGuard } from "../src/lib/spendGuard.js";
 import { resolveCallCost, getEstimatedStaticPrefixTokens, classifyCacheEligibility } from "../src/lib/anthropicPricing.js";
 import { requireAuthenticatedPrincipal } from "../src/lib/accessGate.js";
+import { markClientContractRefusal } from "../src/lib/clientContract.js";
 import { guardConditionClaims } from "../src/lib/conditionEvidenceGuard.js";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// GK-281 — maxRetries: 0, deliberately. The SDK default (2) silently re-POSTs /v1/messages on a connection failure, a
+// timeout, 408, 409, 429 and every 5xx — a hidden second (third) PAID invocation inside ONE claimed attempt, where the
+// first may already have been processed and billed. All retry/recovery decisions belong to the attempt state machine
+// (src/lib/gradeAttempt.js), which knows whether a call is provably unbilled (definitive rejection) or UNCERTAIN.
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0 });
 
 // GrailKey Dispatch 33 (2026-08-08) — audit-only cost/cache logging. This
 // is a separate HTTP request from api/enrich.js (the only place
@@ -974,6 +979,9 @@ export default async function handler(req, res) {
       attempt = claim.handle; // OWNER: this request is the one logical workflow for this attempt
       await observeAttempt({ outcome: 'claimed', branch: workflow });
     } else if (attemptEnforcement() === 'required') {
+      // Same stable stale-client signal the U1 contract uses: a current bundle shows "Update the app and try again." centrally
+      // (apiFetch) instead of a raw code. An older bundle cannot understand it, but it STILL fails closed: no paid call is made.
+      markClientContractRefusal(res);
       res.status(400).json({ error: "GRADE_ATTEMPT_REQUIRED", message: "Update the app and try again." });
       return;
     } else {
