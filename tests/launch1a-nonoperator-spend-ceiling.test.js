@@ -153,5 +153,81 @@ console.log('\n[7] misconfiguration and legacy behaviour');
   eq(st3._dump()[guard.nonOperatorDayKey(NOW)] ?? 0, 0, 'an operator reservation never touches the aggregate');
 }
 
+console.log('\n[8] FAIL-CLOSED operator configuration (v3): absent / empty / malformed / unrecognized');
+{
+  const UUID = '95b42d2e-a1d8-47de-904e-798122731b08';
+  const UUID2 = '01A0283A-B1B6-7F90-9B41-9C06BEE6ECBA';
+  const p = guard.parseOperatorIds;
+  eq(p(undefined).status, 'absent', 'undefined -> absent');
+  eq(p(null).status, 'absent', 'null -> absent');
+  for (const v of ['', '   ', ',', ' , , ']) eq(p(v).status, 'empty', `${JSON.stringify(v)} -> empty`);
+  for (const v of ['admin', 'jimmy@example.com', UUID + ',not-a-uuid', UUID + 'x', '"' + UUID + '"', '95b42d2e-a1d8-47de-904e', 'operator']) eq(p(v).status, 'malformed', `${JSON.stringify(v)} -> malformed`);
+  eq(p(UUID).status, 'ok', 'one valid uuid -> ok');
+  eq(p(` ${UUID} , ${UUID2} `).ids.length, 2, 'two valid uuids (spaces, mixed case) -> ok');
+
+  const HOSTED = { VERCEL: '1' };
+  eq(guard.resolveSpendConfig({ ...HOSTED }).requireOperatorConfig, true, 'a hosted runtime REQUIRES operator configuration');
+  eq(guard.resolveSpendConfig({ ...HOSTED }).operatorConfigStatus, 'absent', 'hosted, variable unset -> absent');
+  eq(guard.resolveSpendConfig({ ...HOSTED, SPEND_GUARD_OPERATOR_PRINCIPAL_IDS: '' }).operatorConfigStatus, 'empty', 'hosted, empty string -> empty');
+  eq(guard.resolveSpendConfig({ ...HOSTED, SPEND_GUARD_OPERATOR_PRINCIPAL_IDS: 'root' }).operatorConfigStatus, 'malformed', 'hosted, junk -> malformed');
+  eq(guard.resolveSpendConfig({ NODE_ENV: 'production' }).requireOperatorConfig, true, 'NODE_ENV=production also requires it');
+  eq(guard.resolveSpendConfig({ GRAILKEY_CATALOG_ENVIRONMENT: 'production' }).requireOperatorConfig, true, 'GRAILKEY_CATALOG_ENVIRONMENT=production also requires it');
+  eq(guard.resolveSpendConfig({}).requireOperatorConfig, false, 'only a tests/*.test.js harness process is exempt (this process)');
+
+  const spyStore = () => { const inner = createMemoryResearchStore(); const spy = { calls: 0 }; const w = {}; for (const k of Object.keys(inner)) w[k] = (...a) => { spy.calls += 1; return inner[k](...a); }; w._dump = inner._dump; w.spy = spy; return w; };
+  const hostedCfg = (envOver) => ({ ...guard.resolveSpendConfig({ ...HOSTED, ...envOver }), principalDaily: 100, operatorDaily: 5000, globalDaily: 6000, nonOperatorDaily: 1000 });
+  const errs = []; const origErr = console.error; console.error = (...a) => { errs.push(a.join(' ')); };
+  for (const [label, envOver, reason] of [['absent', {}, 'absent'], ['empty', { SPEND_GUARD_OPERATOR_PRINCIPAL_IDS: '' }, 'empty'], ['malformed', { SPEND_GUARD_OPERATOR_PRINCIPAL_IDS: 'admin,' + UUID }, 'malformed']]) {
+    guard.resetOperatorRecognitionCache();
+    const st = spyStore();
+    const r = await guard.reserveSpend({ principalId: 'user-1', endpoint: 'grade', store: st, now: NOW, config: hostedCfg(envOver), operatorRecognizer: async () => true });
+    ok(!r.ok && r.status === 503 && r.code === 'SPEND_GUARD_MISCONFIGURED' && r.reason === reason, `${label}: refused 503 SPEND_GUARD_MISCONFIGURED (reason ${reason})`);
+    eq(st.spy.calls, 0, `${label}: the store was never touched (no quota consumed, nothing to refund)`);
+    ok(/operator/i.test(r.error) && /Nothing was charged/.test(r.error), `${label}: actionable message that says nothing was charged`);
+    const opR = await guard.reserveSpend({ principalId: UUID, endpoint: 'grade', store: st, now: NOW, config: hostedCfg(envOver), operatorRecognizer: async () => true });
+    ok(!opR.ok && opR.code === 'SPEND_GUARD_MISCONFIGURED', `${label}: even the real operator is refused (cannot be classified) - never silently treated as ordinary or unlimited`);
+  }
+  // unrecognized: well-formed but names no operator principal
+  guard.resetOperatorRecognitionCache();
+  let recogCalls = 0; const notOp = async () => { recogCalls += 1; return false; };
+  const cfgUn = hostedCfg({ SPEND_GUARD_OPERATOR_PRINCIPAL_IDS: UUID });
+  const stU = spyStore();
+  const rUn = await guard.reserveSpend({ principalId: 'user-1', endpoint: 'chat', store: stU, now: NOW, config: cfgUn, operatorRecognizer: notOp });
+  ok(!rUn.ok && rUn.code === 'SPEND_GUARD_MISCONFIGURED' && rUn.reason === 'unrecognized', 'unrecognized: well-formed id that is NOT an operator principal -> refused (reason unrecognized)');
+  eq(stU.spy.calls, 0, 'unrecognized: store never touched');
+  for (let i = 0; i < 10; i += 1) await guard.reserveSpend({ principalId: 'user-1', endpoint: 'chat', store: stU, now: NOW, config: cfgUn, operatorRecognizer: notOp });
+  eq(recogCalls, 1, 'unrecognized: the verdict is cached (1 lookup for 11 requests)');
+  // recognized: proceeds and the aggregate applies
+  guard.resetOperatorRecognitionCache();
+  const stOk = createMemoryResearchStore();
+  const rOk = await guard.reserveSpend({ principalId: 'user-1', endpoint: 'chat', store: stOk, now: NOW, config: cfgUn, operatorRecognizer: async (id) => id === UUID });
+  ok(rOk.ok === true, 'recognized operator configuration: requests proceed');
+  eq(stOk._dump()[guard.nonOperatorDayKey(NOW)], 1, '...and the aggregate counter is in force for an ordinary principal');
+  // recognition outage must not take paid features down, and must not disable the aggregate
+  guard.resetOperatorRecognitionCache();
+  const stDb = createMemoryResearchStore();
+  const rDb = await guard.reserveSpend({ principalId: 'user-1', endpoint: 'chat', store: stDb, now: NOW, config: cfgUn, operatorRecognizer: async () => { throw new Error('db down'); } });
+  ok(rDb.ok === true && stDb._dump()[guard.nonOperatorDayKey(NOW)] === 1, 'recognition lookup outage: proceeds, aggregate STILL enforced');
+  // no permanent consumption after a misconfiguration refusal
+  guard.resetOperatorRecognitionCache();
+  const stFix = createMemoryResearchStore();
+  await guard.reserveSpend({ principalId: 'user-1', endpoint: 'grade', store: stFix, now: NOW, config: hostedCfg({}), operatorRecognizer: async () => true });
+  eq(Object.keys(stFix._dump()).length, 0, 'after refusals nothing was ever written to the store');
+  console.error = origErr;
+  ok(!errs.some((e) => e.includes(UUID) || e.includes('admin')), 'the misconfiguration log line never prints the configured values');
+  ok(errs.some((e) => /operator configuration/.test(e)), '...but does log an actionable line');
+
+  // HTTP shape
+  const rr = { h: {}, code: null, body: null, setHeader(k, v) { this.h[k] = v; }, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
+  guard.sendSpendRefusal(rr, { ok: false, status: 503, code: 'SPEND_GUARD_MISCONFIGURED', reason: 'absent', error: 'x', retryAfterSeconds: 300, resetAt: null });
+  ok(rr.code === 503 && rr.body.error === 'SPEND_GUARD_MISCONFIGURED' && rr.body.reason === 'absent', 'the HTTP refusal carries the stable code and a reason code only');
+
+  // non-spend paths never reach the guard
+  const { readFileSync } = await import('node:fs');
+  for (const f of ['api/auth-clerk.js', 'api/collection.js', 'api/assets.js', 'api/collection-image-v2.js', 'api/collection-image.js', 'api/asset-media.js']) {
+    ok(!/spendGuard/.test(readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')), `${f} never imports the spend guard (authentication, Collection reads and images stay available)`);
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

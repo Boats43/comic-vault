@@ -45,6 +45,16 @@
 // The sub-ceiling applies ONLY when at least one operator principal is configured:
 // with none, nobody is protected, so a pooled limit would throttle the real operator
 // (everyone is "ordinary"); the pre-L1A behaviour is kept in that case.
+//
+// GK-L1A (v3 amendment) - MISSING CONFIGURATION MUST NEVER SILENTLY DISABLE A SPEND INVARIANT. The paragraph above
+// described a fail-OPEN: with no operator configured, the aggregate ceiling simply vanished. In any REAL runtime (the
+// same boundary the store invariant uses: not a tests/*.test.js harness process) a spend-consuming request is now
+// REFUSED with SPEND_GUARD_MISCONFIGURED (503, nothing charged, no counter touched) when SPEND_GUARD_OPERATOR_PRINCIPAL_IDS
+// is absent, empty, malformed (any entry is not a UUID), or unrecognized (it names no real operator-kind principal).
+// Only spend-consuming calls are affected: authentication, Collection reads and the public pages never reach the guard.
+// "Unrecognized" is verified against the principal table with a cached lookup; if that lookup itself cannot be made
+// (database outage) the guard proceeds, because the aggregate ceiling still applies and a verification outage must not
+// take paid features down - it is logged. Pinned by tests/launch1a-nonoperator-spend-ceiling.test.js.
 
 import { researchStore, hasResearchStoreOverride, createMemoryResearchStore, ResearchStoreUnavailableError } from './researchStore.js';
 
@@ -76,15 +86,29 @@ const intEnv = (env, name, dflt) => {
   return Number.isFinite(n) && n >= 0 ? n : dflt;
 };
 
+const PRINCIPAL_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** @returns {{status:'ok'|'absent'|'empty'|'malformed', ids:string[]}} */
+export function parseOperatorIds(raw) {
+  if (raw === undefined || raw === null) return { status: 'absent', ids: [] };
+  const parts = String(raw).split(',').map((x) => x.trim()).filter(Boolean);
+  if (parts.length === 0) return { status: 'empty', ids: [] };
+  if (!parts.every((x) => PRINCIPAL_ID_RE.test(x))) return { status: 'malformed', ids: [] };
+  return { status: 'ok', ids: parts };
+}
+
 export function resolveSpendConfig(env = process.env) {
-  const ops = String(env.SPEND_GUARD_OPERATOR_PRINCIPAL_IDS || '')
-    .split(',').map((s) => s.trim()).filter(Boolean);
+  const parsed = parseOperatorIds(env.SPEND_GUARD_OPERATOR_PRINCIPAL_IDS);
+  const ops = parsed.status === 'ok' ? parsed.ids : String(env.SPEND_GUARD_OPERATOR_PRINCIPAL_IDS || '').split(',').map((x) => x.trim()).filter(Boolean);
   return {
+    operatorConfigStatus: parsed.status,
     principalDaily: intEnv(env, 'SPEND_GUARD_PRINCIPAL_DAILY_UNITS', SPEND_DEFAULTS.PRINCIPAL_DAILY_UNITS),
     operatorDaily: intEnv(env, 'SPEND_GUARD_OPERATOR_DAILY_UNITS', SPEND_DEFAULTS.OPERATOR_DAILY_UNITS),
     globalDaily: intEnv(env, 'SPEND_GUARD_GLOBAL_DAILY_UNITS', SPEND_DEFAULTS.GLOBAL_DAILY_UNITS),
     nonOperatorDaily: intEnv(env, 'SPEND_GUARD_NONOPERATOR_DAILY_UNITS', SPEND_DEFAULTS.NONOPERATOR_DAILY_UNITS),
     operatorPrincipalIds: new Set(ops),
+    // true in every real runtime; false only in a tests/*.test.js harness process (see isTestHarnessProcess)
+    requireOperatorConfig: !isTestHarnessProcess(process.argv[1], env),
   };
 }
 
@@ -141,8 +165,9 @@ const secondsUntilUtcMidnight = (now) => Math.max(1, Math.ceil((nextUtcMidnightM
 // Reserve `endpoint`'s units for `principalId` BEFORE the paid call.
 //   ok:true  -> { ok, units, principalUsed, principalCap, globalUsed, globalCap }
 //   ok:false -> { ok:false, status, code, error, retryAfterSeconds, resetAt }
-// codes: SPEND_PRINCIPAL_DAILY_CAP | SPEND_GLOBAL_DAILY_CAP | SPEND_GUARD_UNAVAILABLE
-export async function reserveSpend({ principalId, endpoint, store, now = new Date(), config } = {}) {
+// codes: SPEND_PRINCIPAL_DAILY_CAP | SPEND_NONOPERATOR_DAILY_CAP | SPEND_GLOBAL_DAILY_CAP | SPEND_GUARD_UNAVAILABLE |
+//        SPEND_GUARD_MISCONFIGURED
+export async function reserveSpend({ principalId, endpoint, store, now = new Date(), config, operatorRecognizer } = {}) {
   const units = SPEND_UNITS[endpoint];
   const retryAfterSeconds = secondsUntilUtcMidnight(now);
   const resetAt = new Date(nextUtcMidnightMs(now)).toISOString();
@@ -155,6 +180,9 @@ export async function reserveSpend({ principalId, endpoint, store, now = new Dat
   if (!units || !principalId) return unavailable();
 
   const cfg = config || resolveSpendConfig();
+  // GK-L1A (v3): a real runtime with missing/invalid operator classification REFUSES (nothing charged, no counter touched).
+  const gate = await checkOperatorConfig(cfg, { operatorRecognizer });
+  if (!gate.ok) return misconfigured(gate.reason);
   const st = store || defaultSpendStore();
   const pKey = principalDayKey(principalId, now);
   const gKey = globalDayKey(now);
@@ -225,6 +253,56 @@ export function effectiveNonOperatorCeiling(cfg) {
   return Math.min(cfg.nonOperatorDaily, Math.max(0, cfg.globalDaily - cfg.operatorDaily));
 }
 
+const misconfigured = (reason) => ({
+  ok: false, status: 503, code: 'SPEND_GUARD_MISCONFIGURED', reason,
+  error: 'Paid features are paused: usage accounting is not configured correctly on this deployment. Nothing was charged. The operator must fix the spend-guard operator configuration.',
+  retryAfterSeconds: 300, resetAt: null,
+});
+
+let lastMisconfigLog = 0;
+const OPERATOR_RECOGNITION_TTL_MS = 10 * 60 * 1000;
+const OPERATOR_UNRECOGNIZED_TTL_MS = 60 * 1000;
+let recognitionCache = { key: null, until: 0, ok: false };
+export const resetOperatorRecognitionCache = () => { recognitionCache = { key: null, until: 0, ok: false }; lastMisconfigLog = 0; };
+
+// Default recognizer: lazily imports the auth module so a harness process (which never reaches it) loads no database code.
+async function defaultOperatorRecognizer(id) {
+  const { isOperatorPrincipal } = await import('../modules/auth/index.js');
+  return isOperatorPrincipal({ principalId: id });
+}
+
+/**
+ * @returns {Promise<{ok:true} | {ok:false, reason:'absent'|'empty'|'malformed'|'unrecognized'}>}
+ * Never throws. Applies only when cfg.requireOperatorConfig (every real runtime).
+ */
+export async function checkOperatorConfig(cfg, { operatorRecognizer } = {}) {
+  const required = cfg?.requireOperatorConfig ?? !isTestHarnessProcess();
+  if (!required) return { ok: true };
+  const status = cfg?.operatorConfigStatus ?? (cfg?.operatorPrincipalIds?.size ? 'ok' : 'absent');
+  const fail = (reason) => {
+    const now = Date.now();
+    if (now - lastMisconfigLog > 60_000) { lastMisconfigLog = now; console.error(`[spend-guard] operator configuration ${reason} - REFUSING spend-consuming requests (set SPEND_GUARD_OPERATOR_PRINCIPAL_IDS to the operator principal UUID)`); }
+    return { ok: false, reason };
+  };
+  if (status !== 'ok') return fail(status);
+  const ids = [...cfg.operatorPrincipalIds];
+  const key = ids.slice().sort().join(',');
+  const now = Date.now();
+  if (recognitionCache.key === key && now < recognitionCache.until) return recognitionCache.ok ? { ok: true } : fail('unrecognized');
+  const recognize = operatorRecognizer || defaultOperatorRecognizer;
+  let any = false;
+  try {
+    for (const id of ids) { if (await recognize(id)) { any = true; break; } }
+  } catch (e) {
+    // The principal table could not be consulted. The aggregate ceiling still applies, so do not take paid features down
+    // for a verification outage - but say so.
+    console.error('[spend-guard] operator recognition unavailable (database) - proceeding; aggregate ceiling still enforced:', e?.message || e);
+    return { ok: true };
+  }
+  recognitionCache = { key, ok: any, until: now + (any ? OPERATOR_RECOGNITION_TTL_MS : OPERATOR_UNRECOGNIZED_TTL_MS) };
+  return any ? { ok: true } : fail('unrecognized');
+}
+
 // Writes the stable refusal response. Never includes provider detail.
 export function sendSpendRefusal(res, refusal) {
   res.setHeader('retry-after', String(refusal.retryAfterSeconds));
@@ -233,6 +311,7 @@ export function sendSpendRefusal(res, refusal) {
     message: refusal.error,
     retryAfter: refusal.retryAfterSeconds,
     resetAt: refusal.resetAt,
+    ...(refusal.reason ? { reason: refusal.reason } : {}),
   });
 }
 

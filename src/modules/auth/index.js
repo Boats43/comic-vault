@@ -7,7 +7,7 @@
 //
 // See docs/adr/DATA-1D-AUTH-CROSS-DEVICE.md for the full design.
 
-export { login, loginWithExternalIdentity, verifyToken } from './service.js';
+export { login, loginWithExternalIdentity, verifyToken, isOperatorPrincipal } from './service.js';
 
 export {
   AuthModuleError,

@@ -314,16 +314,6 @@ export async function getRemoteImageUriForPrincipal(client, principalId, id, ind
   return Array.isArray(arr) && typeof arr[index] === 'string' ? arr[index] : null;
 }
 
-// How many displayable remote images each of THIS principal's items has — counts only, never a URI.
-export async function getRemoteImageCountsForPrincipal(client, principalId, ids) {
-  const res = await client.query(
-    `SELECT id, CASE WHEN jsonb_typeof(attributes->'remoteImages') = 'array' THEN jsonb_array_length(attributes->'remoteImages') ELSE 0 END AS n
-       FROM data1_dev.collection_item WHERE principal_id = $1 AND id = ANY($2::text[])`,
-    [principalId, ids]
-  );
-  return res.rows.map((x) => ({ id: x.id, count: Number(x.n) || 0 }));
-}
-
 // ───────────────────────── GK-280A — grade-prediction association ─────────────────────────
 // One event is bound to at most one item per principal. Serialized by an advisory lock keyed on
 // (principal, event) so two concurrent claims of the same event cannot both pass the check below.

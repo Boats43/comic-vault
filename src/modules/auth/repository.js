@@ -23,6 +23,13 @@ export async function getOperatorPrincipal(client) {
   return res.rows[0] || null;
 }
 
+// GK-L1A (2026-10-11): true only when this id is a REAL operator-kind principal. Used by the spend guard to detect an
+// operator-classification config that names ids which are not operators (a typo would otherwise throttle the real operator).
+export async function isOperatorPrincipal(client, principalId) {
+  const res = await client.query("SELECT 1 FROM data1_dev.gk_principal WHERE id = $1 AND kind = 'operator'", [principalId]);
+  return res.rowCount > 0;
+}
+
 export async function getCredential(client, principalId) {
   const res = await client.query(
     'SELECT credential_hash, credential_salt FROM data1_dev.principal_credential WHERE principal_id = $1',

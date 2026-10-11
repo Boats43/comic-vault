@@ -14,6 +14,17 @@ import { InvalidCredentialError, InvalidTokenError, NotProvisionedError } from '
 // Single-operator era: no username/email — there is exactly one
 // operator principal to log in as. Multi-user login is explicitly not
 // built (see docs/adr/DATA-1D-AUTH-CROSS-DEVICE.md, T1).
+// GK-L1A: does this id name a real operator principal? (read-only; never throws on "no" - only on a DB failure)
+export async function isOperatorPrincipal({ principalId } = {}) {
+  if (typeof principalId !== 'string' || !principalId) return false;
+  const client = await acquireConnection();
+  try {
+    return await repo.isOperatorPrincipal(client, principalId);
+  } finally {
+    client.release();
+  }
+}
+
 export async function login({ passphrase } = {}) {
   if (!passphrase || typeof passphrase !== 'string') {
     throw new InvalidCredentialError('passphrase is required');

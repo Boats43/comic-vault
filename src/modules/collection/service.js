@@ -320,14 +320,3 @@ export async function getRemoteImageUriForPrincipal({ principalId, id, index = 0
     client.release();
   }
 }
-
-export async function getRemoteImageCountsForPrincipal({ principalId, ids } = {}) {
-  requireFields({ principalId }, ['principalId']);
-  if (!Array.isArray(ids) || ids.length === 0) return [];
-  const client = await acquireConnection();
-  try {
-    return await repo.getRemoteImageCountsForPrincipal(client, principalId, ids);
-  } finally {
-    client.release();
-  }
-}

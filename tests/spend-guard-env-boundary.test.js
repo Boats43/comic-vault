@@ -58,16 +58,23 @@ for (const argv of REAL_ARGVS) {
 console.log('\n4. end to end: with a hosted marker and NO KV configured, reservation FAILS CLOSED (503), never in-memory');
 {
   const saved = {};
-  for (const k of ['VERCEL', 'KV_REST_API_URL', 'KV_REST_API_TOKEN']) { saved[k] = process.env[k]; }
+  for (const k of ['VERCEL', 'KV_REST_API_URL', 'KV_REST_API_TOKEN', 'SPEND_GUARD_OPERATOR_PRINCIPAL_IDS']) { saved[k] = process.env[k]; }
   delete process.env.KV_REST_API_URL; delete process.env.KV_REST_API_TOKEN;
   process.env.VERCEL = '1';
+  // GK-L1A (v3): a hosted runtime now also REQUIRES valid operator classification before any reservation; this block
+  // isolates the STORE invariant, so it supplies a valid operator id (recognition stubbed - no database here).
+  process.env.SPEND_GUARD_OPERATOR_PRINCIPAL_IDS = '95b42d2e-a1d8-47de-904e-798122731b08';
   rs.setResearchStoreForTests(null); // no injected store: the real selection path
   const errs = console.error; console.error = () => {};
-  const r = await guard.reserveSpend({ principalId: 'prod-like-user', endpoint: 'chat' });
+  const recognizer = async () => true;
+  const r = await guard.reserveSpend({ principalId: 'prod-like-user', endpoint: 'chat', operatorRecognizer: recognizer });
   console.error = errs;
   ok(r.ok === false && r.status === 503 && r.code === 'SPEND_GUARD_UNAVAILABLE', 'VERCEL set + no durable store -> 503 SPEND_GUARD_UNAVAILABLE (fail closed)');
-  const r2 = await guard.reserveSpend({ principalId: 'prod-like-user', endpoint: 'chat' });
+  const r2 = await guard.reserveSpend({ principalId: 'prod-like-user', endpoint: 'chat', operatorRecognizer: recognizer });
   ok(r2.ok === false, 'and it keeps failing closed (nothing was silently counted in memory)');
+  delete process.env.SPEND_GUARD_OPERATOR_PRINCIPAL_IDS;
+  const r3 = await guard.reserveSpend({ principalId: 'prod-like-user', endpoint: 'chat' });
+  ok(r3.ok === false && r3.code === 'SPEND_GUARD_MISCONFIGURED', 'hosted + NO operator configuration -> SPEND_GUARD_MISCONFIGURED (refused before any store is touched)');
   for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
 }
 
