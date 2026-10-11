@@ -27,6 +27,24 @@
 // SPEND_GUARD_OPERATOR_PRINCIPAL_IDS (comma-separated principal ids) — never
 // inferred from a request field. research-market keeps its own separate
 // durable cap and is NOT double-counted here.
+//
+// GK-L1A - NON-OPERATOR AGGREGATE SUB-CEILING. Operator and ordinary units used
+// to share ONE global counter, so enough ordinary accounts could exhaust the day
+// and lock the operator out (operator remaining = min(5000, 6000 - ordinary use)).
+// A THIRD counter now bounds the SUM of all non-operator reservations
+// (SPEND_GUARD_NONOPERATOR_DAILY_UNITS, default 1000). Reservation order for an
+// ordinary principal: principal cap -> non-operator aggregate -> global, each an
+// atomic INCRBY checked on its own post-increment value, and any refusal (or store
+// error) refunds EVERY counter it took, so a refused call burns nothing.
+// GUARANTEE: ordinary reservations are bounded by the aggregate BEFORE they ever
+// touch the global counter, so ordinary usage occupies at most
+// min(aggregate, global) units of the global budget and the operator keeps
+// min(operatorCap, global - aggregate) = 5000 with the shipped 6000/1000/5000.
+// The effective aggregate is additionally CLAMPED to max(0, global - operatorDaily),
+// so a misconfiguration can never let ordinary use reach into the operator reserve.
+// The sub-ceiling applies ONLY when at least one operator principal is configured:
+// with none, nobody is protected, so a pooled limit would throttle the real operator
+// (everyone is "ordinary"); the pre-L1A behaviour is kept in that case.
 
 import { researchStore, hasResearchStoreOverride, createMemoryResearchStore, ResearchStoreUnavailableError } from './researchStore.js';
 
@@ -43,6 +61,7 @@ export const SPEND_DEFAULTS = Object.freeze({
   PRINCIPAL_DAILY_UNITS: 300,
   OPERATOR_DAILY_UNITS: 5000,
   GLOBAL_DAILY_UNITS: 6000,
+  NONOPERATOR_DAILY_UNITS: 1000,
 });
 
 const DAY_TTL_SECONDS = 2 * 24 * 3600;
@@ -50,6 +69,7 @@ const clean = (s) => String(s).replace(/[^A-Za-z0-9._:-]/g, '_');
 const utcDay = (d) => d.toISOString().slice(0, 10);
 export const principalDayKey = (principalId, d = new Date()) => `sg:v1:p:${clean(principalId)}:${utcDay(d)}`;
 export const globalDayKey = (d = new Date()) => `sg:v1:g:${utcDay(d)}`;
+export const nonOperatorDayKey = (d = new Date()) => `sg:v1:n:${utcDay(d)}`;
 
 const intEnv = (env, name, dflt) => {
   const n = Number.parseInt(env[name] ?? '', 10);
@@ -63,6 +83,7 @@ export function resolveSpendConfig(env = process.env) {
     principalDaily: intEnv(env, 'SPEND_GUARD_PRINCIPAL_DAILY_UNITS', SPEND_DEFAULTS.PRINCIPAL_DAILY_UNITS),
     operatorDaily: intEnv(env, 'SPEND_GUARD_OPERATOR_DAILY_UNITS', SPEND_DEFAULTS.OPERATOR_DAILY_UNITS),
     globalDaily: intEnv(env, 'SPEND_GUARD_GLOBAL_DAILY_UNITS', SPEND_DEFAULTS.GLOBAL_DAILY_UNITS),
+    nonOperatorDaily: intEnv(env, 'SPEND_GUARD_NONOPERATOR_DAILY_UNITS', SPEND_DEFAULTS.NONOPERATOR_DAILY_UNITS),
     operatorPrincipalIds: new Set(ops),
   };
 }
@@ -137,12 +158,19 @@ export async function reserveSpend({ principalId, endpoint, store, now = new Dat
   const st = store || defaultSpendStore();
   const pKey = principalDayKey(principalId, now);
   const gKey = globalDayKey(now);
-  const principalCap = cfg.operatorPrincipalIds.has(principalId) ? cfg.operatorDaily : cfg.principalDaily;
+  const isOperator = cfg.operatorPrincipalIds.has(principalId);
+  const principalCap = isOperator ? cfg.operatorDaily : cfg.principalDaily;
+  // GK-L1A: the aggregate applies only to ordinary principals and only when an operator is configured.
+  const nonOperatorCeiling = effectiveNonOperatorCeiling(cfg);
+  const useNonOperatorPool = !isOperator && nonOperatorCeiling !== null;
+  const nKey = nonOperatorDayKey(now);
 
   let pTaken = false;
+  let nTaken = false;
   let gTaken = false;
   const refund = async () => {
     try { if (pTaken) await st.decrBy(pKey, units); } catch { /* counter self-expires with its day */ }
+    try { if (nTaken) await st.decrBy(nKey, units); } catch { /* counter self-expires with its day */ }
     try { if (gTaken) await st.decrBy(gKey, units); } catch { /* counter self-expires with its day */ }
   };
   try {
@@ -155,6 +183,18 @@ export async function reserveSpend({ principalId, endpoint, store, now = new Dat
         error: 'Daily usage limit reached for this account. It resets at 00:00 UTC.',
         retryAfterSeconds, resetAt,
       };
+    }
+    if (useNonOperatorPool) {
+      const nUsed = await st.incrBy(nKey, units, DAY_TTL_SECONDS);
+      nTaken = true;
+      if (nUsed > nonOperatorCeiling) {
+        await refund();
+        return {
+          ok: false, status: 429, code: 'SPEND_NONOPERATOR_DAILY_CAP',
+          error: 'GrailKey is at its daily capacity for shared accounts. Please try again after 00:00 UTC.',
+          retryAfterSeconds, resetAt,
+        };
+      }
     }
     const gUsed = await st.incrBy(gKey, units, DAY_TTL_SECONDS);
     gTaken = true;
@@ -176,6 +216,13 @@ export async function reserveSpend({ principalId, endpoint, store, now = new Dat
     }
     return unavailable();
   }
+}
+
+// GK-L1A: the aggregate ceiling actually enforced, or null when no operator is configured (see header).
+// Clamped so ordinary use can never exceed (global - operator reserve).
+export function effectiveNonOperatorCeiling(cfg) {
+  if (!cfg || !cfg.operatorPrincipalIds || cfg.operatorPrincipalIds.size === 0) return null;
+  return Math.min(cfg.nonOperatorDaily, Math.max(0, cfg.globalDaily - cfg.operatorDaily));
 }
 
 // Writes the stable refusal response. Never includes provider detail.
