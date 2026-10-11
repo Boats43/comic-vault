@@ -2,7 +2,7 @@
 /**
  * isolation-cert-readonly - Production cross-principal isolation certification (LAUNCH-3 prep, 2026-10-11).
  *
- * STRICTLY READ-ONLY against the target. Issues only GET requests and the non-mutating image-link MINT (POST
+ * STRICTLY READ-ONLY against the target. Issues only GET requests and the non-mutating image-credential MINT (POST
  * /api/collection-image-v2, which writes nothing). Creates no principal, no row, no asset, spends nothing, calls no
  * paid provider. Needs TWO EXISTING sessions supplied by the operator, because a session token cannot be forged
  * safely from outside (the signing secret is not available to this tool and must not be):
@@ -59,23 +59,21 @@ for (const id of A.ids.slice(0, 25)) {
 }
 check('B cannot read any of A\'s items by id (first 25)', leaked === 0, `${leaked} leaked`);
 
-// B asks to mint image links for A's items.
+// Protected images (GK-L1B v3): the credential is a cookie minted by an authenticated POST; the URL carries identifiers only.
+const mintCookie = async (t) => { const r = await fetch(`${BASE}/api/collection-image-v2`, { method: 'POST', headers: hdr(t) }); const sc = r.headers.get('set-cookie') || ''; await r.arrayBuffer(); return { status: r.status, cookie: sc.split(';')[0], attrs: sc }; };
+const imgGet = async (cookie, p, id) => { const r = await fetch(`${BASE}/api/collection-image-v2?p=${encodeURIComponent(p)}&id=${encodeURIComponent(id)}&i=0`, { headers: cookie ? { Cookie: cookie } : {} }); const ct = r.headers.get('content-type') || ''; const cc = r.headers.get('cache-control') || ''; await r.arrayBuffer(); return { status: r.status, ct, cc }; };
+const mA = await mintCookie(TA); const mB = await mintCookie(TB);
+check('both principals can mint an image credential', mA.status === 200 && mB.status === 200 && /HttpOnly/.test(mA.attrs) && /Secure/.test(mA.attrs) && /SameSite=Strict/.test(mA.attrs), `A ${mA.status}, B ${mB.status}`);
 if (A.ids.length) {
-  const r = await fetch(`${BASE}/api/collection-image-v2`, { method: 'POST', headers: { ...hdr(TB), 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: A.ids.slice(0, 100) }) });
-  const j = await r.json().catch(() => ({}));
-  const gotForA = Object.keys(j.urls || {}).filter((id) => setA.has(id) && !overlap.includes(id));
-  check('B cannot mint image links for A\'s items', r.status === 200 && gotForA.length === 0, `status ${r.status}, ${gotForA.length} links`);
-  // and A's own mint works and the link is single-purpose
-  const ra = await fetch(`${BASE}/api/collection-image-v2`, { method: 'POST', headers: { ...hdr(TA), 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: A.ids.slice(0, 5) }) });
-  const ja = await ra.json().catch(() => ({}));
-  check('A can mint links for its own items', ra.status === 200, `${Object.keys(ja.urls || {}).length} items with links`);
-  const firstLink = Object.values(ja.urls || {})[0]?.[0];
-  if (firstLink) {
-    const g = await fetch(BASE + firstLink); // link holder needs no header by design; expect image
-    check('a freshly minted link serves an image to its holder', g.status === 200 && String(g.headers.get('content-type')).startsWith('image/'), `status ${g.status}`);
-    check('the response is not publicly cacheable', /private/.test(g.headers.get('cache-control') || '') && !/public|immutable/.test(g.headers.get('cache-control') || ''), g.headers.get('cache-control') || 'no header');
-    await g.arrayBuffer(); // drain; bytes are never stored or printed
-  }
+  const own = await imgGet(mA.cookie, pA, A.ids[0]);
+  check('A can load its own image', own.status === 200 && own.ct.startsWith('image/') || own.status === 404, `status ${own.status}${own.status === 404 ? ' (item has no stored display image)' : ''}`);
+  check('the image response is private and short-cached (never public/immutable)', own.status !== 200 || (/private/.test(own.cc) && !/public|immutable/.test(own.cc)), own.cc || 'n/a');
+  let leaked2 = 0; for (const id of A.ids.slice(0, 25)) { const r = await imgGet(mB.cookie, pB, id); if (r.status === 200 && !overlap.includes(id)) leaked2 += 1; }
+  check('B\x27s credential cannot load any of A\x27s item images (addressed as B)', leaked2 === 0, `${leaked2} leaked`);
+  const spoof = await imgGet(mB.cookie, pA, A.ids[0]);
+  check('B\x27s credential addressed as A is refused (principal mismatch)', spoof.status === 403, `status ${spoof.status}`);
+  const nocred = await imgGet(null, pA, A.ids[0]);
+  check('an image request with NO credential is refused (the old id-only attack)', nocred.status === 403, `status ${nocred.status}`);
 }
 
 // Physical assets: B probes A's linked assets / media.
