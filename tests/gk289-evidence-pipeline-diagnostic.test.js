@@ -81,7 +81,7 @@ ok(stage2.length > 0 && fx.rawComps.count === 0, 'the recorded visual pool conta
 console.log('\n-- the other two Production candidates: recorded sold-evidence stages (read-only census 2026-10-12) --');
 // Recorded values (Production catalogue rows; no re-fetch). Stage 2 is not separately recorded for these rows: the sold
 // diagnostics only record a first-failing filter per candidate.
-const NM98 = { active: 21, visualPool: 20, soldRaw: 30, soldRetained: 20, verified: 0, admitted: 0, reasons: { ungradedTitle: 22, gradeMismatch: 6, slabMismatch: 1, lot: 1 }, sample: 'a "cross-series" rejection reason appears in rejectedSamples but has no key in the reasons map (counts sum to 30 without it)' };
+const NM98 = { active: 21, visualPool: 20, soldRaw: 30, soldRetained: 20, verified: 0, admitted: 0, reasons: { ungradedTitle: 22, gradeMismatch: 6, slabMismatch: 1, lot: 1 }, sample: 'the "cross-series" sample is counted in the `lot` bucket (soldVerification.js:473), so the four reason counts sum to 30' };
 const OML = { active: 8, visualPool: 20, soldRaw: 1, verified: 0, admitted: 0, reasons: { issueMismatch: 1 }, sample: '"Old Man Logan, Vol. 2 #25F" $35 rejected as issueMismatch (a lettered/variant printing of the same issue number)' };
 const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
 ok(sum(NM98.reasons) === NM98.soldRaw && NM98.verified === 0, `New Mutants #98: 30 sold candidates -> 0 verified; exclusions ${JSON.stringify(NM98.reasons)} (73% "ungradedTitle")`);

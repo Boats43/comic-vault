@@ -36,17 +36,19 @@ export const REQUIRED_ABSENCE_SOURCES = Object.freeze(['SELLER_HUB_ACTIVE', 'SEL
 // ───────────────────────── provider correlation ─────────────────────────
 /**
  * Attempt-linked correlation identifiers sent with AddFixedPriceItem.
- *  * uuid -- Item.UUID: 32 hex characters (a GUID without dashes). eBay's documented defence for a lost response:
+ *  * uuid -- Item.UUID: 32 characters, digits 0-9 and letters A-F, UPPERCASE (a GUID without dashes). eBay's documented defence for a lost response:
  *    resending the SAME request with the SAME UUID either creates the listing (the first call had failed) or is
  *    rejected with error 488 "Duplicate UUID used" carrying the existing ItemID (KB 1462).
- *  * sku  -- Item.SKU used as a seller-visible custom label ("GK-" + the same 32 hex = 35 chars, limit 50). Without
+ *  * sku  -- Item.SKU used as a seller-visible custom label ("GK-" + the same 32 characters = 35 chars, limit 50). Without
  *    InventoryTrackingMethod=SKU it is NOT retrievable by GetItem; it exists so an operator (and a seller-scoped
  *    GetMyeBaySelling list scan) can recognise the listing.
  */
 export function attemptCorrelation(attemptId) {
   const hex = String(attemptId || '').replace(/-/g, '').toLowerCase();
   if (!/^[0-9a-f]{32}$/.test(hex)) throw new Error('attemptCorrelation: attemptId must be a UUID');
-  return { uuid: hex, sku: `GK-${hex}`, scheme: 'attempt-id-derived-v1' };
+  // eBay's schema documents Item.UUID as 32 characters of digits 0-9 and letters A-F (example is uppercase): emit uppercase.
+  const upper = hex.toUpperCase();
+  return { uuid: upper, sku: `GK-${upper}`, scheme: 'attempt-id-derived-v2-upper' };
 }
 
 // ───────────────────────── acknowledgment payload (whitelist projection) ─────────────────────────

@@ -350,7 +350,7 @@ try {
     addBehavior = behavior;
     let res = await call(PA, asset);
     ok(res.statusCode === 502 && res.body?.error === 'LISTING_OUTCOME_UNKNOWN' && !!res.body?.attemptId, `#12 [${behavior}] -> 502 LISTING_OUTCOME_UNKNOWN with the attempt id`);
-    ok(/^GK-[0-9a-f]{32}$/.test(res.body?.correlation?.sku || ''), `#12 [${behavior}] the response tells the operator which Seller Hub label to look for`);
+    ok(/^GK-[0-9A-F]{32}$/.test(res.body?.correlation?.sku || ''), `#12 [${behavior}] the response tells the operator which Seller Hub label to look for`);
     let rows = await ledger(asset.gkAssetId);
     ok(JSON.stringify(phasesOf(rows)) === JSON.stringify(['AUTHORIZED', 'SUBMITTED', 'AMBIGUOUS']), `#12 [${behavior}] attempt recorded AMBIGUOUS, not "failed" and not "not listed": ${JSON.stringify(phasesOf(rows))}`);
     const amb = rows.find((r) => r.phase === 'AMBIGUOUS');

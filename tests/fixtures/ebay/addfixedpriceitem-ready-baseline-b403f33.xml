@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ErrorLanguage>en_US</ErrorLanguage>
+  <WarningLevel>High</WarningLevel>
+  <Item>
+    <Title>The New Mutants #98 Marvel 1991</Title>
+    <Description><![CDATA[<h2>The New Mutants #98</h2>
+<p><strong>Marvel · 1991</strong></p>
+<p>Condition: See photos for condition details.</p>
+<p><strong>SHIPPING</strong></p>
+<p>Packed in Gemini mailer with cardboard backing and top loader for protection. Ships within 3 business days via USPS Ground Advantage. Combined shipping available.</p>
+<p><strong>RETURNS</strong></p>
+<p>30-day returns accepted. Professional grading available.</p>]]></Description>
+    <PrimaryCategory>
+      <CategoryID>259104</CategoryID>
+    </PrimaryCategory>
+    <StartPrice currencyID="USD">263.80</StartPrice>
+    <Location>Phoenix, AZ</Location>
+    <Country>US</Country>
+    <PostalCode>85033</PostalCode>
+    <Currency>USD</Currency>
+    <ListingDuration>GTC</ListingDuration>
+    <ListingType>FixedPriceItem</ListingType>
+    <Quantity>1</Quantity>
+    <Site>US</Site>
+    <DispatchTimeMax>3</DispatchTimeMax>
+    <PictureDetails>
+      <PictureURL>https://i.ebayimg.com/images/g/abc/s-l1600.jpg</PictureURL>
+    </PictureDetails>
+    <ShipToLocations>US</ShipToLocations>
+    <ShippingDetails>
+      <ShippingType>Flat</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <ShippingService>USPSParcel</ShippingService>
+        <ShippingServiceCost>0.00</ShippingServiceCost>
+        <FreeShipping>true</FreeShipping>
+      </ShippingServiceOptions>
+    </ShippingDetails>
+    <ReturnPolicy>
+      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
+      <RefundOption>MoneyBack</RefundOption>
+      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
+      <ShippingCostPaidByOption>Seller</ShippingCostPaidByOption>
+    </ReturnPolicy>
+    <ItemSpecifics>
+      <NameValueList>
+        <Name>Publisher</Name>
+        <Value>Marvel</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>Series Title</Name>
+        <Value>The New Mutants</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>Issue Number</Name>
+        <Value>98</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>Publication Year</Name>
+        <Value>1991</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>Format</Name>
+        <Value>Single Issue</Value>
+      </NameValueList>
+      <NameValueList>
+        <Name>Language</Name>
+        <Value>English</Value>
+      </NameValueList>
+    </ItemSpecifics>
+  </Item>
+</AddFixedPriceItemRequest>

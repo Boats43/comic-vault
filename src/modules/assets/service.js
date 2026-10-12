@@ -2428,7 +2428,9 @@ export async function operatorReconcileAttempt({
         observations: typeof observations === 'string' ? observations.slice(0, 1000) : null,
         evidenceRef: typeof evidenceRef === 'string' ? evidenceRef.slice(0, 300) : null,
         checkedSources: Array.isArray(checkedSources) ? checkedSources.filter((s) => typeof s === 'string').slice(0, 12).map((s) => s.slice(0, 40)) : [],
-        checkedAt: checkedAt ? new Date(checkedAt).toISOString() : null,
+        // a malformed observation time must degrade the verdict (the policy already does), never crash the record
+        checkedAt: (() => { const d = checkedAt ? new Date(checkedAt) : null; return d && !Number.isNaN(d.getTime()) ? d.toISOString() : null; })(),
+        checkedAtRaw: typeof checkedAt === 'string' ? checkedAt.slice(0, 60) : null,
         requestedNewPublish: requestNewPublish === true,
         automatedLookup: automatedLookup ? {
           matches: Array.isArray(automatedLookup.matches) ? automatedLookup.matches.slice(0, 5) : [],

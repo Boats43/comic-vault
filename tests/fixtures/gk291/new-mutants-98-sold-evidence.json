@@ -1,0 +1,3491 @@
+{
+ "_comment": "GK-291 fixture: stored sold evidence for New Mutants #98 (Production catalogue, read-only extraction 2026-10-12), sanitized: no ids/principals/media. eBay listing titles/prices are public marketplace data.",
+ "scan": {
+  "title": "the new mutants",
+  "issue": "98",
+  "year": "1991",
+  "publisher": "Marvel",
+  "variant": null,
+  "grade": "VG 4.0",
+  "numericGrade": null,
+  "isGraded": false,
+  "pricingSource": "active_ask_derived",
+  "price": "$360.59",
+  "priceLow": "$278.59",
+  "priceHigh": "$414.68",
+  "timestamp": 1789945847230,
+  "gradeMultiplier": 0.55,
+  "manualConfirmed": false
+ },
+ "soldCompsRawKeys": [
+  "url",
+  "date",
+  "grade",
+  "price",
+  "title",
+  "source",
+  "__evIdx",
+  "daysAgo",
+  "marketplace"
+ ],
+ "soldCompsRaw": [
+  {
+   "title": "NEW MUTANTS #98 VF/NM 1ST DEADPOOL",
+   "price": 338.1,
+   "date": "2026-09-14",
+   "daysAgo": 6,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "Marvel Comics: THE NEW MUTANTS #98 February 1991 First Appearance of Deadpool 1991",
+   "price": 180,
+   "date": "2026-09-09",
+   "daysAgo": 11,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "The New Mutants #98 (1991) | 7.5 VF- | 1st Appearance Of Deadpool - Marvel Key 1991",
+   "price": 249.99,
+   "date": "2026-09-06",
+   "daysAgo": 14,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "The New Mutants #98 – Marvel (1991) 9.6 NM+ Rob Liefeld story",
+   "price": 527.89,
+   "date": "2026-09-04",
+   "daysAgo": 16,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "Marvel Comics The New Mutants #98 1991 Deadpool Domino Gideon Punisher 1991",
+   "price": 294,
+   "date": "2026-09-03",
+   "daysAgo": 17,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "Marvel Comics the New Mutants #98 February 1991 First Appearance of Deadpool 1991",
+   "price": 240,
+   "date": "2026-09-03",
+   "daysAgo": 17,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "New Mutants #98 First Appearance Of Deadpool Marvel Comic",
+   "price": 210,
+   "date": "2026-09-03",
+   "daysAgo": 17,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "New Mutants #98 - Not Graded. Not Mint. &#34;Good&#34; Condition. 1991",
+   "price": 215,
+   "date": "2026-09-03",
+   "daysAgo": 17,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "The New Mutants #98 (Marvel Comics Feb. 1991) 1st Appearance Of Deadpool 🔑🔥 1991",
+   "price": 325,
+   "date": "2026-09-02",
+   "daysAgo": 18,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "New Mutants 98 - First Appearance of Deadpool! 1991 #98",
+   "price": 255,
+   "date": "2026-09-02",
+   "daysAgo": 18,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "Marvel Comics The New Mutants #98 (1991) Comic Book Liefeld Nicieza Deadpool 1991",
+   "price": 15,
+   "date": "2026-09-01",
+   "daysAgo": 19,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "The New Mutants #98 (Marvel Comics Feb. 1991) 1st Appearance Of Deadpool 🔑🔥 1991",
+   "price": 240,
+   "date": "2026-09-01",
+   "daysAgo": 19,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "New Mutants 98 - First Appearance of Deadpool! 1991 #98",
+   "price": 249.99,
+   "date": "2026-09-01",
+   "daysAgo": 19,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "The New Mutants #98 (Marvel Comics February 1991) 1991",
+   "price": 410,
+   "date": "2026-08-31",
+   "daysAgo": 20,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "Marvel Comics The New Mutants #98 1991 First Appearance Deadpool 1991",
+   "price": 275,
+   "date": "2026-08-30",
+   "daysAgo": 21,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "The New Mutants #98 (Marvel) Liefeld 1st Appearance Of Deadpool Copycat & Gideon 1991",
+   "price": 265,
+   "date": "2026-08-29",
+   "daysAgo": 22,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "The New Mutants #98 (Marvel Comics February 1991) 1991",
+   "price": 255.99,
+   "date": "2026-08-24",
+   "daysAgo": 27,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "The New Mutants #98 (Marvel Comics February 1991) 1991",
+   "price": 250,
+   "date": "2026-08-20",
+   "daysAgo": 31,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "The New Mutants #98 (Marvel Comics February 1991) 1991",
+   "price": 175,
+   "date": "2026-08-19",
+   "daysAgo": 32,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  },
+  {
+   "title": "New Mutants #98 PSA 9.6 Incredible Looking Book! 1st App of Deadpool Not CGC 1991",
+   "price": 425,
+   "date": "2026-08-18",
+   "daysAgo": 33,
+   "grade": "raw",
+   "source": "pricecharting-history"
+  }
+ ],
+ "soldCompDiagnostics": {
+  "reasons": {
+   "lot": 1,
+   "stale": 0,
+   "format": 0,
+   "signed": 0,
+   "outlier": 0,
+   "slabMismatch": 1,
+   "yearMismatch": 0,
+   "gradeMismatch": 6,
+   "issueMismatch": 0,
+   "titleMismatch": 0,
+   "ungradedTitle": 22,
+   "annualMismatch": 0,
+   "variantMismatch": 0,
+   "printingMismatch": 0
+  },
+  "rawCount": 30,
+  "rejectedCount": 30,
+  "verifiedCount": 0,
+  "rejectedSamples": [
+   {
+    "price": 265,
+    "title": "The New Mutants #98 (Marvel) Liefeld 1st Appearance Of Deadpool Copycat & Gideon 1991",
+    "reason": "cross-series"
+   },
+   {
+    "price": 425,
+    "title": "New Mutants #98 PSA 9.6 Incredible Looking Book! 1st App of Deadpool Not CGC 1991",
+    "reason": "slabMismatch"
+   },
+   {
+    "price": 338.1,
+    "title": "NEW MUTANTS #98 VF/NM 1ST DEADPOOL",
+    "reason": "gradeMismatch"
+   }
+  ]
+ },
+ "priceLadder": {
+  "2.0": 104,
+  "3.0": 130.01,
+  "4.0": 136.48,
+  "5.0": 205.21,
+  "6.0": 218.66,
+  "7.0": 219.93,
+  "8.0": 309.99,
+  "9.0": 303,
+  "9.2": 345,
+  "9.4": 362.25,
+  "9.6": 479.48,
+  "9.8": 1014.43,
+  "raw": 253,
+  "10.0": 1319
+ },
+ "salesByGrade": {
+  "2.0": [
+   {
+    "url": "https://www.ebay.com/itm/305085972075?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-08-29",
+    "grade": 2,
+    "price": 132.5,
+    "title": "The New Mutants #98 (Marvel, February 1991) 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1118,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/115668374564?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-01-18",
+    "grade": 2,
+    "price": 162.5,
+    "title": "New Mutants #98 CGC 2.5 1st Appearance of Deadpool Wade Wilson Marvel 1991 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 1341,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/265898274525?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2022-09-26",
+    "grade": 2,
+    "price": 199.99,
+    "title": "NEW MUTANTS #98 *CGC 2.5 WHITE PAGES* DEADPOOL 1ST APPEARANCE *1991* 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 1455,
+    "marketplace": "ebay"
+   }
+  ],
+  "3.0": [
+   {
+    "url": "https://www.ebay.com/itm/276706405879?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-10-28",
+    "grade": 3,
+    "price": 99.99,
+    "title": "New Mutants #98 - Marvel Comics 1991 CGC 3.5 1st appearance of Deadpool Used 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 692,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/276658835577?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-10-03",
+    "grade": 3,
+    "price": 151.5,
+    "title": "New Mutants #98 CGC 3.5 1991 3976213005 1st app. Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 717,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/225979533544?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-01-29",
+    "grade": 3,
+    "price": 150,
+    "title": "New Mutants #98 CGC 3.0 Marvel 1991 1st Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 965,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/155404485027?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-02-12",
+    "grade": 3,
+    "price": 130,
+    "title": "Marvel The New Mutants #98 CGC Grade 3.0 NEWSTAND (1st appearance Of Deadpool) 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 1316,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/115668383709?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-01-18",
+    "grade": 3,
+    "price": 11.5,
+    "title": "NEW MUTANTS #14 CGC 3.0 1st Appearance of Illyana Rasputin as Magik off white 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 1341,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/234672765942?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2022-08-30",
+    "grade": 3,
+    "price": 285,
+    "title": "New Mutants #98 CGC 3.0 1st Appearance of Deadpool MCU Soon 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 1482,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/165035518816?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2021-09-01",
+    "grade": 3,
+    "price": 242.5,
+    "title": "Marvel 2/91 NEW MUTANTS 98 , 1ST DEADPOOL! CGC 3.0 (VG-) PICS!!! 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 1845,
+    "marketplace": "ebay"
+   }
+  ],
+  "4.0": [
+   {
+    "url": "https://www.ebay.com/itm/167703915727?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-08-09",
+    "grade": 4,
+    "price": 165,
+    "title": "THE NEW MUTANTS #98 (1991) 1st Appearance of DEADPOOL CGC 4.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 407,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/197522479398?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-07-12",
+    "grade": 4,
+    "price": 100,
+    "title": "The New Mutants #98 CGC 4 Collection Starter MAKE A FAIR OFFER. 1st Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 435,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/155206671927?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2022-10-14",
+    "grade": 4,
+    "price": 215,
+    "title": "New Mutants #98 🌟 CGC 4.5 🌟 1st Appearance of DEADPOOL! Marvel Comic 1991 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 1437,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/234484245625?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2022-03-31",
+    "grade": 4,
+    "price": 280,
+    "title": "New Mutants #98 Deadpool 1st Appearance Marvel 1991 CGC Graded 4.0",
+    "source": "pricecharting-history",
+    "daysAgo": 1634,
+    "marketplace": "ebay"
+   }
+  ],
+  "5.0": [
+   {
+    "url": "https://www.ebay.com/itm/388764693938?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-08-03",
+    "grade": 5,
+    "price": 153.5,
+    "title": "New Mutants #98 - 1st Appearance of Deadpool CGC 5.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 413,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/135922399624?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-06-12",
+    "grade": 5,
+    "price": 203,
+    "title": "New Mutants #98 (Marvel/1991) CGC 5.5 OW/WP - 1st Deadpool - 1303856012 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 465,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/356867942282?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-05-14",
+    "grade": 5,
+    "price": 230,
+    "title": "THE NEW MUTANTS #98 (1991) 1st Appearance of DEADPOOL! CGC 5.0! Custom Lable 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 494,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/116272625064?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-08-04",
+    "grade": 5,
+    "price": 242.5,
+    "title": "New Mutants #98 (Marvel, 1991) First app. Of Deadpool MCU CGC 5.5 White Pages 🔥 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 777,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/156292382893?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-07-08",
+    "grade": 5,
+    "price": 249.95,
+    "title": "New Mutants #98 1st Appearance Deadpool 1991 CGC 5.5 Marvel Comics 2024",
+    "source": "pricecharting-history",
+    "daysAgo": 804,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/235562490758?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-05-20",
+    "grade": 5,
+    "price": 199.88,
+    "title": "New Mutants #98 (CGC 5.0) 1st Appearance of Deadpool - 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 853,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/155573439884?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-06-05",
+    "grade": 5,
+    "price": 210.1,
+    "title": "New Mutants #98 CGC 5.0 OW/W Pages Marvel 1991 1st App. Deadpool, Gideon, Domino 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1203,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/225395952682?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-02-25",
+    "grade": 5,
+    "price": 250,
+    "title": "NEW MUTANTS #98 1ST DEADPOOL CGC 5.5 WHITE PAGES MARVEL 1991 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 1303,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/115668376043?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-01-18",
+    "grade": 5,
+    "price": 53,
+    "title": "New Mutants #87 CGC 5.5 First Appearance Cable off white/white 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 1341,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/185700871656?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2022-12-16",
+    "grade": 5,
+    "price": 250.3,
+    "title": "New Mutants #98 -1st Appearance of Deadpool. CGC 5.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1374,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/204097874034?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2022-09-25",
+    "grade": 5,
+    "price": 275,
+    "title": "New Mutants #98 (1st App. Of Deadpool, Wade Wilson.) (5.5 CGC Graded.) 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1456,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/185580598490?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2022-09-17",
+    "grade": 5,
+    "price": 202.49,
+    "title": "The New Mutants #98 (Feb 1991, Marvel) Mark Jeweler variant Cgc 5.0 February 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 1464,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/394216798561?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2022-09-05",
+    "grade": 5,
+    "price": 203.5,
+    "title": "NEW MUTANTS #98 *CGC 5.5 WHITE PAGES* DEADPOOL 1ST APPEARANCE *1991* 1983",
+    "source": "pricecharting-history",
+    "daysAgo": 1476,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/234587647991?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2022-06-30",
+    "grade": 5,
+    "price": 299,
+    "title": "New Mutants #98 CGC VG/FN 5.0 White Pages 1st Appearance Deadpool! Marvel 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1543,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/115305694222?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2022-03-27",
+    "grade": 5,
+    "price": 202.5,
+    "title": "The New Mutants #98 CGC 5.0 1st Deadpool!! February 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 1638,
+    "marketplace": "ebay"
+   }
+  ],
+  "6.0": [
+   {
+    "url": "https://www.ebay.com/itm/327151720904?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-05-11",
+    "grade": 6,
+    "price": 240,
+    "title": "New Mutants 98 CBCS 6.0 (1991) 1st Appearance of Deadpool 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 132,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/168244053580?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-03-23",
+    "grade": 6,
+    "price": 190.5,
+    "title": "New Mutants #98 CGC 6.5 1st Deadpool 1991 Marvel 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 181,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/257399343637?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-03-13",
+    "grade": 6,
+    "price": 250,
+    "title": "New Mutants #98 CGC 6.5 1st App Deadpool 1991 Marvel Key Off White/White Pages 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 191,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ha.com/itm/-/-/-/a/122546-15757.s?type=DA-DMC-PriceCharting",
+    "date": "2025-12-02",
+    "grade": 6,
+    "price": 139,
+    "title": "The New Mutants #98 (Marvel, 1991) CGC FN 6.0 White pages....",
+    "source": "pricecharting-history",
+    "daysAgo": 292,
+    "marketplace": "heritage"
+   },
+   {
+    "url": "https://www.ebay.com/itm/406057675890?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-07-31",
+    "grade": 6,
+    "price": 225,
+    "title": "New Mutants #98 CGC 6.5 1st app Deadpool",
+    "source": "pricecharting-history",
+    "daysAgo": 416,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/365726297705?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-07-12",
+    "grade": 6,
+    "price": 125,
+    "title": "NEW MUTANTS #98 CGC 6.0 / FREE SHIPPING 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 435,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/335963230987?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-05-22",
+    "grade": 6,
+    "price": 231.66,
+    "title": "THE NEW MUTANTS #98 (1991) 1st Appearance of DEADPOOL - CGC 6.5 - Custom Label 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 486,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/388130765217?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-03-23",
+    "grade": 6,
+    "price": 200,
+    "title": "New mutants #98 CGC 6.0 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 546,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/135581363077?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-03-04",
+    "grade": 6,
+    "price": 250,
+    "title": "THE NEW MUTANTS # 98 CGC 6.5 1991 FIRST APPEARANCE DEADPOOL 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 565,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/135569163965?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-02-26",
+    "grade": 6,
+    "price": 280,
+    "title": "New Mutants #98D Direct Variant CGC 6.5 1991 4197148001 1st app. Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 571,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/396133261787?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-01-26",
+    "grade": 6,
+    "price": 249.95,
+    "title": "THE NEW MUTANTS # 98 CGC 6.5 NEW CASE 1991 FIRST APPEARANCE DEADPOOL 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 602,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/176780390601?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-01-18",
+    "grade": 6,
+    "price": 229.44,
+    "title": "New Mutants 98 - First Deadpool/Wade Wilson- CGC 6.5 off white pages",
+    "source": "pricecharting-history",
+    "daysAgo": 610,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/156514763661?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-11-29",
+    "grade": 6,
+    "price": 224.99,
+    "title": "The New Mutants #98 CBCS 6.5 CGC 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 660,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/356016910483?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-09-15",
+    "grade": 6,
+    "price": 199,
+    "title": "New Mutants #98 (Marvel, 1991) First app. Of Deadpool MCU CGC 6.5 White Pages 🔥 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 735,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/375598902841?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-08-19",
+    "grade": 6,
+    "price": 239.95,
+    "title": "New Mutants #98 CGC Graded 6.0 2/91 1991 Marvel Comics 1st appearance DeadPool",
+    "source": "pricecharting-history",
+    "daysAgo": 762,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/256603647672?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-08-14",
+    "grade": 6,
+    "price": 265,
+    "title": "New Mutants #98 First Appearance Deadpool White Pages CGC 6.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 767,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/235637055268?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-07-10",
+    "grade": 6,
+    "price": 199,
+    "title": "NEW MUTANTS #98 CGC 6.0 White PAGES 1ST APPEARANCE OF DEADPOOL 1991 Marvel 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 802,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/315326657938?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-05-05",
+    "grade": 6,
+    "price": 299.99,
+    "title": "New Mutants #98 CGC 6.5 1st Appearance Of Deadpool! Hot Book! Marvel Comics 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 868,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/256424987702?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-02-29",
+    "grade": 6,
+    "price": 299.99,
+    "title": "The New Mutants #98 CGC 6.5 WP 1991 Marvel (1st App of Deadpool) February 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 934,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/335255625957?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-02-22",
+    "grade": 6,
+    "price": 315.34,
+    "title": "NEW MUTANTS #98 1ST APP DEADPOOL (MARVEL 1991) 6.0 DIRECT EDITION MOVIE SOON🔥🥵 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 941,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/204640410195?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-02-07",
+    "grade": 6,
+    "price": 199.99,
+    "title": "NEW MUTANTS #98 CGC 6.0 WHITE PAGES 1ST APPEARANCE OF DEADPOOL 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 956,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/225952537930?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2024-01-12",
+    "grade": 6,
+    "price": 250,
+    "title": "The New Mutants #98 (Marvel, February 1991) CGC 6.5 1st App Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 982,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/335144377465?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-12-06",
+    "grade": 6,
+    "price": 149.32,
+    "title": "🔥New Mutants 98 CGC 6.0🔥 1st Appearance Of Deadpool‼️ 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1019,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/325851743279?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-10-18",
+    "grade": 6,
+    "price": 165,
+    "title": "New Mutants #98 1991 CGC 6.5 First appearance of Deadpool! 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1068,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/225632048880?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-06-29",
+    "grade": 6,
+    "price": 209.5,
+    "title": "NEW MUTANTS #98 *CGC 6.0 1ST APPEARANCES OF DEADPOOL & GIDEON *1991* 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1179,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/225533056122?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-05-10",
+    "grade": 6,
+    "price": 280,
+    "title": "NEW MUTANTS #98 CGC 6.0 🔥 1st APPEARANCE DEADPOOL & GIDEON! WHITE PAGES 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1229,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/275802895216?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-04-22",
+    "grade": 6,
+    "price": 250,
+    "title": "New Mutants 98 CGC 6.5. 1st appearance of Deadpool! 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1247,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/275774621746?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-04-14",
+    "grade": 6,
+    "price": 260,
+    "title": "New Mutants 98 CGC 6.5. 1st appearance of Deadpool! 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1255,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/325578266459?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-03-23",
+    "grade": 6,
+    "price": 249,
+    "title": "New Mutants #98 Marvel Feb 1991 1st Appearance of DEADPOOL CGC 6.0 1st print 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1277,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/404207636611?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2023-03-19",
+    "grade": 6,
+    "price": 295,
+    "title": "New Mutants #98 First App Deadpool CGC 6.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 1281,
+    "marketplace": "ebay"
+   }
+  ],
+  "7.0": [
+   {
+    "url": "https://www.ha.com/itm/-/-/-/a/122636-13753.s?type=DA-DMC-PriceCharting",
+    "date": "2026-09-17",
+    "grade": 7,
+    "price": 159,
+    "title": "The New Mutants #98 (Marvel, 1991) CGC FN/VF 7.0 White pages....",
+    "source": "pricecharting-history",
+    "daysAgo": 3,
+    "marketplace": "heritage"
+   },
+   {
+    "url": "https://www.ebay.com/itm/117392867220?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-14",
+    "grade": 7,
+    "price": 195.5,
+    "title": "New Mutants #98 CGC 7.0 WP 1st Appearance of Deadpool, 1991, Marvel Comics 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 6,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/358831170052?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-05",
+    "grade": 7,
+    "price": 269.99,
+    "title": "New Mutants #98 CGC 7.5 Direct 1st Deadpool Marvel Comic 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 15,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/227477771128?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-21",
+    "grade": 7,
+    "price": 197.5,
+    "title": "1991 NEW MUTANTS ISSUE #98 COMIC BOOK 1st DEADPOOL GRADED CGC 7.5",
+    "source": "pricecharting-history",
+    "daysAgo": 30,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/137499100444?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-12",
+    "grade": 7,
+    "price": 269.99,
+    "title": "New Mutants #98 DIRECT EDITION 2/91 CGC 7.5 VERY FINE- 26-251 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 39,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/267742417822?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-02",
+    "grade": 7,
+    "price": 215.59,
+    "title": "NEW MUTANTS #98 CGC 7.5 1st Appearance Of Deadpool, Marvel Comic Book, Key Issue 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 49,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366522009008?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-23",
+    "grade": 7,
+    "price": 299.99,
+    "title": "New Mutants #98 CGC 7.0 1st Appearance of Deadpool Marvel 1991 Liefeld 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 59,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/318571592011?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-19",
+    "grade": 7,
+    "price": 223,
+    "title": "Marvel New Mutants #98 (1991) CGC 7.5 Universal Grade Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 63,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/127938408366?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-29",
+    "grade": 7,
+    "price": 257,
+    "title": "New Mutants #98 1991 CGC 7.5 4735114013 1st App Deadpool Rob Liefeld 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 83,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/168269696562?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-04-02",
+    "grade": 7,
+    "price": 323.99,
+    "title": "First Deadpool appearance. NEW MUTANTS #98 CGC 7.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 171,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/136152679361?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-02-15",
+    "grade": 7,
+    "price": 315,
+    "title": "The New Mutants #98 CGC 7.0 First Appearance of Deadpool!! 1st printing 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 217,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/125816509422?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-02-14",
+    "grade": 7,
+    "price": 325,
+    "title": "First Deadpool appearance. NEW MUTANTS #98 CGC 7.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 218,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/267569514768?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-02-14",
+    "grade": 7,
+    "price": 325,
+    "title": "New Mutants #98 (1991) CGC 7.0 - 1st app Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 218,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/286679537741?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-01-09",
+    "grade": 7,
+    "price": 302.94,
+    "title": "New Mutants #98 (1991) CGC 7.5 - 1st Deadpool App Grail 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 254,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/406468465760?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-12-17",
+    "grade": 7,
+    "price": 250,
+    "title": "New Mutants #98 CGC 7.0 First Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 277,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/197724690172?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-12-09",
+    "grade": 7,
+    "price": 235,
+    "title": "NEW MUTANTS 98 - CGC 7.5 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 285,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/267499017681?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-12-07",
+    "grade": 7,
+    "price": 215.5,
+    "title": "New Mutants 98 CGC 7.5",
+    "source": "pricecharting-history",
+    "daysAgo": 287,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/277435531498?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-12-07",
+    "grade": 7,
+    "price": 342.31,
+    "title": "New Mutants (Vol 1) #98, CGC 7.5 Grade, Custom Label, 1st App - Deadpool/ Domino 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 287,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/397298684940?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-11-22",
+    "grade": 7,
+    "price": 219.99,
+    "title": "New Mutants #98 CGC 7.5 WP (1991) 🔑 1st Appearance Deadpool / Domino / Gideon 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 302,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/317460532161?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-11-13",
+    "grade": 7,
+    "price": 294.99,
+    "title": "The New Mutants #98 (Marvel Comics Feb 1991) - CGC 7.0 - Deadpool 1st Appearance 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 311,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/146835933942?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-09-22",
+    "grade": 7,
+    "price": 300,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) GRADED 7.5 CGC 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 363,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/326742452714?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-08-30",
+    "grade": 7,
+    "price": 207.5,
+    "title": "The New Mutants #98 First Deadpool Appearance CBCS 7.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 386,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/236277355647?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-08-26",
+    "grade": 7,
+    "price": 215.5,
+    "title": "The New Mutants #98 CGC 7.0 First Appearance of Deadpool!! 1st printing 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 390,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/317171426790?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-08-16",
+    "grade": 7,
+    "price": 275,
+    "title": "The New Mutants #98 CGC 7.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 400,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/388800457776?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-08-08",
+    "grade": 7,
+    "price": 195,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) cgc graded 7.0 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 408,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/376330189978?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-06-19",
+    "grade": 7,
+    "price": 275,
+    "title": "NEW MUTANTS #98 CGC 7.0 1ST DEADPOOL OW-WHITE PAGES MARVEL COMICS 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 458,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/167506752117?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-05-31",
+    "grade": 7,
+    "price": 233.5,
+    "title": "New Mutants #98 CGC 7.5 VF- 1st Appearance of Deadpool (Wade Wilson) 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 477,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/335713139756?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-03-09",
+    "grade": 7,
+    "price": 300,
+    "title": "NEW MUTANTS #98 CGC 7.0 ROB LIEFELD - DIRECT EDITION 🔑 1ST APP OF DEADPOOL 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 560,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/326433869950?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-02-15",
+    "grade": 7,
+    "price": 235.5,
+    "title": "New Mutants #98 CGC 7.5 1st Deadpool! Marvel Comics 1991 Key Comic 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 582,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/316110946443?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-02-03",
+    "grade": 7,
+    "price": 300,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) CGC 7.0 1st Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 594,
+    "marketplace": "ebay"
+   }
+  ],
+  "8.0": [
+   {
+    "url": "https://www.ebay.com/itm/358800523490?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-01",
+    "grade": 8,
+    "price": 299,
+    "title": "The New Mutants #98 CGC 8.5 WHITE PAGES 1st DEADPOOL 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 19,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/155580748215?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-01",
+    "grade": 8,
+    "price": 350,
+    "title": "CGC 8.0 WP - New Mutants #98 1st Appearance of Deadpool 1979",
+    "source": "pricecharting-history",
+    "daysAgo": 19,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/206465529561?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-30",
+    "grade": 8,
+    "price": 309.99,
+    "title": "The New Mutants #98 CGC 8.5 White Pages Marvel Comics First Deadpool 2/91 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 21,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/195030492903?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-08",
+    "grade": 8,
+    "price": 660,
+    "title": "New Mutants #98 CGC 8.0 First Appearance of Deadpool Marvel Comic Book",
+    "source": "pricecharting-history",
+    "daysAgo": 43,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/358610638711?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-08",
+    "grade": 8,
+    "price": 295,
+    "title": "NEW MUTANTS #98 White pages CGC 8.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 43,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/398228119172?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-06",
+    "grade": 8,
+    "price": 350,
+    "title": "The New Mutants #98 CGC 8.5 WHITE PAGES 1st Deadpool. Marvel comics. 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 45,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/236185687546?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-02",
+    "grade": 8,
+    "price": 296.63,
+    "title": "New Mutants #98 CGC 8.5 - 1st app. Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 49,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/147434296803?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-20",
+    "grade": 8,
+    "price": 274.99,
+    "title": "New Mutants #98 CGC 8.0 White Pages 1st Deadpool Marvel 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 62,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/318587299690?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-19",
+    "grade": 8,
+    "price": 268,
+    "title": "The New Mutants #98 CGC 8.5 (Marvel Comics February 1991) 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 63,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/257617655404?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-14",
+    "grade": 8,
+    "price": 228.25,
+    "title": "New Mutants #98 1st App Deadpool CGC 8.5 Marvel 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 68,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/198348535550?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-11",
+    "grade": 8,
+    "price": 280,
+    "title": "NEW MUTANTS #98, FIRST DEADPOOL. CGC 8.5 MARVEL 1991. By Comic Blink 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 71,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/168511623538?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-07",
+    "grade": 8,
+    "price": 240,
+    "title": "Marvel the New Mutants #98 February 1991 First Appearance of Deadpool CGC 8.0 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 75,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/198449250898?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-30",
+    "grade": 8,
+    "price": 575,
+    "title": "The New Mutants #98 1991 cgc 8,5 stan lee auto 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 82,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/397741308743?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-30",
+    "grade": 8,
+    "price": 250,
+    "title": "New Mutants 98 CGC 8.0 WHITE Pages 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 82,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/157760783908?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-20",
+    "grade": 8,
+    "price": 279.99,
+    "title": "New Mutants #98 1st App Deadpool CGC 8.5 Marvel Comics",
+    "source": "pricecharting-history",
+    "daysAgo": 92,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/336639343078?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-19",
+    "grade": 8,
+    "price": 275,
+    "title": "New Mutants #98 CGC 8.0 White Pages 1st App Deadpool Rob Liefeld 1991 DIRECT 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 93,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/377248886949?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-17",
+    "grade": 8,
+    "price": 247.5,
+    "title": "New Mutants #98 Marvel Comics 1991 1st Appearance Deadpool CGC 8.0",
+    "source": "pricecharting-history",
+    "daysAgo": 95,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/377138918821?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-02",
+    "grade": 8,
+    "price": 300,
+    "title": "NEW MUTANTS #98 CGC 8.5 OFF-WHITE TO WHITE PAGES MARVEL COMICS 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 110,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/358542060876?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-05-18",
+    "grade": 8,
+    "price": 275,
+    "title": "🔥 New Mutants #98 CGC 8.5 WP 1st Deadpool Marvel Key Comic 1991 🔥 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 125,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/377173709463?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-05-17",
+    "grade": 8,
+    "price": 189.5,
+    "title": "New Mutants #98 Marvel Comics 1991 1st Appearance Deadpool CGC 8.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 126,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/157853724373?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-05-02",
+    "grade": 8,
+    "price": 329,
+    "title": "NEW MUTANTS #98 (Marvel Comics February 1991) White pages CGC 8.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 141,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/318179765017?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-04-28",
+    "grade": 8,
+    "price": 312,
+    "title": "New Mutants #98 High Grade 1st App. Deadpool MCU Marvel Comic 1991 CGC 8.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 145,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/266819495215?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-04-24",
+    "grade": 8,
+    "price": 350,
+    "title": "The New Mutants #98 (Marvel Comics February 1991 CGC 8.5 First Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 149,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/137175805511?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-04-13",
+    "grade": 8,
+    "price": 256,
+    "title": "New Mutants #98 CBCS 8.5 1st App of Deadpool (Dir) (Marvel Comics February 1991) 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 160,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366301073092?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-04-01",
+    "grade": 8,
+    "price": 230.5,
+    "title": "New Mutants #98 Marvel Comics 1991 1st Appearance Deadpool CGC 8.5",
+    "source": "pricecharting-history",
+    "daysAgo": 172,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/336471165242?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-03-13",
+    "grade": 8,
+    "price": 300,
+    "title": "The New Mutants #98 First Appearance of Deadpool - CGC Graded 8.5 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 191,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/358266436243?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-03-06",
+    "grade": 8,
+    "price": 334.99,
+    "title": "New Mutants #98 Comic CGC 8.5 Deadpool",
+    "source": "pricecharting-history",
+    "daysAgo": 198,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/317848991635?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-03-03",
+    "grade": 8,
+    "price": 325,
+    "title": "New Mutants 98 cgc 8.5 / 1st Deadpool Appearance! 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 201,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/117055829744?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-03-03",
+    "grade": 8,
+    "price": 325,
+    "title": "New Mutants 98 1st DEADPOOL!! CGC 8.5 off white/white pages. 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 201,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/127437040302?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-02-27",
+    "grade": 8,
+    "price": 360,
+    "title": "New Mutants #98 CGC 8.0 (1991 Marvel) 1st Deadpool - Free Combine Shipping 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 205,
+    "marketplace": "ebay"
+   }
+  ],
+  "9.0": [
+   {
+    "url": "https://www.ebay.com/itm/336786819332?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-13",
+    "grade": 9,
+    "price": 295,
+    "title": "PRIMO: NEW MUTANTS #98 key 1st DEADPOOL Marvel comics 1991 VF/NM 9.0 CGC",
+    "source": "pricecharting-history",
+    "daysAgo": 7,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/278083453475?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-13",
+    "grade": 9,
+    "price": 290,
+    "title": "Marvel Comics New Mutants #98 CGC 9.0 (1991) 1st App. of Deadpool! 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 7,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/306996390263?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-07",
+    "grade": 9,
+    "price": 406.09,
+    "title": "New Mutants #98 - 1991 - CGC 9.0 🔑1st appearance of Deadpool🔑 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 13,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/287551194244?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-04",
+    "grade": 9,
+    "price": 306,
+    "title": "New Mutants #98 CGC 9.0 Marvel Comics 1st App of Deadpool 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 16,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/137637274780?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-26",
+    "grade": 9,
+    "price": 255,
+    "title": "New Mutants #98 CGC 9.0 Marvel Comics 1991 1st appearance Deadpool Wade Wilson 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 25,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/336674320825?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-13",
+    "grade": 9,
+    "price": 325,
+    "title": "The New Mutants #98 , First App. Deadpool, Domino by Liefeld CGC 9.0 4731677005 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 69,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/198478706724?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-07",
+    "grade": 9,
+    "price": 315,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) CGC 9.0 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 75,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/257595413348?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-03",
+    "grade": 9,
+    "price": 309.99,
+    "title": "New Mutants #98 CGC 9.0 1st App. of Deadpool Rob Liefeld Marvel Comics 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 79,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/227387092675?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-15",
+    "grade": 9,
+    "price": 295,
+    "title": "The New Mutants #98 CGC 9.0 1st App Of Deadpool White Pages. 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 97,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/206310440979?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-04",
+    "grade": 9,
+    "price": 300,
+    "title": "The New Mutants #98 1st Deadpool CGC 9.0 Marvel 1991 💀💩 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 108,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/206238445043?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-05-20",
+    "grade": 9,
+    "price": 265,
+    "title": "New Mutants #98 CGC 9.0 Amazing Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 123,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/198259957008?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-05-10",
+    "grade": 9,
+    "price": 307.08,
+    "title": "New Mutants #98 cgc 9.0 🔑 1st Appearance Of Deadpool 🔑",
+    "source": "pricecharting-history",
+    "daysAgo": 133,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/257490986444?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-05-06",
+    "grade": 9,
+    "price": 329.99,
+    "title": "New Mutants 98 CGC 9.0 VFFM White Pages Graded Blue Universal 1st Deadpool 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 137,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/187978565095?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-04-30",
+    "grade": 9,
+    "price": 349.99,
+    "title": "New Mutants # 98 CGC Graded 9.0 Marvel Comic Book 1st Deadpool Appearance",
+    "source": "pricecharting-history",
+    "daysAgo": 143,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366320210572?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-04-22",
+    "grade": 9,
+    "price": 230.5,
+    "title": "New Mutants #98 CGC 9.0 Amazing Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 151,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/406820696242?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-04-15",
+    "grade": 9,
+    "price": 380,
+    "title": "New Mutants #98 CGC 9.0 Amazing Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 158,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/287266408177?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-04-12",
+    "grade": 9,
+    "price": 270.05,
+    "title": "New Mutants #98 Copper Age 1991 CGC 9.0 First Appearance Of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 161,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/227263475530?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-03-19",
+    "grade": 9,
+    "price": 255,
+    "title": "New Mutants #98 (CGC 9.0) 1st Appearance of Deadpool Gideon & Copycat! Marvel 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 185,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/257415142222?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-03-19",
+    "grade": 9,
+    "price": 199,
+    "title": "The New Mutants #98 CGC 9.0 1st App Deadpool. RL Sig on case not book. 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 185,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/206103614104?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-03-16",
+    "grade": 9,
+    "price": 275,
+    "title": "New Mutants #98, CGC 9.0 VF/NM, WP (Marvel, 1991) Rob Liefeld, 1st Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 188,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/188083229700?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-03-02",
+    "grade": 9,
+    "price": 290,
+    "title": "New Mutants (1983) #98 CGC 9.0 VF/NM 1983",
+    "source": "pricecharting-history",
+    "daysAgo": 202,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/157691602923?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-02-27",
+    "grade": 9,
+    "price": 359.95,
+    "title": "New Mutants #98 CGC 9.0 (Marvel Comics February 1991) 1st app. Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 205,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/198120341650?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-02-24",
+    "grade": 9,
+    "price": 268,
+    "title": "Marvel Comics The New Mutants #98 Copper Age 1991 CGC 9.0 Key Issue Comic Book 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 208,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/177809995361?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-02-15",
+    "grade": 9,
+    "price": 349.99,
+    "title": "NEW MUTANTS #98 CGC 9.0 Deadpool 1st Appearance White Pgs! 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 217,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/227208602031?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-02-15",
+    "grade": 9,
+    "price": 325,
+    "title": "CGC 9.0 - New Mutants 98 White Pages 1st Appearance of Deadpool 1991 1991 #1",
+    "source": "pricecharting-history",
+    "daysAgo": 217,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/187986518913?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-02-04",
+    "grade": 9,
+    "price": 360,
+    "title": "New Mutants #98 CGC 9.0 Marvel 1991 Rob Liefeld 1st Deadpool Copycat Gideon 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 228,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/287060140794?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-01-17",
+    "grade": 9,
+    "price": 320,
+    "title": "Marvel Comics The New Mutants #98 Copper Age 1991 CGC 9.0 Key Issue Comic Book 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 246,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/147016391073?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-01-12",
+    "grade": 9,
+    "price": 329.99,
+    "title": "New Mutants #98 CGC 9.0 1st Deadpool Rob Liefeld art 2/1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 251,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/127520659081?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-12-25",
+    "grade": 9,
+    "price": 325,
+    "title": "The New Mutants #98 CGC 9.0-WHITE PAGES-1st App Deadpool (Marvel 1991 ) 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 269,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/287030329116?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2025-12-25",
+    "grade": 9,
+    "price": 295,
+    "title": "NEW MUTANTS 98 CGC 9.0 WPGS V1 1991! 1ST DEADPOOL, COPYCAT AS DOMINO, GIDEON! 87 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 269,
+    "marketplace": "ebay"
+   }
+  ],
+  "9.2": [
+   {
+    "url": "https://www.ebay.com/itm/820077025329?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-09",
+    "grade": 9.2,
+    "price": 401,
+    "title": "New Mutants #98 CGC 9.2 1st Deadpool Appearance 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 11,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/237034399570?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-07",
+    "grade": 9.2,
+    "price": 346,
+    "title": "New Mutants #98 CGC 9.2 Amazing Looking Book! 1st App of Deadpool - White Pages 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 13,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ha.com/itm/-/-/-/a/122633-15709.s?type=DA-DMC-PriceCharting",
+    "date": "2026-09-04",
+    "grade": 9.2,
+    "price": 354,
+    "title": "The New Mutants #98 (Marvel, 1991) CBCS NM- 9.2 Off-white pages....",
+    "source": "pricecharting-history",
+    "daysAgo": 16,
+    "marketplace": "heritage"
+   },
+   {
+    "url": "https://www.ebay.com/itm/800334191067?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-01",
+    "grade": 9.2,
+    "price": 345,
+    "title": "New Mutants #98 - Marvel Comics 1991 CGC 9.2 1st appearance of Deadpool (Wade Wi 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 19,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/158216600697?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-31",
+    "grade": 9.2,
+    "price": 330,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) CGC 9.2 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 20,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/377412882846?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-19",
+    "grade": 9.2,
+    "price": 282.77,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) CGC 9.2 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 32,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/407104756838?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-12",
+    "grade": 9.2,
+    "price": 325,
+    "title": "New Mutants #98 CGC 9.2 Amazing Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 39,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/158164413975?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-09",
+    "grade": 9.2,
+    "price": 425,
+    "title": "New Mutants 98 CGC 9.2 White Pages 1st Appearance Deadpool Marvel 1991 NM- 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 42,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/398150756283?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-07",
+    "grade": 9.2,
+    "price": 300,
+    "title": "The New Mutants # 98 : CGC 9.2 WP / 1st appearance Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 44,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/336727839945?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-05",
+    "grade": 9.2,
+    "price": 299.99,
+    "title": "New Mutants 98 CGC 9.2 1st Deadpool Marvel 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 46,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/236666808822?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-04",
+    "grade": 9.2,
+    "price": 367.99,
+    "title": "New Mutants #98 CGC 9.2 White Pages - 1st Deadpool - Marvel 1991 Key Issue 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 47,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/117273305413?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-25",
+    "grade": 9.2,
+    "price": 283.77,
+    "title": "The New Mutants # 98 : CGC 9.2 WP / CGC #: 4443048003 / 1st appearance Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 57,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/377350410176?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-24",
+    "grade": 9.2,
+    "price": 283.76,
+    "title": "New Mutants #98 CGC 9.2 White Pages - 1st Appearance of Deadpool 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 58,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/306958134327?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-23",
+    "grade": 9.2,
+    "price": 390,
+    "title": "New Mutants 98, CGC 9.2! 1991 First Appearance Of Deadpool, Domino And Gideon 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 59,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366513623322?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-05",
+    "grade": 9.2,
+    "price": 285,
+    "title": "CGC Graded 9.2- The New Mutants #98 Comic 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 77,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/327167064406?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-05",
+    "grade": 9.2,
+    "price": 350,
+    "title": "NEW MUTANTS #98 CGC 9.2 WHITE PAGES // 1ST APPEARANCE OF DEADPOOL 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 77,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/168429904907?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-30",
+    "grade": 9.2,
+    "price": 357.97,
+    "title": "NEW MUTANTS #98 - FEB 1991 - 1st DEADPOOL APPEARANCE - CGC (9.2) CENTS COPY! 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 82,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/377299077934?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-27",
+    "grade": 9.2,
+    "price": 320,
+    "title": "New Mutants #98 CGC 9.2 White Pages 1st Appearance of Deadpool & Domino 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 85,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/127873837583?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-27",
+    "grade": 9.2,
+    "price": 375,
+    "title": "Marvel Comics New Mutants #98 (1991) 1st Appearance Deadpool CGC 9.2 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 85,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/206355018661?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-22",
+    "grade": 9.2,
+    "price": 329.99,
+    "title": "NEW MUTANTS 98 CGC 9.2 WHITE PAGES 1ST DEADPOOL 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 90,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/117245332894?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-19",
+    "grade": 9.2,
+    "price": 270,
+    "title": "New Mutants #98 CGC 9.2 Amazing Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 93,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/800161485776?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-12",
+    "grade": 9.2,
+    "price": 300,
+    "title": "New Mutants #98 CGC 9.2 White Pages 1st Deadpool",
+    "source": "pricecharting-history",
+    "daysAgo": 100,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/257547238269?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-12",
+    "grade": 9.2,
+    "price": 280,
+    "title": "Marvel New Mutants #98 CGC 9.2 1991 1st Appearance Deadpool Domino 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 100,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/406940060368?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-10",
+    "grade": 9.2,
+    "price": 260,
+    "title": "New Mutants #98 CGC 9.2 Amazing Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 102,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/306970886153?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-08",
+    "grade": 9.2,
+    "price": 300,
+    "title": "The New Mutants #98 CGC 9.2 (1991) *FIRST DEADPOOL* (Direct Variant) 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 104,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/178145592220?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-06",
+    "grade": 9.2,
+    "price": 299,
+    "title": "New Mutants #98 CGC 9.2 Deadpool First Appearance! Feb 1991 Marvel Comics Graded 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 106,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366402608336?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-03",
+    "grade": 9.2,
+    "price": 308,
+    "title": "New Mutants #98 CGC 9.2 Amazing Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 109,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/267672852104?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-05-24",
+    "grade": 9.2,
+    "price": 325,
+    "title": "NEW MUTANTS 98 CGC 9.2 WHITE PAGES 1ST DEADPOOL",
+    "source": "pricecharting-history",
+    "daysAgo": 119,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ha.com/itm/-/-/-/a/122614-11481.s?type=DA-DMC-PriceCharting",
+    "date": "2026-04-30",
+    "grade": 9.2,
+    "price": 307,
+    "title": "The New Mutants #98 (Marvel, 1991) CGC NM- 9.2 Off-white to white pages....",
+    "source": "pricecharting-history",
+    "daysAgo": 143,
+    "marketplace": "heritage"
+   },
+   {
+    "url": "https://www.ebay.com/itm/406854047913?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-04-29",
+    "grade": 9.2,
+    "price": 295,
+    "title": "New Mutants #98 CGC 9.2 Amazing Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 144,
+    "marketplace": "ebay"
+   }
+  ],
+  "9.4": [
+   {
+    "url": "https://www.ebay.com/itm/298650945532?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-18",
+    "grade": 9.4,
+    "price": 380,
+    "title": "New Mutants #98 CGC 9.4 Big Key! 1st Appearance Deadpool Gideon Marvel 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 2,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/188836939657?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-09",
+    "grade": 9.4,
+    "price": 365,
+    "title": "New Mutants #98 CGC 9.4 Big Key! 1st Appearance Deadpool Gideon Marvel 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 11,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/128049632042?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-04",
+    "grade": 9.4,
+    "price": 350,
+    "title": "New Mutants #98 1st Appearance Of Deadpool Marvel Comics 2/91 CGC Graded 9.4",
+    "source": "pricecharting-history",
+    "daysAgo": 16,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/168627328751?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-25",
+    "grade": 9.4,
+    "price": 325,
+    "title": "Marvel Comics The New Mutants #98 CGC 9.4 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 26,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/298586173879?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-24",
+    "grade": 9.4,
+    "price": 365,
+    "title": "New Mutants #98 CGC 9.4 White Pages 1st Appearance Deadpool Marvel 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 27,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/147503089173?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-23",
+    "grade": 9.4,
+    "price": 399.99,
+    "title": "New Mutants #98 CGC 9.4 1st Appearance Deadpool Marvel Comics 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 28,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/117359345746?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-21",
+    "grade": 9.4,
+    "price": 350,
+    "title": "New Mutants #98 1st Appearance Of Deadpool Marvel Comics 2/91 CGC Graded 9.4",
+    "source": "pricecharting-history",
+    "daysAgo": 30,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/206448841483?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-19",
+    "grade": 9.4,
+    "price": 349.98,
+    "title": "New Mutants #98 CGC 9.4 Incredible Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 32,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366556680670?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-12",
+    "grade": 9.4,
+    "price": 361.98,
+    "title": "New Mutants #98 CGC 9.4 Incredible Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 39,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/298551945578?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-11",
+    "grade": 9.4,
+    "price": 398.98,
+    "title": "New Mutants #98 - CGC 9.4, 1st Appearance of Deadpool White Pages Marvel Comics 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 40,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/236979861841?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-07",
+    "grade": 9.4,
+    "price": 338,
+    "title": "New Mutants #98 CGC 9.4 Incredible Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 44,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/358761299768?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-06",
+    "grade": 9.4,
+    "price": 389.95,
+    "title": "New Mutants #98 (1991 Marvel) CGC 9.4 1st Deadpool Appearance 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 45,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/147449581085?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-05",
+    "grade": 9.4,
+    "price": 398.99,
+    "title": "New Mutants #98 CGC 9.4 White Pages 1st Appearance Deadpool Marvel 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 46,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/327263737412?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-04",
+    "grade": 9.4,
+    "price": 425,
+    "title": "New Mutants #98 CGC 9.4 First App of Deadpool 1991 Marvel Comics 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 47,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/206460063171?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-04",
+    "grade": 9.4,
+    "price": 385,
+    "title": "New Mutants #98 CGC 9.4 Big Key! 1st Appearance Deadpool Gideon Marvel 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 47,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/188698730880?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-28",
+    "grade": 9.4,
+    "price": 385,
+    "title": "New Mutants #98 CGC 9.4 Big Key! 1st Appearance Deadpool Gideon Marvel 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 54,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/407030231045?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-24",
+    "grade": 9.4,
+    "price": 335,
+    "title": "New Mutants #98 DIRECT EDITION 2/91 CGC 9.4 NEAR MINT 26-400 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 58,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/198455943999?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-18",
+    "grade": 9.4,
+    "price": 399.95,
+    "title": "New Mutants #98 (1991) CGC 9.4 - 1st Appearance of Deadpool Marvel Comics Key 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 64,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/318547156763?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-16",
+    "grade": 9.4,
+    "price": 385,
+    "title": "New Mutants #98 CGC 9.4 Marvel Comics 1st App of Deadpool 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 66,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/377331604056?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-14",
+    "grade": 9.4,
+    "price": 385,
+    "title": "New Mutants #98 (1991). CBCS 9.4. 1st app Deadpool. Direct Edition. 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 68,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/327235954537?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-03",
+    "grade": 9.4,
+    "price": 385,
+    "title": "New Mutants #98 (1991 Marvel) CGC 9.4 1st Deadpool Cert 4740911001 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 79,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/146726833512?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-30",
+    "grade": 9.4,
+    "price": 419.99,
+    "title": "New Mutants: #98 [CBCS 9.4 Rob Liefeld] 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 82,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/298433367258?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-27",
+    "grade": 9.4,
+    "price": 385,
+    "title": "New Mutants 98 CGC 9.4 White Pages 1st Deadpool 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 85,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/236848789350?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-26",
+    "grade": 9.4,
+    "price": 395,
+    "title": "New Mutants #98 CGC 9.4 1st Deadpool Marvel Key Issue White Pages 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 86,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/178146811203?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-19",
+    "grade": 9.4,
+    "price": 420,
+    "title": "New Mutants #98 CGC 9.4 Marvel Comics 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 93,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366467930730?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-17",
+    "grade": 9.4,
+    "price": 335,
+    "title": "New Mutants #98 Marvel Comics 1991 1st Appearance Deadpool CGC 9.4",
+    "source": "pricecharting-history",
+    "daysAgo": 95,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/318382596236?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-17",
+    "grade": 9.4,
+    "price": 368,
+    "title": "New Mutants #98 CGC 9.4 White Pages - 1st Deadpool! - Marvel Comics 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 95,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/389958185736?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-16",
+    "grade": 9.4,
+    "price": 408,
+    "title": "New Mutants #98 - Marvel Comics 1991 CGC 9.4 1st appearance of Deadpool (Wade Wi 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 96,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/298412586599?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-14",
+    "grade": 9.4,
+    "price": 330,
+    "title": "New Mutants #98 CGC 9.4 White Pages - 1st Deadpool! - Marvel Comics 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 98,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/206332128441?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-06-13",
+    "grade": 9.4,
+    "price": 319.99,
+    "title": "New Mutants #98 CGC 9.4 | 1st Deadpool Appearance | Marvel Key Comic 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 99,
+    "marketplace": "ebay"
+   }
+  ],
+  "9.6": [
+   {
+    "url": "https://www.ha.com/itm/-/-/-/a/122637-15791.s?type=DA-DMC-PriceCharting",
+    "date": "2026-09-17",
+    "grade": 9.6,
+    "price": 610,
+    "title": "The New Mutants #98 (Marvel, 1991) CGC NM+ 9.6 White pages....",
+    "source": "pricecharting-history",
+    "daysAgo": 3,
+    "marketplace": "heritage"
+   },
+   {
+    "url": "https://www.ebay.com/itm/277791547216?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-14",
+    "grade": 9.6,
+    "price": 495,
+    "title": "New Mutants 98 CGC 9.6 NM+ 1st Deadpool, Gideon & Copy Cat Rob Liefeld NICE 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 6,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/227510743674?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-14",
+    "grade": 9.6,
+    "price": 412,
+    "title": "The New Mutants #98 CGC 9.6 White Pages",
+    "source": "pricecharting-history",
+    "daysAgo": 6,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/178452477087?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-13",
+    "grade": 9.6,
+    "price": 499.95,
+    "title": "Marvel New Mutants 98 1st Appearance Of Deadpool CGC 9.6 White Pages 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 7,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/168681452037?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-12",
+    "grade": 9.6,
+    "price": 429.99,
+    "title": "NEW MUTANTS #98 CGC 9.6 WHITE PAGES 1st DEADPOOL ROB LIEFELD 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 8,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/168679365299?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-11",
+    "grade": 9.6,
+    "price": 429.99,
+    "title": "NEW MUTANTS #98 CGC 9.6 WHITE PAGES 1st DEADPOOL ROB LIEFELD 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 9,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/198613124167?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-07",
+    "grade": 9.6,
+    "price": 435,
+    "title": "New Mutants #98 CGC 9.6 1st Deadpool Rob Liefeld Marvel 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 13,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366590851836?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-02",
+    "grade": 9.6,
+    "price": 586,
+    "title": "New Mutants #98 CGC 9.6 Incredible Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 18,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/306427035033?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-30",
+    "grade": 9.6,
+    "price": 479,
+    "title": "New Mutants #98 CGC 9.6 White Pages",
+    "source": "pricecharting-history",
+    "daysAgo": 21,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366577456064?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-26",
+    "grade": 9.6,
+    "price": 440,
+    "title": "New Mutants #98 CGC 9.6 Incredible Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 25,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/377240617375?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-24",
+    "grade": 9.6,
+    "price": 479.95,
+    "title": "New Mutants #98 / CGC 9.6 NM+ / WHITE PAGES / 1ST DEADPOOL !! 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 27,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/267758321579?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-17",
+    "grade": 9.6,
+    "price": 410,
+    "title": "Marvel New Mutants #98 1st appearance Deadpool CGC 9.6 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 34,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/318728779954?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-16",
+    "grade": 9.6,
+    "price": 503.58,
+    "title": "Marvel Comics New Mutants #98 Deadpool 1st App CGC 9.6 1991 (FREE POSTAGE AUS) 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 35,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/306880987422?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-14",
+    "grade": 9.6,
+    "price": 499.99,
+    "title": "NEW MUTANTS #98 CGC 9.6. 1ST APPEARANCE OF DEADPOOL 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 37,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/406887218374?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-14",
+    "grade": 9.6,
+    "price": 480,
+    "title": "The New Mutants 98 CGC 9.6 1st Appearance of Deadpool Marvel Comics Feb 1991 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 37,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/298567787088?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-11",
+    "grade": 9.6,
+    "price": 425,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) 1st Deadpool CGC 9.6 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 40,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/318704605727?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-10",
+    "grade": 9.6,
+    "price": 501.52,
+    "title": "Marvel Comics New Mutants #98 Deadpool 1st App CGC 9.6 1991 (FREE POSTAGE AUS) 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 41,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/336731745021?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-09",
+    "grade": 9.6,
+    "price": 400,
+    "title": "Marvel Comics New Mutants #98 (1991) CGC 9.6 White Pages Deadpool Domino 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 42,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/227458258397?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-06",
+    "grade": 9.6,
+    "price": 449.89,
+    "title": "New Mutants #98 1991 CGC 9.6 1st Appearance Deadpool with White Pages Ships Fast",
+    "source": "pricecharting-history",
+    "daysAgo": 45,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366554526412?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-05",
+    "grade": 9.6,
+    "price": 420,
+    "title": "New Mutants #98 CGC 9.6 Incredible Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 46,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/147459634151?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-04",
+    "grade": 9.6,
+    "price": 410,
+    "title": "1991 Marvel Comics New Mutants #98 1st App. Deadpool by Liefield Nicieza CGC 9.6",
+    "source": "pricecharting-history",
+    "daysAgo": 47,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/137497488139?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-31",
+    "grade": 9.6,
+    "price": 479,
+    "title": "New Mutants #98 CGC 9.6 White Pages 1st Deadpool Marvel 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 51,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/227444563350?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-29",
+    "grade": 9.6,
+    "price": 469,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) CGC 9.6 WP ❄️ 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 53,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/147291847553?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-26",
+    "grade": 9.6,
+    "price": 425.65,
+    "title": "NEW MUTANTS #98 *FIRST APP DEADPOOL* CGC 9.6 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 56,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/206426291347?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-22",
+    "grade": 9.6,
+    "price": 420,
+    "title": "New Mutants #98 CGC 9.6- White pages!",
+    "source": "pricecharting-history",
+    "daysAgo": 60,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366490748865?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-22",
+    "grade": 9.6,
+    "price": 407,
+    "title": "New Mutants #98 CGC 9.6 Incredible Looking Book! 1st App of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 60,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/127973116789?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-20",
+    "grade": 9.6,
+    "price": 420,
+    "title": "New Mutants 98 Cgc 9.6 1st Appearance Of Deadpool Marvel 1991 Copycat Domino NM 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 62,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/198480864346?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-20",
+    "grade": 9.6,
+    "price": 470,
+    "title": "THE NEW MUTANTS #98 (Deadpool , Gideon 1st app) CGC 9.6 NM+ Marvel Comics 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 62,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/117267166006?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-20",
+    "grade": 9.6,
+    "price": 500,
+    "title": "CGC 9.6 New Mutants 98 First Deadpool White Pages",
+    "source": "pricecharting-history",
+    "daysAgo": 62,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/398183097988?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-17",
+    "grade": 9.6,
+    "price": 445,
+    "title": "New Mutants #98 CGC 9.6 White Pages 1st Appearance Deadpool Marvel 1991 KEY 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 65,
+    "marketplace": "ebay"
+   }
+  ],
+  "9.8": [
+   {
+    "url": "https://www.ebay.com/itm/137715995756?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-17",
+    "grade": 9.8,
+    "price": 1099,
+    "title": "The New Mutants #98 CGC 9.8 White Pages 1st Deadpool Marvel 1991 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 3,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/237065377319?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-13",
+    "grade": 9.8,
+    "price": 1000,
+    "title": "Marvel The New Mutants 98 1991 CGC 9.8 White Pages 1st First Appearance Deadpool 1991 #98",
+    "source": "pricecharting-history",
+    "daysAgo": 7,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/318800655747?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-08",
+    "grade": 9.8,
+    "price": 975,
+    "title": "New Mutants #98 1991 CGC 9.8 1st App Deadpool Rob Liefeld Key 🗝️ White Pages 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 12,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/128051448240?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-08",
+    "grade": 9.8,
+    "price": 1075,
+    "title": "New Mutants #98 1991 CGC 9.8 | 1st App Deadpool | New Case White Pages | 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 12,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/278337552903?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-06",
+    "grade": 9.8,
+    "price": 1015,
+    "title": "New Mutants #98 High Grade 1st App. Deadpool Vintage Marvel Comic 1991 CGC 9.8 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 14,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/406161606080?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-04",
+    "grade": 9.8,
+    "price": 1061.99,
+    "title": "New Mutants: #98 [Rob Liefeld CGC 9.8] 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 16,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/307161397217?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-03",
+    "grade": 9.8,
+    "price": 875,
+    "title": "New Mutants #98 CGC 9.8 1st Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 17,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/236994905889?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-03",
+    "grade": 9.8,
+    "price": 1100,
+    "title": "New Mutants #98 CGC 9.8 1st App Deadpool - WHITE PAGES 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 17,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/206448816178?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-19",
+    "grade": 9.8,
+    "price": 1009,
+    "title": "New Mutants #98 CGC 9.8 Stunning Book! 1st Appearance of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 32,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/358918703801?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-18",
+    "grade": 9.8,
+    "price": 915,
+    "title": "New Mutants #98 CGC 9.8 1st App Deadpool - WHITE PGS 1991 key -CRACKED CGC CASE! 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 33,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/398272063598?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-17",
+    "grade": 9.8,
+    "price": 1019.15,
+    "title": "NEW MUTANTS #98 CGC 9.8 WHITE PAGES 1991 Marvel 1st App Deadpool 1986",
+    "source": "pricecharting-history",
+    "daysAgo": 34,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/147494252395?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-17",
+    "grade": 9.8,
+    "price": 921,
+    "title": "New Mutants #98 High Grade 1st App. Deadpool Vintage Marvel Comic 1991 CGC 9.8 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 34,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/358339246004?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-15",
+    "grade": 9.8,
+    "price": 1024,
+    "title": "New Mutants #98 - Marvel Comics 1991 CGC 9.8 1st appearance of Deadpool (Wade Wi 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 36,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366592686399?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-14",
+    "grade": 9.8,
+    "price": 899.99,
+    "title": "New Mutants #98 CGC 9.8 1st Appearance of Deadpool Marvel Comic Key 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 37,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/147497954538?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-12",
+    "grade": 9.8,
+    "price": 995,
+    "title": "New Mutants #98 CGC 9.8 White Pages",
+    "source": "pricecharting-history",
+    "daysAgo": 39,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/157913671627?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-10",
+    "grade": 9.8,
+    "price": 950,
+    "title": "The New Mutants #98 CGC 9.8 White Pages 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 41,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/407113824598?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-09",
+    "grade": 9.8,
+    "price": 979,
+    "title": "New Mutants #98 - Marvel Comics 1991 CGC 9.8 1st appearance of DeadpoolWOW~!LOOK 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 42,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/278228729898?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-03",
+    "grade": 9.8,
+    "price": 984.99,
+    "title": "New Mutants #98 CGC 9.8 White Pgs | 1st Deadpool | Rob Liefeld | Brand New Slab! 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 48,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/178357214743?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-02",
+    "grade": 9.8,
+    "price": 980,
+    "title": "New Mutants #98 CGC 9.8 White Pages 1st Deadpool Marvel 1991 BEAUTIFUL 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 49,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/407080543032?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-29",
+    "grade": 9.8,
+    "price": 966.51,
+    "title": "New Mutants #98 CGC 9.8 Stunning Book! 1st Appearance of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 53,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/284697411050?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-28",
+    "grade": 9.8,
+    "price": 1195,
+    "title": "New Mutants #98 CGC 9.8 Marvel 1991 1st Deadpool! X-Men! Wolverine WP M12 320 cm 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 54,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/137547269749?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-24",
+    "grade": 9.8,
+    "price": 1000.35,
+    "title": "New Mutants #98 1st Appearance Deadpool CGC 9.8 - 1991 white pages! Marvel 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 58,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/137361554755?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-24",
+    "grade": 9.8,
+    "price": 1111.11,
+    "title": "New Mutants #98 1st Appearance Deadpool CGC 9.8 - 1991 white pages! Marvel 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 58,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ha.com/itm/-/-/-/a/122629-15771.s?type=DA-DMC-PriceCharting",
+    "date": "2026-07-23",
+    "grade": 9.8,
+    "price": 976,
+    "title": "The New Mutants #98 (Marvel, 1991) CGC NM/MT 9.8 White pages....",
+    "source": "pricecharting-history",
+    "daysAgo": 59,
+    "marketplace": "heritage"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366530773599?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-22",
+    "grade": 9.8,
+    "price": 945,
+    "title": "New Mutants #98 CGC 9.8 Stunning Book! 1st Appearance of Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 60,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366509635217?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-18",
+    "grade": 9.8,
+    "price": 1075,
+    "title": "Marvel New Mutants #98 (1991) CGC 9.8 1st Deadpool Cert 2049318002 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 64,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/168477014735?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-18",
+    "grade": 9.8,
+    "price": 1060,
+    "title": "New Mutants #98 CGC 9.8 White Pages 1st Deadpool",
+    "source": "pricecharting-history",
+    "daysAgo": 64,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/298482886126?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-13",
+    "grade": 9.8,
+    "price": 910,
+    "title": "New Mutants #98 CGC 9.8 White Pages DEADPOOL 1st Appearance 1991 Marvel MCU 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 69,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/168508515938?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-11",
+    "grade": 9.8,
+    "price": 999.99,
+    "title": "The New Mutants #98 (Marvel Comics 1991) CGC 9.8 Deadpool First Appearance 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 71,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/377201470187?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-07-10",
+    "grade": 9.8,
+    "price": 1250,
+    "title": "New Mutants #98 CGC 9.8 1st App Deadpool 1991",
+    "source": "pricecharting-history",
+    "daysAgo": 72,
+    "marketplace": "ebay"
+   }
+  ],
+  "raw": [
+   {
+    "url": "https://www.ebay.com/itm/198621129365?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-14",
+    "grade": "raw",
+    "price": 338.1,
+    "title": "NEW MUTANTS #98 VF/NM 1ST DEADPOOL",
+    "source": "pricecharting-history",
+    "__evIdx": 0,
+    "daysAgo": 6,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/117403166178?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-09",
+    "grade": "raw",
+    "price": 180,
+    "title": "Marvel Comics: THE NEW MUTANTS #98 February 1991 First Appearance of Deadpool 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 1,
+    "daysAgo": 11,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/237027917524?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-06",
+    "grade": "raw",
+    "price": 249.99,
+    "title": "The New Mutants #98 (1991) | 7.5 VF- | 1st Appearance Of Deadpool - Marvel Key 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 2,
+    "daysAgo": 14,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/306825299238?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-04",
+    "grade": "raw",
+    "price": 527.89,
+    "title": "The New Mutants #98 – Marvel (1991) 9.6 NM+ Rob Liefeld story",
+    "source": "pricecharting-history",
+    "__evIdx": 3,
+    "daysAgo": 16,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366632734418?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-03",
+    "grade": "raw",
+    "price": 294,
+    "title": "Marvel Comics The New Mutants #98 1991 Deadpool Domino Gideon Punisher 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 4,
+    "daysAgo": 17,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/227491022913?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-03",
+    "grade": "raw",
+    "price": 240,
+    "title": "Marvel Comics the New Mutants #98 February 1991 First Appearance of Deadpool 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 5,
+    "daysAgo": 17,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/820075986674?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-03",
+    "grade": "raw",
+    "price": 210,
+    "title": "New Mutants #98 First Appearance Of Deadpool Marvel Comic",
+    "source": "pricecharting-history",
+    "__evIdx": 6,
+    "daysAgo": 17,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/198614126196?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-03",
+    "grade": "raw",
+    "price": 215,
+    "title": "New Mutants #98 - Not Graded. Not Mint. &#34;Good&#34; Condition. 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 7,
+    "daysAgo": 17,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/407127938868?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-02",
+    "grade": "raw",
+    "price": 325,
+    "title": "The New Mutants #98 (Marvel Comics Feb. 1991) 1st Appearance Of Deadpool 🔑🔥 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 8,
+    "daysAgo": 18,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/137665040917?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-02",
+    "grade": "raw",
+    "price": 255,
+    "title": "New Mutants 98 - First Appearance of Deadpool! 1991 #98",
+    "source": "pricecharting-history",
+    "__evIdx": 9,
+    "daysAgo": 18,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/398347597284?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-01",
+    "grade": "raw",
+    "price": 15,
+    "title": "Marvel Comics The New Mutants #98 (1991) Comic Book Liefeld Nicieza Deadpool 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 10,
+    "daysAgo": 19,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/800597045717?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-01",
+    "grade": "raw",
+    "price": 240,
+    "title": "The New Mutants #98 (Marvel Comics Feb. 1991) 1st Appearance Of Deadpool 🔑🔥 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 11,
+    "daysAgo": 19,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/800555516955?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-09-01",
+    "grade": "raw",
+    "price": 249.99,
+    "title": "New Mutants 98 - First Appearance of Deadpool! 1991 #98",
+    "source": "pricecharting-history",
+    "__evIdx": 12,
+    "daysAgo": 19,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/318767746495?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-31",
+    "grade": "raw",
+    "price": 410,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 13,
+    "daysAgo": 20,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/307138373114?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-30",
+    "grade": "raw",
+    "price": 275,
+    "title": "Marvel Comics The New Mutants #98 1991 First Appearance Deadpool 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 14,
+    "daysAgo": 21,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/158216514069?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-29",
+    "grade": "raw",
+    "price": 265,
+    "title": "The New Mutants #98 (Marvel) Liefeld 1st Appearance Of Deadpool Copycat & Gideon 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 15,
+    "daysAgo": 22,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/257696693597?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-24",
+    "grade": "raw",
+    "price": 255.99,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 16,
+    "daysAgo": 27,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/298591632848?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-20",
+    "grade": "raw",
+    "price": 250,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 17,
+    "daysAgo": 31,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/206496462742?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-19",
+    "grade": "raw",
+    "price": 175,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 18,
+    "daysAgo": 32,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/137554077996?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-18",
+    "grade": "raw",
+    "price": 425,
+    "title": "New Mutants #98 PSA 9.6 Incredible Looking Book! 1st App of Deadpool Not CGC 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 19,
+    "daysAgo": 33,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/158163932388?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-17",
+    "grade": "raw",
+    "price": 277,
+    "title": "New Mutants #98 - 1991 1st Print, 1st Deadpool/Domino, VF/NM 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 20,
+    "daysAgo": 34,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/366582504022?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-16",
+    "grade": "raw",
+    "price": 310,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) - 0820 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 21,
+    "daysAgo": 35,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/188766259529?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-16",
+    "grade": "raw",
+    "price": 232.5,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 22,
+    "daysAgo": 35,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/287523114273?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-15",
+    "grade": "raw",
+    "price": 200,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) RARE 1st DEADPOOL!!! 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 23,
+    "daysAgo": 36,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/137593168169?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-14",
+    "grade": "raw",
+    "price": 249.5,
+    "title": "The New Mutants #98 1st appearance of Deadpool FN Huge auction going on now! 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 24,
+    "daysAgo": 37,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/318660975191?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-14",
+    "grade": "raw",
+    "price": 395,
+    "title": "The New Mutants #98 (Marvel Comics 1991) CGC WHITE PAGES 9.8 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 25,
+    "daysAgo": 37,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/278271491175?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-12",
+    "grade": "raw",
+    "price": 250,
+    "title": "Marvel Comics The New Mutants #98 (1991) Deadpool Domino Gideon - Rob Liefeld 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 26,
+    "daysAgo": 39,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/147474316131?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-10",
+    "grade": "raw",
+    "price": 265,
+    "title": "Marvel Comics The New Mutants #98 First Appearance Deadpool 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 27,
+    "daysAgo": 41,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/336722411106?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-10",
+    "grade": "raw",
+    "price": 210,
+    "title": "Marvel Comics the New Mutants #98 (Feb. 1991) First Deadpool Appearance 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 28,
+    "daysAgo": 41,
+    "marketplace": "ebay"
+   },
+   {
+    "url": "https://www.ebay.com/itm/800430077919?nordt=true&rt=nc&mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5338832968&customid=noId&toolid=10001",
+    "date": "2026-08-08",
+    "grade": "raw",
+    "price": 250,
+    "title": "Marvel Comics The New Mutants #98 (1991) Deadpool Domino Gideon - Rob Liefeld 1991",
+    "source": "pricecharting-history",
+    "__evIdx": 29,
+    "daysAgo": 43,
+    "marketplace": "ebay"
+   }
+  ]
+ },
+ "pop": {
+  "total": 22686,
+  "atGrade": 77,
+  "belowGrade": 55,
+  "aboveGrade": 22554
+ },
+ "rawComps": {
+  "count": 21,
+  "average": 424.2271428571429,
+  "lowest": 327.75,
+  "highest": 799,
+  "prices": [
+   {
+    "url": "https://www.ebay.com/itm/336803989351?_skw=the+new+mutants+%2398+1991&hash=item4e6b150767:g:VpIAAeSwMyBqsAxA",
+    "date": null,
+    "price": 327.75,
+    "title": "The New Mutants #98 (Marvel, Feb 1991) ☆ Authentic ☆",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/157831457917?_skw=the+new+mutants+%2398+1991&hash=item24bf7cec7d:g:~1MAAeSwkC9nw8Bh&amdata=enc%3AAQALAAAA8ACCtXRWQnOEpyOqnQQ8KGbwc7mikT1v1vaLT351ojOOx0p%2BLTCx9yKSQgU6BscpHh3KXBC2%2FtvttofIhD01akO4blIg7WHrhtiyO%2Bm3khU%2FI37EjQInXplait9hRQpAQl1W8U%2Baznr3GoCKpwRfZjTkcf--CmxUTkmvNN6fMFUqGFiqF85MSAigU6f7IofTNqhodl6Ge9daqVva7jenUa5j3ohtw%2BMTn7vPjX3Xv24CuNLq7nW20SVSNbExbVvvcuJRparLGyaCRwsWQllPQuHqhL7KOJ%2F6vpIYa52sde5i0wiWvzelP06NIIlqXDKmSA%3D%3D",
+    "date": null,
+    "price": 425,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) 1ST DEADPOOL!!!!",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/377441118600?_skw=the+new+mutants+%2398+1991&hash=item57e13e6988:g:Z0UAAeSw2npqihgx",
+    "date": null,
+    "price": 400,
+    "title": "The New Mutants #98 (Marvel Comics February 1991)",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/298619611687?_skw=the+new+mutants+%2398+1991&hash=item45871daa27:g:hysAAeSw0Hxqj5MP",
+    "date": null,
+    "price": 330,
+    "title": "The New Mutants #98 (Marvel Comics February 1991)",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/377451710741?_skw=the+new+mutants+%2398+1991&hash=item57e1e00915:g:ILsAAeSwMk1qkHMp&amdata=enc%3AAQALAAAA8ACCtXRWQnOEpyOqnQQ8KGbvNJl76g81m6sOE4i8XjuB5avuXBPZiOuiASnKXZlhONnBdGx4l89xVzzG9NUlGbk188Avx0sZEJnqvw7plVTgsV5U%2FWxBs%2Fllhfo8%2B%2BwmZF%2BUB8tJruxHGH0oMuCKxEjelXMn0%2FSa09rx53zIdX41MlGz%2FDWESKrXG0fif2NoRUYgXi8yZ3pH0vcbMhvRgMlNyBhPNelNOA5PrpHE3Mxag62zuCusaL%2FGkdXRf1AmCMRqFH79IkvONIdm6eUqUurfqxVOeWzv33kcgS6N0tDosw6Z6F%2Fu2jpO2CUMqpd6mA%3D%3D",
+    "date": null,
+    "price": 340,
+    "title": "The New Mutants #98 Comic Book First Deadpool Appearance",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/336789511037?_skw=the+new+mutants+%2398+1991&hash=item4e6a381b7d:g:PjwAAeSwiHtqpAGM",
+    "date": null,
+    "price": 349.99,
+    "title": "New Mutants #98 - 1st App Deadpool Marvel 1991 Comics",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/336338189652?_skw=the+new+mutants+%2398+1991&hash=item4e4f517d54:g:pAMAAeSwKyFpOemO&amdata=enc%3AAQALAAAA8ACCtXRWQnOEpyOqnQQ8KGYBmzj0aTCDaT2lfy7XHp1xB3IlbekGI6DmXxmTJHv3JGMc%2BGYWC%2BLNAMtRBDkXYLi9R3gl%2FwZRArnaHfc%2Fb4bJFqGLuF%2FwZJEh713iORyVILMdYISxGcG4swnU8D59J3QsX3dtnWJ%2BrdZNR%2ByMM8MfZgcCxOBMfa%2FS9t1UtrFrUD4kH6JTPP7sI8v%2BXTwLoUEZ4HC4bZCHWNN8w4rJJPP9Qa3YWr59Qkwk3hEG7iVYyg%2FRpIg5W68%2BfsAQUjOOuIYY3T6rmTQhcSaFidY%2BVi9CVSb5rAJBEwg6nFc23alq9w%3D%3D",
+    "date": null,
+    "price": 799,
+    "title": "The New Mutants #98 Comic Book (First Appearance Of Deadpool)",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/398402343938?_skw=the+new+mutants+%2398+1991&hash=item5cc2a15402:g:Fw8AAeSwzEtqqzou",
+    "date": null,
+    "price": 399.99,
+    "title": "Marvel Comics The New Mutants #98 (1991) Deadpool Domino Rob Liefeld",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/166329846239?_skw=the+new+mutants+%2398+1991&hash=item26ba0809df:g:FUMAAOSwt5FlApRV",
+    "date": null,
+    "price": 375,
+    "title": "The New Mutants #98 (Marvel, February 1991)",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/157642085964?_skw=the+new+mutants+%2398+1991&hash=item24b433564c:g:8jAAAeSwy7FpeThi",
+    "date": null,
+    "price": 444.88,
+    "title": "The New Mutants #98  (Marvel Comics February 1991)",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/178160757233?_skw=the+new+mutants+%2398+1991&hash=item297b3569f1:g:pz8AAeSwEJpqErcQ",
+    "date": null,
+    "price": 399.99,
+    "title": "The New Mutants #98 (First Deadpool)",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/318852838789?_skw=the+new+mutants+%2398+1991&hash=item4a3d1c3585:g:~~oAAeSwgXRqoqZf",
+    "date": null,
+    "price": 500,
+    "title": "Marvel Comics The New Mutants #98 1st Deadpool Appearance",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/384992601509?_skw=the+new+mutants+%2398+1991&hash=item59a358e5a5:g:PgoAAOSwkq1ixiMk",
+    "date": null,
+    "price": 500,
+    "title": "The New Mutants #98 (Feb 1991, Marvel)",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/188227385156?_skw=the+new+mutants+%2398+1991&hash=item2bd339f744:g:I~4AAeSwC~Rpyw3x",
+    "date": null,
+    "price": 499.99,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) 1st Deadpool Key Issue",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/177821501909?_skw=the+new+mutants+%2398+1991&hash=item2966fcc9d5:g:yeEAAeSwDCxpfLgs",
+    "date": null,
+    "price": 340,
+    "title": "The New Mutants #98 First Printing (Marvel Comics 1991) Deadpool Domino Gideon",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/336535019804?_skw=the+new+mutants+%2398+1991&hash=item4e5b0ce11c:g:ZUIAAeSwzGVp32FX",
+    "date": null,
+    "price": 328.18,
+    "title": "The New Mutants # 98 1st Deadpool Appearance Marvel 1991 New (Other)",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/325598253617?_skw=the+new+mutants+%2398+1991&hash=item4bcf2b1231:g:glYAAOSwiKVkKGZP",
+    "date": null,
+    "price": 350,
+    "title": "The New Mutants #98 Deadpool Marvel Comics 1991",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/396585431844?_skw=the+new+mutants+%2398+1991&hash=item5c56557324:g:GAwAAOSwk8FoHSUg",
+    "date": null,
+    "price": 450,
+    "title": "The New Mutants #98 (Marvel Comics February 1991)",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/116236564274?_skw=the+new+mutants+%2398+1991&hash=item1b103d3732:g:e8cAAOSwKCdmg1C7",
+    "date": null,
+    "price": 350,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) 1st Deadpool",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/198549457331?_skw=the+new+mutants+%2398+1991&hash=item2e3a7849b3:g:u4YAAeSwz-Bqcz2L",
+    "date": null,
+    "price": 599,
+    "title": "The New Mutants #98 (Marvel Comics February 1991) 1st Appearance Deadpool Key",
+    "condition": null
+   },
+   {
+    "url": "https://www.ebay.com/itm/307048552234?_skw=the+new+mutants+%2398+1991&hash=item477d85172a:g:9eQAAeSwBq5qJxGk",
+    "date": null,
+    "price": 400,
+    "title": "The New Mutants #98 1st app. Deadpool, 1st app. Gideon, 1st app. Domino NM",
+    "condition": null
+   }
+  ]
+ },
+ "matchConfidence": {
+  "tier": "HIGH",
+  "score": 95,
+  "displayMessage": "Verified exact match"
+ },
+ "decision": {
+  "price": 360.59,
+  "action": "RESEARCH",
+  "reason": "30 sold comps found but rejected — mostly ungraded title",
+  "blockers": [],
+  "evidence": {
+   "warnings": [
+    "zero-verified-comps"
+   ],
+   "zeroVerifiedComps": {
+    "activeCount": 21,
+    "rawSoldCount": 30,
+    "verifiedCount": 0
+   }
+  },
+  "nextStep": "Verify market state and review comps manually before listing",
+  "warnings": [
+   "zero-verified-comps"
+  ],
+  "timestamp": 1789945849863,
+  "confidence": "low",
+  "bestChannel": "research"
+ },
+ "contractActionAuthority": {
+  "state": "REVIEW",
+  "reasonCodes": [],
+  "marketStanding": "EXACT_CURRENT",
+  "identityStanding": "CONFIRMED"
+ },
+ "keyIssue": ""
+}

@@ -405,11 +405,13 @@ ${plan.specifics.map((x) => `      <NameValueList>
 `).join('')}    </ItemSpecifics>
 ` : '';
 
-  // GK-284 / B1-FINAL A3 -- attempt-linked provider correlation (only for an OPERATOR_MANUAL attempt). Item.UUID is eBay's
+  // GK-284 / B1-FINAL A3 -- attempt-linked provider correlation (only for an OPERATOR_MANUAL attempt). Item.UUID is eBay's ITEM ORDER: eBay's ItemType is an xs:sequence in which UUID precedes SKU (schema v1487), so they are emitted in that relative order.
   // documented duplicate-listing defence (a resend with the same UUID yields error 488 + the existing ItemID, KB 1462);
   // Item.SKU is a seller-visible custom label so the listing can be recognised in Seller Hub and in GetMyeBaySelling.
   const correlationBlock = plan.correlation && plan.correlation.uuid && plan.correlation.sku
-    ? `    <SKU>${xmlEscape(plan.correlation.sku)}</SKU>\n    <UUID>${xmlEscape(plan.correlation.uuid)}</UUID>\n`
+    ? `    <UUID>${xmlEscape(plan.correlation.uuid)}</UUID>
+    <SKU>${xmlEscape(plan.correlation.sku)}</SKU>
+`
     : '';
 
   return `<?xml version="1.0" encoding="utf-8"?>

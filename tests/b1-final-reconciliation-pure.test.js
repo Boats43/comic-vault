@@ -20,7 +20,7 @@ console.log('-- A3: provider correlation --');
 {
   const id = '01a13144-dea7-7fa5-8224-566a1ae53fba';
   const c = OA.attemptCorrelation(id);
-  ok(/^[0-9a-f]{32}$/.test(c.uuid) && c.uuid === id.replace(/-/g, ''), 'Item.UUID is the attempt id as 32 hex characters (eBay GUID-without-dashes format)');
+  ok(/^[0-9A-F]{32}$/.test(c.uuid) && c.uuid === id.replace(/-/g, '').toUpperCase(), 'Item.UUID is the attempt id as 32 UPPERCASE hex characters (eBay schema: digits 0-9 and letters A-F, 32 long)');
   ok(c.sku === `GK-${c.uuid}` && c.sku.length === 35 && c.sku.length <= 50, 'Item.SKU label is attempt-linked and within eBay\'s 50-character limit');
   ok(JSON.stringify(OA.attemptCorrelation(id)) === JSON.stringify(c), 'deterministic: the same attempt always yields the same identifiers (a resend carries the same UUID)');
   ok(OA.attemptCorrelation('01a13144-dea7-7fa5-8224-566a1ae53fbb').uuid !== c.uuid, 'distinct attempts yield distinct identifiers');
