@@ -241,10 +241,15 @@ const PRINCIPAL_A = await createTestPrincipal('gk265-principal-a');
 const PRINCIPAL_B = await createTestPrincipal('gk265-principal-b');
 const PRINCIPAL_C_NO_CONNECTION = await createTestPrincipal('gk265-principal-c-no-connection');
 
+// Provider identities are permanent per marketplace_connection row (0032): a run killed before its cleanup would leave
+// the fixed names claimed and every later run would fail with PROVIDER_IDENTITY_CONFLICT. Unique per run => repeatable.
+const RUN_IDENTITY_SUFFIX = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const IDENTITY_A = `ebay-identity-A-${RUN_IDENTITY_SUFFIX}`;
+const IDENTITY_B = `ebay-identity-B-${RUN_IDENTITY_SUFFIX}`;
 const A_REFRESH = `fake-refresh-A-${nonce('a')}`;
 const B_REFRESH = `fake-refresh-B-${nonce('b')}`;
-await connectEbay(PRINCIPAL_A, 'ebay-identity-A', A_REFRESH);
-await connectEbay(PRINCIPAL_B, 'ebay-identity-B', B_REFRESH);
+await connectEbay(PRINCIPAL_A, IDENTITY_A, A_REFRESH);
+await connectEbay(PRINCIPAL_B, IDENTITY_B, B_REFRESH);
 
 const createdOutcomeIdempotencyKeys = [];
 const createdExternalListingIds = [];
@@ -500,7 +505,7 @@ try {
     refreshBehavior[A_REFRESH] = 'success';
     // Restore A back to CONNECTED for subsequent scenarios, exactly the
     // same real reconnect path GK-264's own Connect flow uses.
-    await connectEbay(PRINCIPAL_A, 'ebay-identity-A', A_REFRESH);
+    await connectEbay(PRINCIPAL_A, IDENTITY_A, A_REFRESH);
   }
 
   // Temporary eBay/network failure -> connection remains CONNECTED, no

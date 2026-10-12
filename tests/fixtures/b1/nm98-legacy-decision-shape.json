@@ -1,0 +1,25 @@
+{
+  "_comment": "Real Production row SHAPE for New Mutants #98 (read-only census, 2026-10-12), sanitized: all ids replaced by placeholders, no principal/asset/media identifiers, no credentials. Values are the facts that make the historical decision contradictory.",
+  "decision": {
+    "id": "DECISION-PLACEHOLDER",
+    "recommendation": "LIST_NOW",
+    "reason_codes": [],
+    "authority_snapshot": null,
+    "valuation_event_id": "VALUATION-SERVER-DERIVED-PLACEHOLDER"
+  },
+  "valuations": [
+    { "id": "VALUATION-CLIENT-PLACEHOLDER", "value_amount": "360.59", "provenance": "CLIENT_ASSERTED" },
+    { "id": "VALUATION-SERVER-DERIVED-PLACEHOLDER", "value_amount": "263.80", "provenance": "SERVER_DERIVED" }
+  ],
+  "catalogue": {
+    "title": "the new mutants",
+    "issue": "98",
+    "year": "1991",
+    "price": "$360.59",
+    "pricingSource": "active_ask_derived",
+    "decision": { "action": "RESEARCH", "warnings": ["zero-verified-comps"] },
+    "soldCompDiagnostics": { "rawCount": 30, "rejectedCount": 30, "verifiedCount": 0 },
+    "contract": { "actionAuthority": { "state": "REVIEW", "marketStanding": "EXACT_CURRENT", "identityStanding": "CONFIRMED" } },
+    "matchConfidence": { "tier": "HIGH", "score": 95 }
+  }
+}

@@ -384,7 +384,9 @@ const isTestMarketVariant = (title, issue, variantKey) => {
 // of booleans in the same order as `listings`, or null on any failure so
 // the caller can silently fall back to unverified comps.
 // Single source for the verification-lane model id: request, pricing lookup and log all read this.
-const VERIFY_MODEL = "claude-haiku-4-5";
+// B1/B5: pinned to the dated Haiku 4.5 snapshot (the undated alias can be repointed by the provider).
+// Same model family and the same price row (src/lib/anthropicPricing.js) — no behavior change.
+const VERIFY_MODEL = "claude-haiku-4-5-20251001";
 const verifyCompsTitles = async ({ title, issue, year, publisher, listings }) => {
   if (!process.env.ANTHROPIC_API_KEY) return null;
   if (!Array.isArray(listings) || listings.length === 0) return null;

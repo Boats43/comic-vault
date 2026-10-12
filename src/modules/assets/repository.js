@@ -920,3 +920,101 @@ export async function listAssetMediaContentHashes(client, { gkAssetId }) {
   const res = await client.query(`SELECT content_hash FROM data1_dev.media WHERE asset_id = $1`, [gkAssetId]);
   return res.rows.map((r) => r.content_hash);
 }
+
+// ───────────────────────── GK-284 (0040): operator authority + marketplace attempt ledger ─────────────────────────
+// operator_authority_event is append-only (DB-enforced). No update/delete function exists here.
+
+export async function lockAssetAttempts(client, gkAssetId) {
+  // Serialises authorize/submit/reconcile for ONE asset inside the caller's transaction.
+  await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1::text, 40284))`, [gkAssetId]);
+}
+
+export async function getOperatorActionAuthorityContext(client, operatorActionEventId) {
+  const r = await client.query(
+    `SELECT id, gk_asset_id, decision_event_id, principal_id, action_code, action_value_amount::text AS action_value_amount,
+            action_value_currency, occurred_at
+       FROM data1_dev.operator_action_event WHERE id = $1`,
+    [operatorActionEventId]
+  );
+  return r.rows[0] || null;
+}
+
+export async function getDecisionForAuthority(client, decisionEventId) {
+  const r = await client.query(
+    `SELECT id, asset_id, recommendation, reason_codes, authority_snapshot, valuation_event_id FROM data1_dev.decision_event WHERE id = $1`,
+    [decisionEventId]
+  );
+  return r.rows[0] || null;
+}
+
+export async function listValuationsForAuthority(client, assetId) {
+  const r = await client.query(
+    `SELECT id, value_amount::text AS value_amount, provenance FROM data1_dev.valuation_event WHERE asset_id = $1 ORDER BY recorded_at, id`,
+    [assetId]
+  );
+  return r.rows;
+}
+
+export async function listAttemptRowsForAsset(client, { gkAssetId, channel }) {
+  const r = await client.query(
+    `SELECT a.attempt_id, a.phase, a.external_listing_id, a.recorded_at, a.recon_verdict, a.new_publish_authorized,
+            (a.external_listing_id IS NOT NULL AND EXISTS (
+               SELECT 1 FROM data1_dev.outcome_event o
+                WHERE o.gk_asset_id = a.gk_asset_id AND o.channel = a.channel AND o.external_listing_id = a.external_listing_id
+                  AND o.outcome_type IN ('DELISTED','SOLD','EXPIRED_UNSOLD'))) AS listing_ended
+       FROM data1_dev.operator_authority_event a
+      WHERE a.gk_asset_id = $1 AND a.channel = $2
+      ORDER BY a.recorded_at, a.id`,
+    [gkAssetId, channel]
+  );
+  return r.rows;
+}
+
+export async function listAttemptPhases(client, attemptId) {
+  const r = await client.query(
+    `SELECT id, authorized_event_id, attempt_id, phase, gk_asset_id, principal_id, operator_action_event_id, decision_event_id, channel,
+            authority_type, approved_amount::text AS approved_amount, approved_amount_cents::text AS approved_amount_cents, approved_currency,
+            approved_at, engine_recommendation, governing_grade, evidence_class, verified_sold_count, ack_payload, ack_warnings, evidence,
+            provider_correlation, external_listing_id, detail, review_due_at, recon_verdict, new_publish_authorized, reconciliation,
+            correlation_id, recorded_at
+       FROM data1_dev.operator_authority_event WHERE attempt_id = $1 ORDER BY recorded_at, id`,
+    [attemptId]
+  );
+  return r.rows;
+}
+
+// Ambiguous attempts that still need an owner's review (no OPERATOR_RECONCILED event yet), oldest first.
+export async function listAttemptsNeedingReview(client, { principalId }) {
+  const r = await client.query(
+    `SELECT a.attempt_id, a.gk_asset_id, a.review_due_at, a.recorded_at AS ambiguous_at
+       FROM data1_dev.operator_authority_event a
+      WHERE a.phase = 'AMBIGUOUS' AND a.principal_id = $1
+        AND NOT EXISTS (SELECT 1 FROM data1_dev.operator_authority_event r WHERE r.attempt_id = a.attempt_id AND r.phase = 'OPERATOR_RECONCILED')
+      ORDER BY a.review_due_at, a.id`,
+    [principalId]
+  );
+  return r.rows;
+}
+
+export async function insertOperatorAuthorityEvent(client, f) {
+  const id = f.id || await uuidv7(client);
+  await client.query(
+    `INSERT INTO data1_dev.operator_authority_event
+       (id, authorized_event_id, attempt_id, phase, gk_asset_id, principal_id, operator_action_event_id, decision_event_id, channel,
+        authority_type, approved_amount, approved_amount_cents, approved_currency, approved_at, engine_recommendation, governing_grade,
+        evidence_class, verified_sold_count, ack_payload, ack_warnings, evidence, provider_correlation,
+        external_listing_id, detail, review_due_at, recon_verdict, new_publish_authorized, reconciliation, correlation_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'OPERATOR_MANUAL',$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18::jsonb,$19::jsonb,$20::jsonb,$21::jsonb,
+             $22,$23::jsonb,$24,$25,$26,$27::jsonb,$28)`,
+    [id, f.authorizedEventId || id, f.attemptId, f.phase, f.gkAssetId, f.principalId, f.operatorActionEventId, f.decisionEventId, f.channel,
+     f.approvedAmount ?? null, f.approvedAmountCents ?? null, f.approvedCurrency ?? null, f.approvedAt ?? null, f.engineRecommendation ?? null,
+     f.governingGrade ? JSON.stringify(f.governingGrade) : null, f.evidenceClass ?? null, f.verifiedSoldCount ?? null,
+     f.ackPayload ? JSON.stringify(f.ackPayload) : null, f.ackWarnings ? JSON.stringify(f.ackWarnings) : null,
+     f.evidence ? JSON.stringify(f.evidence) : null, f.providerCorrelation ? JSON.stringify(f.providerCorrelation) : null,
+     f.externalListingId ?? null, f.detail ? JSON.stringify(f.detail) : null, f.reviewDueAt ?? null,
+     f.reconVerdict ?? null, f.newPublishAuthorized ?? null, f.reconciliation ? JSON.stringify(f.reconciliation) : null, f.correlationId]
+  );
+  return id;
+}
+
+export async function newUuidV7(client) { return uuidv7(client); }

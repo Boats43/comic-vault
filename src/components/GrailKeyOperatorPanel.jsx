@@ -30,7 +30,7 @@
 // reach /api/capture-scan; there is no other code path in the frontend
 // that calls it.
 
-import { decisionTrustStanding, decisionTrustLabel } from "../lib/decisionTrust.js";
+import { decisionTrustStanding, decisionTrustLabel, decisionGovernance } from "../lib/decisionTrust.js";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { authFetch, isAuthenticated, getPrincipalScope } from "../lib/grailkeySession.js";
 import {
@@ -543,6 +543,13 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
             client-origin rows stay visible as history, never as a trusted recommendation). */}
         {latestDecision && decisionTrustLabel(decisionTrustStanding(latestDecision, valuations)) ? (
           <Field label="Recommendation standing" value={decisionTrustLabel(decisionTrustStanding(latestDecision, valuations))} />
+        ) : null}
+        {/* GK-288 -- a decision anchored to a server-derived valuation can still be a legacy row with no
+            recorded evidence (no authority_snapshot) or one the durable catalogue contradicts. It stays
+            visible as history; it is never presented as a current governed authorization. */}
+        {latestDecision && !decisionTrustLabel(decisionTrustStanding(latestDecision, valuations))
+          && decisionGovernance(latestDecision, valuations, item).label ? (
+          <Field label="Recommendation standing" value={decisionGovernance(latestDecision, valuations, item).label} />
         ) : null}
       </div>
 

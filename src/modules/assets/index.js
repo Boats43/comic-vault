@@ -60,6 +60,13 @@ export {
   retireTransientDuplicate,
   recordPhysicalCopyDecision,
   resolvePhysicalCopyChoice,
+  authorizeOperatorManualListing,
+  recordMarketplaceAttemptPhase,
+  operatorReconcileAttempt,
+  listAttemptsNeedingReview,
+  verifyOperatorAuthorityConsistency,
+  getListingAttemptGuard,
+  getOperatorAuthorityAttempt,
 } from './service.js';
 
 export {
@@ -72,6 +79,7 @@ export {
   AuthorizationFailedError,
   PhysicalCopyDecisionRequiredError,
   PhysicalCopyCandidateCheckUnavailableError,
+  ListingAttemptBlockedError,
 } from './errors.js';
 
 // Test/shutdown only — not part of the operational contract, but a real

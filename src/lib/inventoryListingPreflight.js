@@ -48,7 +48,7 @@
 // mutates it.
 
 import { assertListable, ConflictError as InventoryConflictError, NotFoundError as InventoryNotFoundError, AuthorizationFailedError as InventoryAuthorizationFailedError } from '../modules/inventory/index.js';
-import { hasActiveListingForChannel, hasAuthoritativeSoldOutcome, wasOutcomeIdempotencyKeyClaimed } from '../modules/assets/index.js';
+import { hasActiveListingForChannel, hasAuthoritativeSoldOutcome, wasOutcomeIdempotencyKeyClaimed, getListingAttemptGuard } from '../modules/assets/index.js';
 
 export class ListingPreflightFailedError extends Error {
   constructor(code, message) {
@@ -107,6 +107,15 @@ export async function assertListingAuthorized({ principalId, gkAssetId, channel,
         `gk_asset ${gkAssetId} already has an active listing on channel "${channel}" (${activeListingIds.join(', ')}) — reject, do not create a duplicate projection`
       );
     }
+  }
+
+  // GK-284 -- durable attempt ledger. An earlier OPERATOR_MANUAL attempt that is ambiguous, still
+  // unresolved, or already produced a live listing blocks a new publish BEFORE any provider call, even
+  // when no outcome_event exists (e.g. the provider response was lost) and even for a replayed
+  // idempotency key (a replay must not become a second provider write). Read-only.
+  const attemptGuard = await getListingAttemptGuard({ principalId, gkAssetId, channel });
+  if (!attemptGuard.allowed) {
+    throw new ListingPreflightFailedError(attemptGuard.code, attemptGuard.message);
   }
 
   return { inventoryState: 'AVAILABLE' };

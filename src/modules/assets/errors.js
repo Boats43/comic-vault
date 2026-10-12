@@ -81,3 +81,15 @@ export class PhysicalCopyCandidateCheckUnavailableError extends AssetServiceErro
     this.category = category || 'UNKNOWN';
   }
 }
+
+// GK-284 -- a marketplace listing attempt was refused by the durable attempt ledger BEFORE any
+// provider call: an earlier attempt for this asset is ambiguous, unresolved, or already produced a
+// live listing. Carries the stable guard code (LISTING_ATTEMPT_AMBIGUOUS | LISTING_ATTEMPT_UNRESOLVED |
+// LISTING_ALREADY_LISTED_BY_ATTEMPT) and the blocking attempt id.
+export class ListingAttemptBlockedError extends AssetServiceError {
+  constructor(guardCode, message, attemptId) {
+    super(guardCode, message);
+    this.guardCode = guardCode;
+    this.blockingAttemptId = attemptId ?? null;
+  }
+}

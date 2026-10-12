@@ -201,7 +201,14 @@ await client.connect();
 // then restore Creepy to UNMANAGED in cleanup, exactly as found.
 const { enrollAsset, closePool: closeInventoryPool } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'inventory', 'index.js')).href);
 const inventoryEnrollKey = `list-ebay-smoke-inventory-enroll-${crypto.randomUUID()}`;
-await enrollAsset({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, idempotencyKey: inventoryEnrollKey });
+// B1-FINAL A5 repairs: (1) Creepy may already be enrolled from an earlier or crashed run (enrollment is only valid from UNMANAGED);
+// tolerate that instead of failing at setup. (2) The GK-284 attempt ledger is append-only and rightly blocks a second listing while an
+// earlier attempt on the asset is live, but these suites list the SAME asset repeatedly and delete their LISTED outcome rows. Pre-seed
+// ONE DELISTED outcome for this run's fake item id so every attempt of this run reads as an ENDED listing (what a real delist does).
+try { await enrollAsset({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, idempotencyKey: inventoryEnrollKey }); }
+catch (e) { if (e?.code !== 'CONFLICT') throw e; console.log('  (test setup) Creepy is already enrolled in Inventory Authority -- continuing'); }
+{ const __assets = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+  await __assets.recordOutcomeEvent({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, outcomeType: 'DELISTED', channel: 'ebay', externalListingId: FAKE_ITEM_ID, idempotencyKey: `${inventoryEnrollKey}-seed-delisted` }); }
 console.log('  (test setup) Creepy enrolled in Inventory Authority: UNMANAGED -> AVAILABLE, real write, restored in cleanup\n');
 
 // GK-265 PHASE 3 — a real, transient EBAY marketplace_connection for

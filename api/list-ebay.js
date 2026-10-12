@@ -52,7 +52,8 @@ import { uploadImageViaMediaApi, MediaApiError, hasMediaScope } from "../src/lib
 // endpoint has no mandatory GrailKey auth today, and this dispatch does
 // not add one).
 import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
-import { recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, getCanonicalCollectionItemIdForAsset, getOperatorActionForListing, getAssetMediaContentHashes, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
+import { recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, getCanonicalCollectionItemIdForAsset, getOperatorActionForListing, getAssetMediaContentHashes, authorizeOperatorManualListing, recordMarketplaceAttemptPhase, ListingAttemptBlockedError, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
+import { sanitizeQ41Ack, buildAckWarnings, classifyAddItemResponse } from "../src/lib/operatorAuthority.js";
 import { attemptListedOutcome } from "../src/lib/marketplaceOutcomeBridge.js";
 import { assertListingAuthorized, ListingPreflightFailedError } from "../src/lib/inventoryListingPreflight.js";
 // GK-265 PHASE 3 -- principal-scoped eBay seller execution. Every real
@@ -404,6 +405,13 @@ ${plan.specifics.map((x) => `      <NameValueList>
 `).join('')}    </ItemSpecifics>
 ` : '';
 
+  // GK-284 / B1-FINAL A3 -- attempt-linked provider correlation (only for an OPERATOR_MANUAL attempt). Item.UUID is eBay's
+  // documented duplicate-listing defence (a resend with the same UUID yields error 488 + the existing ItemID, KB 1462);
+  // Item.SKU is a seller-visible custom label so the listing can be recognised in Seller Hub and in GetMyeBaySelling.
+  const correlationBlock = plan.correlation && plan.correlation.uuid && plan.correlation.sku
+    ? `    <SKU>${xmlEscape(plan.correlation.sku)}</SKU>\n    <UUID>${xmlEscape(plan.correlation.uuid)}</UUID>\n`
+    : '';
+
   return `<?xml version="1.0" encoding="utf-8"?>
 <AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <ErrorLanguage>en_US</ErrorLanguage>
@@ -422,7 +430,7 @@ ${conditionId ? `    <ConditionID>${xmlEscape(conditionId)}</ConditionID>\n` : '
     <ListingDuration>GTC</ListingDuration>
     <ListingType>FixedPriceItem</ListingType>
     <Quantity>1</Quantity>
-    <Site>US</Site>
+${correlationBlock}    <Site>US</Site>
     <DispatchTimeMax>3</DispatchTimeMax>
 ${pictureBlock}    <ShipToLocations>US</ShipToLocations>
     <ShippingDetails>
@@ -1104,6 +1112,52 @@ export default async function handler(req, res) {
       return;
     }
 
+    // GK-284 -- DURABLE OPERATOR_MANUAL AUTHORITY. When the engine's own authority is NOT READY, the only
+    // way to reach a marketplace write is the operator's exact-price acknowledgment (Q41). That approval is
+    // recorded durably HERE -- after every local precondition (ownership, inventory, duplicate and attempt
+    // guards, price binding, source media) and BEFORE the first eBay network call -- bound to the asset,
+    // principal, LIST operator action and exact approved price, with the original engine recommendation
+    // (read, never changed) and the evidence the operator was shown. If it cannot be recorded, nothing is sent.
+    let manualAttempt = null;
+    if (!serverReady) {
+      try {
+        manualAttempt = await authorizeOperatorManualListing({
+          principalId: grailkeyPrincipalId,
+          gkAssetId: item.gkAssetId,
+          decisionEventId: item.decisionEventId,
+          operatorActionEventId: item.operatorActionEventId,
+          outgoingAmount: outgoingPrice,
+          ackPayload: sanitizeQ41Ack(item.q41Override),
+          ackWarnings: buildAckWarnings({ authority, priorLockCodes, freshLockCodes: Array.isArray(freshLocks) ? freshLocks.map((l) => l && l.code) : [] }),
+          durableAttrs: governedFacts,
+          presentedAttrs: { pricingSource: item.pricingSource || null, soldCompDiagnostics: item.soldCompDiagnostics || null },
+        });
+      } catch (e) {
+        console.error('[ebay] OPERATOR_MANUAL authority could not be recorded — aborting before any eBay call:', e?.code || e?.name, e?.message || e);
+        if (e instanceof ListingAttemptBlockedError) { res.status(409).json({ error: e.guardCode, message: e.message, blockingAttemptId: e.blockingAttemptId }); return; }
+        if (e instanceof AssetAuthorizationFailedError) { res.status(403).json({ error: 'OPERATOR_AUTHORITY_FORBIDDEN', message: 'This principal cannot authorize a listing for this asset. Nothing was listed.' }); return; }
+        if (e instanceof NotFoundError) { res.status(404).json({ error: 'OPERATOR_AUTHORITY_INVALID', message: e.message }); return; }
+        if (e instanceof ValidationFailedError) {
+          const code = (String(e.message).match(/^(MANUAL_PRICE_ACK_MISMATCH|LIST_ACTION_PRICE_MISMATCH|LIST_ACTION_PRICE_NOT_RECORDED)/) || [])[1] || 'OPERATOR_AUTHORITY_INVALID';
+          res.status(409).json({ error: code, message: e.message }); return;
+        }
+        res.status(503).json({ error: 'OPERATOR_AUTHORITY_UNAVAILABLE', message: 'The operator authorization could not be recorded, so nothing was listed. Please retry.' });
+        return;
+      }
+    }
+    // Records one attempt phase; returns false (never throws) so a ledger fault AFTER the provider call
+    // cannot change what the operator is told about the real listing.
+    const recordAttempt = async (phase, extra = {}) => {
+      if (!manualAttempt) return true;
+      try {
+        await recordMarketplaceAttemptPhase({ principalId: grailkeyPrincipalId, attemptId: manualAttempt.attemptId, phase, ...extra });
+        return true;
+      } catch (e) {
+        console.error(`[ebay] attempt ledger write failed (${phase}):`, e?.code || e?.name, e?.message || e);
+        return false;
+      }
+    };
+
     // OUTCOME #1 — AUTHORITATIVE MARKETPLACE METADATA (before any eBay write). Aspect enums and the
     // category condition policy come from eBay's own selling metadata; unavailable => fail closed.
     let aspectMeta, conditionPolicy;
@@ -1124,6 +1178,7 @@ export default async function handler(req, res) {
       bestOffer: item.bestOffer === true, // explicit opt-in only; default OFF
       specifics: buildItemSpecificsFromMetadata(toBuyerSafeListingFacts(item), aspectMeta, { isTPB: item.isTPB === true, isMagazine: item.isMagazine === true }),
       shippingService: null,
+      correlation: manualAttempt ? manualAttempt.providerCorrelation : null, // GK-284 / A3: Item.UUID + Item.SKU label
     };
 
     // GK-265 PHASE 3 — the authenticated, ownership-verified principal's own eBay User access token
@@ -1212,17 +1267,55 @@ export default async function handler(req, res) {
     const xml = buildXml(item, pictureUrls, listingPlan);
     console.log("[ebay] AddFixedPriceItem request XML:\n" + redactToken(xml));
 
-    const ebayRes = await fetch(EBAY_ENDPOINT, {
-      method: "POST",
-      headers: {
-        ...singleHeaders,
-        "Content-Type": "text/xml",
-        "X-EBAY-API-CALL-NAME": "AddFixedPriceItem",
-      },
-      body: xml,
-    });
+    // GK-284 -- the SUBMITTED phase is written immediately BEFORE the provider write. If the ledger
+    // cannot record it, nothing is sent (a call with no durable record of intent is never made).
+    // A concurrent second attempt for this asset is refused here, by the ledger, under a per-asset lock.
+    if (manualAttempt) {
+      try {
+        await recordMarketplaceAttemptPhase({ principalId: grailkeyPrincipalId, attemptId: manualAttempt.attemptId, phase: 'SUBMITTED' });
+      } catch (e) {
+        console.error('[ebay] attempt SUBMITTED could not be recorded — aborting before AddFixedPriceItem:', e?.code || e?.name, e?.message || e);
+        if (e instanceof ListingAttemptBlockedError) { res.status(409).json({ error: e.guardCode, message: e.message, blockingAttemptId: e.blockingAttemptId }); return; }
+        res.status(503).json({ error: 'ATTEMPT_LEDGER_UNAVAILABLE', message: 'The listing attempt could not be recorded, so nothing was listed. Please retry.' });
+        return;
+      }
+    }
 
-    const responseXml = await ebayRes.text();
+    let ebayRes = null, responseXml = null, providerNetworkError = null;
+    try {
+      ebayRes = await fetch(EBAY_ENDPOINT, {
+        method: "POST",
+        headers: {
+          ...singleHeaders,
+          "Content-Type": "text/xml",
+          "X-EBAY-API-CALL-NAME": "AddFixedPriceItem",
+        },
+        body: xml,
+      });
+      responseXml = await ebayRes.text();
+    } catch (e) {
+      providerNetworkError = e;
+    }
+    // Unchanged behavior for the engine-READY path: a transport failure surfaces exactly as before.
+    if (providerNetworkError && !manualAttempt) throw providerNetworkError;
+    const attemptClass = manualAttempt
+      ? classifyAddItemResponse({ networkError: providerNetworkError, httpStatus: ebayRes ? ebayRes.status : null, responseXml })
+      : null;
+    if (manualAttempt && attemptClass.kind === 'AMBIGUOUS') {
+      // The provider may or may not have created the listing. Record that explicitly; a retry is BLOCKED
+      // by the ledger until the attempt is reconciled with the marketplace.
+      console.error(`[ebay] AddFixedPriceItem outcome UNKNOWN (${attemptClass.reason}) — attempt ${manualAttempt.attemptId} marked AMBIGUOUS; retry blocked until reconciled`);
+      await recordAttempt('AMBIGUOUS', { detail: { reason: attemptClass.reason, httpStatus: ebayRes ? ebayRes.status : undefined, errorCodes: attemptClass.errorCodes } });
+      res.status(502).json({
+        error: 'LISTING_OUTCOME_UNKNOWN',
+        message: 'eBay did not give a definite answer. The listing may or may not exist — check eBay before trying again. A new attempt is blocked until this one is reconciled.',
+        attemptId: manualAttempt.attemptId,
+        // Recovery: look for this label in Seller Hub (Active, Scheduled, Sold, Unsold), then record an operator reconciliation.
+        correlation: { sku: manualAttempt.providerCorrelation.sku },
+      });
+      return;
+    }
+
     const ack = extractTag(responseXml, "Ack");
     const itemId = extractTag(responseXml, "ItemID");
     const severity = extractTag(responseXml, "SeverityCode");
@@ -1230,6 +1323,7 @@ export default async function handler(req, res) {
     // Success if eBay returned an ItemID, regardless of warnings.
     // Fail only when no ItemID came back (true Failure / PartialFailure with no item).
     if (!itemId) {
+      if (manualAttempt) await recordAttempt('FAILED_DEFINITIVE', { detail: { reason: attemptClass.reason, httpStatus: ebayRes ? ebayRes.status : undefined, errorCodes: attemptClass.errorCodes } });
       console.error(
         `[ebay] AddFixedPriceItem failed (HTTP ${ebayRes.status}, ack=${ack}, severity=${severity}). Full response:\n` +
           redactToken(responseXml)
@@ -1246,10 +1340,15 @@ export default async function handler(req, res) {
       res.status(502).json({
         error: shortMsg,
         ack,
+        ...(manualAttempt ? { attemptId: manualAttempt.attemptId } : {}),
         ...(process.env.NODE_ENV !== "production" ? { raw: responseXml } : {}),
       });
       return;
     }
+
+    // GK-284 -- the provider returned a listing id: record the confirmed phase. A ledger fault here never
+    // changes the real listing's response; the attempt then stays SUBMITTED, which BLOCKS a retry (safe).
+    if (manualAttempt) await recordAttempt('LISTED_CONFIRMED', { externalListingId: itemId });
 
     // ItemID present but eBay returned warnings — log them and continue.
     if (ack && /Warning|PartialFailure/i.test(ack)) {
@@ -1288,6 +1387,7 @@ export default async function handler(req, res) {
       listingId: itemId,
       listingUrl: `https://www.ebay.com/itm/${itemId}`,
       outcome,
+      ...(manualAttempt ? { authority: { type: manualAttempt.authorityType, attemptId: manualAttempt.attemptId, authorityEventId: manualAttempt.authorityEventId, engineRecommendation: manualAttempt.engineRecommendation, approvedAmount: manualAttempt.approvedAmount } } : {}),
       pictureCount: pictureUrls.length,
       ack: ack || "Success",
     });

@@ -21,7 +21,9 @@ import { createHash } from 'node:crypto';
 import * as repo from './repository.js';
 import { acquireConnection } from './db.js';
 import { checkIdempotencyReplay, claimIdempotencyKey, computeRequestFingerprint } from './idempotency.js';
-import { AssetServiceError, NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError, IdempotencyConflictError, PhysicalCopyDecisionRequiredError, PhysicalCopyCandidateCheckUnavailableError } from './errors.js';
+import { AssetServiceError, NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError, IdempotencyConflictError, PhysicalCopyDecisionRequiredError, PhysicalCopyCandidateCheckUnavailableError, ListingAttemptBlockedError } from './errors.js';
+import { OPERATOR_AUTHORITY_TYPE, RECONCILIATION_POLICY_VERSION, AMBIGUOUS_REVIEW_WINDOW_HOURS, assessListingAttemptGuard, reduceAttemptState, buildApprovalEvidence, evidenceScalars, buildGoverningGradeSnapshot, attemptCorrelation, evaluateOperatorReconciliation, reviewStatus, verifyAuthoritySnapshot, sameCents, toCents } from '../../lib/operatorAuthority.js';
+import { decisionGovernance } from '../../lib/decisionTrust.js';
 import { isPlausiblePhysicalCopyCandidate } from '../../lib/duplicateCopyDetection.js';
 import * as media from '../media/index.js';
 import { withRetryOn40P01 } from './retry.js';
@@ -2224,6 +2226,303 @@ export async function getAssetMediaContentHashes({ principalId, gkAssetId } = {}
     await assertAssetExists(client, gkAssetId);
     await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
     return await repo.listAssetMediaContentHashes(client, { gkAssetId });
+  } finally {
+    client.release();
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// GK-284 -- durable OPERATOR_MANUAL authority + marketplace attempt ledger (0040).
+//
+// authorizeOperatorManualListing  records the human approval (a COMPLETE immutable value snapshot) BEFORE any
+//                                 marketplace call.
+// recordMarketplaceAttemptPhase   records SUBMITTED / LISTED_CONFIRMED / FAILED_DEFINITIVE / AMBIGUOUS.
+// operatorReconcileAttempt        the explicit, append-only OPERATOR_RECONCILED event (B1-FINAL A2).
+// getListingAttemptGuard          read-only retry guard for the publish preflight.
+// verifyOperatorAuthorityConsistency  compares the immutable snapshot with the mutable rows it references (A1).
+// None of these writes a valuation, a decision, an operator action, or an outcome (except the single, explicit,
+// best-effort LISTED outcome after an operator confirms an existing listing): the engine's historical
+// recommendation (e.g. RESEARCH) is read, never altered.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+const AUTHORITY_PHASE_WRITES = ['SUBMITTED', 'LISTED_CONFIRMED', 'FAILED_DEFINITIVE', 'AMBIGUOUS'];
+const cleanDetail = (d) => {
+  if (!d || typeof d !== 'object') return null;
+  const out = {};
+  if (typeof d.reason === 'string') out.reason = d.reason.slice(0, 120);
+  if (Number.isFinite(d.httpStatus)) out.httpStatus = d.httpStatus;
+  if (Array.isArray(d.errorCodes)) out.errorCodes = d.errorCodes.filter((c) => typeof c === 'string').slice(0, 10).map((c) => c.slice(0, 32));
+  if (typeof d.note === 'string') out.note = d.note.slice(0, 500);
+  return Object.keys(out).length ? out : null;
+};
+
+function guardOrThrow(rows, exceptAttemptId) {
+  const g = assessListingAttemptGuard(rows, exceptAttemptId);
+  if (!g.allowed) throw new ListingAttemptBlockedError(g.code, g.message, g.attemptId);
+}
+
+export async function authorizeOperatorManualListing({
+  principalId, gkAssetId, decisionEventId, operatorActionEventId, channel = 'ebay',
+  outgoingAmount, outgoingCurrency = 'USD', ackPayload, ackWarnings, durableAttrs, presentedAttrs, correlationId,
+} = {}) {
+  requireFields({ principalId, gkAssetId, decisionEventId, operatorActionEventId, outgoingAmount }, ['principalId', 'gkAssetId', 'decisionEventId', 'operatorActionEventId', 'outgoingAmount']);
+  requireEnum(channel, ['ebay'], 'channel');
+  if (!ackPayload || typeof ackPayload !== 'object' || ackPayload.priceOverridden !== true) {
+    throw new ValidationFailedError('An explicit operator price acknowledgment (priceOverridden) is required for OPERATOR_MANUAL authority');
+  }
+  if (!sameCents(ackPayload.manualPrice, outgoingAmount)) {
+    throw new ValidationFailedError('MANUAL_PRICE_ACK_MISMATCH: the acknowledged price does not exactly equal the price being listed');
+  }
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      await assertAssetExists(client, gkAssetId);
+      await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+      await repo.lockAssetAttempts(client, gkAssetId);
+
+      const action = await repo.getOperatorActionAuthorityContext(client, operatorActionEventId);
+      if (!action) throw new NotFoundError(`operator_action_event ${operatorActionEventId} does not exist`);
+      if (action.gk_asset_id !== gkAssetId) throw new ValidationFailedError(`operator_action_event ${operatorActionEventId} belongs to a different asset`);
+      if (action.principal_id !== principalId) throw new AuthorizationFailedError('the LIST operator action was recorded by a different principal');
+      if (action.action_code !== 'LIST') throw new ValidationFailedError(`operator_action_event ${operatorActionEventId} is ${action.action_code}, not LIST`);
+      if (action.decision_event_id !== decisionEventId) throw new ValidationFailedError('decisionEventId does not match the decision the LIST action responded to');
+      if (action.action_value_amount === null || action.action_value_amount === undefined) {
+        throw new ValidationFailedError('LIST_ACTION_PRICE_NOT_RECORDED: the LIST action does not record an approved price');
+      }
+      if (!sameCents(action.action_value_amount, outgoingAmount)) {
+        throw new ValidationFailedError('LIST_ACTION_PRICE_MISMATCH: the LIST action approved a different price than the one being listed');
+      }
+
+      const decision = await repo.getDecisionForAuthority(client, decisionEventId);
+      if (!decision) throw new NotFoundError(`decision_event ${decisionEventId} does not exist`);
+      if (decision.asset_id !== gkAssetId) throw new ValidationFailedError('decision_event belongs to a different asset');
+
+      guardOrThrow(await repo.listAttemptRowsForAsset(client, { gkAssetId, channel }), null);
+
+      const valuations = await repo.listValuationsForAuthority(client, gkAssetId);
+      const governance = decisionGovernance(decision, valuations, durableAttrs || null);
+      const evidence = buildApprovalEvidence({ durableAttrs, presentedAttrs, decisionSnapshot: decision.authority_snapshot, decisionGovernance: governance });
+      const scalars = evidenceScalars(evidence);
+
+      const batchCorrelationId = correlationId || await newCorrelationId(client);
+      const attemptId = await repo.newUuidV7(client);
+      const approvedAmountCents = toCents(action.action_value_amount);
+      const authorityEventId = await repo.insertOperatorAuthorityEvent(client, {
+        attemptId, phase: 'AUTHORIZED', gkAssetId, principalId, operatorActionEventId, decisionEventId, channel,
+        approvedAmount: action.action_value_amount, approvedAmountCents, approvedCurrency: action.action_value_currency || outgoingCurrency,
+        approvedAt: action.occurred_at, engineRecommendation: decision.recommendation,
+        governingGrade: buildGoverningGradeSnapshot(durableAttrs), evidenceClass: scalars.evidenceClass, verifiedSoldCount: scalars.verifiedSoldCount,
+        ackPayload, ackWarnings: ackWarnings || {}, evidence, providerCorrelation: attemptCorrelation(attemptId), correlationId: batchCorrelationId,
+      });
+      await repo.writeDomainEvent(client, {
+        eventType: 'operator-authority.authorized', actorPrincipalId: principalId, actorKind: 'user',
+        subjectType: 'gk_asset', subjectId: gkAssetId,
+        payload: { authorityEventId, attemptId, operatorActionEventId, decisionEventId, authorityType: OPERATOR_AUTHORITY_TYPE, engineRecommendation: decision.recommendation, approvedAmountCents },
+        correlationId: batchCorrelationId,
+      });
+      await client.query('COMMIT');
+      return {
+        attemptId, authorityEventId, authorityType: OPERATOR_AUTHORITY_TYPE, engineRecommendation: decision.recommendation,
+        approvedAmount: action.action_value_amount, approvedAmountCents, approvedAt: action.occurred_at, decisionGovernance: governance,
+        providerCorrelation: attemptCorrelation(attemptId),
+      };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+async function loadAttemptForPrincipal(client, principalId, attemptId) {
+  const phases = await repo.listAttemptPhases(client, attemptId);
+  const auth = phases.find((p) => p.phase === 'AUTHORIZED');
+  if (!auth) throw new NotFoundError(`no authorized marketplace attempt ${attemptId}`);
+  if (auth.principal_id !== principalId) throw new AuthorizationFailedError('this attempt belongs to a different principal');
+  await assertPrincipalOwnsAsset(client, principalId, auth.gk_asset_id);
+  return { auth, phases };
+}
+
+export async function recordMarketplaceAttemptPhase({ principalId, attemptId, phase, externalListingId, detail, correlationId } = {}) {
+  requireFields({ principalId, attemptId, phase }, ['principalId', 'attemptId', 'phase']);
+  requireEnum(phase, AUTHORITY_PHASE_WRITES, 'phase');
+  if (phase === 'LISTED_CONFIRMED' && !externalListingId) throw new ValidationFailedError('externalListingId is required for LISTED_CONFIRMED');
+
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const { auth: preAuth } = await loadAttemptForPrincipal(client, principalId, attemptId);
+      await repo.lockAssetAttempts(client, preAuth.gk_asset_id);
+      const { auth, phases } = await loadAttemptForPrincipal(client, principalId, attemptId); // re-read under the lock
+      const have = new Set(phases.map((p) => p.phase));
+      if (have.has(phase)) { await client.query('COMMIT'); return { replayed: true, attemptId, phase }; }
+
+      if (phase === 'SUBMITTED') {
+        if (phases.length !== 1) throw new ConflictError(`attempt ${attemptId} is not in the AUTHORIZED state; it cannot be submitted`);
+        guardOrThrow(await repo.listAttemptRowsForAsset(client, { gkAssetId: auth.gk_asset_id, channel: auth.channel }), attemptId);
+      } else {
+        if (!have.has('SUBMITTED')) throw new ConflictError(`attempt ${attemptId} was never SUBMITTED; a result cannot be recorded`);
+        if (['LISTED_CONFIRMED', 'FAILED_DEFINITIVE', 'AMBIGUOUS', 'OPERATOR_RECONCILED'].some((p) => have.has(p))) {
+          throw new ConflictError(`attempt ${attemptId} already has a recorded result`);
+        }
+      }
+      const batchCorrelationId = correlationId || auth.correlation_id;
+      const rowId = await repo.insertOperatorAuthorityEvent(client, {
+        authorizedEventId: auth.id, attemptId, phase, gkAssetId: auth.gk_asset_id, principalId, operatorActionEventId: auth.operator_action_event_id,
+        decisionEventId: auth.decision_event_id, channel: auth.channel, externalListingId: externalListingId ?? null, detail: cleanDetail(detail),
+        // bounded review: an AMBIGUOUS attempt is owned by this principal and due for closure within the window
+        reviewDueAt: phase === 'AMBIGUOUS' ? new Date(Date.now() + AMBIGUOUS_REVIEW_WINDOW_HOURS * 3600 * 1000) : null,
+        correlationId: batchCorrelationId,
+      });
+      await client.query('COMMIT');
+      return { replayed: false, attemptId, phase, authorityEventId: rowId };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * B1-FINAL A2 -- the explicit operator reconciliation of an AMBIGUOUS (or unresolved SUBMITTED, or closed-but-blocked)
+ * attempt. Appends one OPERATOR_RECONCILED event; the latest one governs. A NOT_FOUND observation unlocks a new
+ * publish ONLY if it satisfies the absence policy (evaluateOperatorReconciliation); otherwise it is recorded as an
+ * UNRESOLVED, closed-but-blocked disposition. LISTING_FOUND reconciles to the existing listing and never publishes.
+ */
+export async function operatorReconcileAttempt({
+  principalId, attemptId, verdict, externalListingId, observations, evidenceRef, requestNewPublish = false, automatedLookup, checkedSources, checkedAt, now,
+} = {}) {
+  requireFields({ principalId, attemptId, verdict }, ['principalId', 'attemptId', 'verdict']);
+  requireEnum(verdict, ['LISTING_FOUND', 'NOT_FOUND', 'UNRESOLVED'], 'verdict');
+  if (verdict === 'LISTING_FOUND' && !externalListingId) throw new ValidationFailedError('LISTING_FOUND requires the marketplace listing id');
+
+  const client = await acquireConnection();
+  let result;
+  try {
+    await assertPrincipalActive(client, principalId);
+    await client.query('BEGIN');
+    try {
+      const { auth: preAuth } = await loadAttemptForPrincipal(client, principalId, attemptId);
+      await repo.lockAssetAttempts(client, preAuth.gk_asset_id);
+      const { auth, phases } = await loadAttemptForPrincipal(client, principalId, attemptId);
+      const state = reduceAttemptState(phases);
+      if (!['AMBIGUOUS', 'IN_FLIGHT_OR_UNRESOLVED', 'CLOSED_BLOCKED'].includes(state)) {
+        throw new ConflictError(`attempt ${attemptId} is ${state}; only an ambiguous, unresolved or closed-but-blocked attempt can be reconciled`);
+      }
+      const submitted = phases.find((p) => p.phase === 'SUBMITTED');
+      const evalResult = evaluateOperatorReconciliation({
+        verdict, externalListingId, checkedSources, checkedAt, evidenceRef, requestNewPublish,
+        submittedAt: submitted ? submitted.recorded_at : null, automatedLookup, now,
+      });
+      const reconciliation = {
+        policyVersion: RECONCILIATION_POLICY_VERSION,
+        claimedVerdict: evalResult.claimedVerdict,
+        downgradeReasons: evalResult.downgradeReasons,
+        observations: typeof observations === 'string' ? observations.slice(0, 1000) : null,
+        evidenceRef: typeof evidenceRef === 'string' ? evidenceRef.slice(0, 300) : null,
+        checkedSources: Array.isArray(checkedSources) ? checkedSources.filter((s) => typeof s === 'string').slice(0, 12).map((s) => s.slice(0, 40)) : [],
+        checkedAt: checkedAt ? new Date(checkedAt).toISOString() : null,
+        requestedNewPublish: requestNewPublish === true,
+        automatedLookup: automatedLookup ? {
+          matches: Array.isArray(automatedLookup.matches) ? automatedLookup.matches.slice(0, 5) : [],
+          scannedAllListsCompletely: automatedLookup.scannedAllListsCompletely === true,
+          absenceProven: false,
+        } : null,
+        priorState: state,
+        reviewWasOverdue: (() => { const amb = phases.find((p) => p.phase === 'AMBIGUOUS'); return amb ? reviewStatus({ reviewDueAt: amb.review_due_at, now }) === 'OVERDUE' : null; })(),
+      };
+      const rowId = await repo.insertOperatorAuthorityEvent(client, {
+        authorizedEventId: auth.id, attemptId, phase: 'OPERATOR_RECONCILED', gkAssetId: auth.gk_asset_id, principalId, operatorActionEventId: auth.operator_action_event_id,
+        decisionEventId: auth.decision_event_id, channel: auth.channel, externalListingId: evalResult.recordedVerdict === 'LISTING_FOUND' ? externalListingId : null,
+        reconVerdict: evalResult.recordedVerdict, newPublishAuthorized: evalResult.newPublishAuthorized, reconciliation, correlationId: auth.correlation_id,
+      });
+      await client.query('COMMIT');
+      result = {
+        attemptId, authorityEventId: rowId, recordedVerdict: evalResult.recordedVerdict, claimedVerdict: evalResult.claimedVerdict,
+        newPublishAuthorized: evalResult.newPublishAuthorized, downgradeReasons: evalResult.downgradeReasons,
+        resultingState: reduceAttemptState([...phases, { phase: 'OPERATOR_RECONCILED', recon_verdict: evalResult.recordedVerdict, new_publish_authorized: evalResult.newPublishAuthorized }]),
+        gkAssetId: auth.gk_asset_id, approvedAmount: auth.approved_amount,
+      };
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  } finally {
+    client.release();
+  }
+  // A confirmed existing listing is recorded in the OUTCOME ledger too (separate transaction, idempotent, best effort):
+  // this records a fact the operator observed; it creates no listing and calls no marketplace.
+  result.outcomeRecorded = null;
+  if (result.recordedVerdict === 'LISTING_FOUND') {
+    try {
+      const { auth } = await (async () => { const c = await acquireConnection(); try { return await loadAttemptForPrincipal(c, principalId, attemptId); } finally { c.release(); } })();
+      const o = await recordOutcomeEvent({
+        principalId, gkAssetId: auth.gk_asset_id, decisionEventId: auth.decision_event_id, operatorActionEventId: auth.operator_action_event_id,
+        outcomeType: 'LISTED', channel: auth.channel, externalListingId, askAmount: Number(auth.approved_amount), idempotencyKey: `operator-reconcile-listed:${attemptId}`,
+      });
+      result.outcomeRecorded = { ok: true, outcomeEventId: o.outcomeEventId };
+    } catch (e) {
+      result.outcomeRecorded = { ok: false, reason: e && (e.code || e.name) };
+    }
+  }
+  return result;
+}
+
+/** Ambiguous attempts owned by this principal that still need an operator reconciliation (the bounded review queue). */
+export async function listAttemptsNeedingReview({ principalId, now } = {}) {
+  requireFields({ principalId }, ['principalId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const rows = await repo.listAttemptsNeedingReview(client, { principalId });
+    return rows.map((r) => ({ attemptId: r.attempt_id, gkAssetId: r.gk_asset_id, ambiguousAt: r.ambiguous_at, reviewDueAt: r.review_due_at, status: reviewStatus({ reviewDueAt: r.review_due_at, now }) }));
+  } finally {
+    client.release();
+  }
+}
+
+export async function getListingAttemptGuard({ principalId, gkAssetId, channel = 'ebay' } = {}) {
+  requireFields({ principalId, gkAssetId }, ['principalId', 'gkAssetId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertAssetExists(client, gkAssetId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    return assessListingAttemptGuard(await repo.listAttemptRowsForAsset(client, { gkAssetId, channel }), null);
+  } finally {
+    client.release();
+  }
+}
+
+export async function getOperatorAuthorityAttempt({ principalId, attemptId } = {}) {
+  requireFields({ principalId, attemptId }, ['principalId', 'attemptId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const { phases } = await loadAttemptForPrincipal(client, principalId, attemptId);
+    return { state: reduceAttemptState(phases), phases };
+  } finally {
+    client.release();
+  }
+}
+
+/** A1: compare the immutable approval snapshot with the CURRENT referenced rows; report every divergence. */
+export async function verifyOperatorAuthorityConsistency({ principalId, attemptId } = {}) {
+  requireFields({ principalId, attemptId }, ['principalId', 'attemptId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    const { auth } = await loadAttemptForPrincipal(client, principalId, attemptId);
+    const operatorAction = await repo.getOperatorActionAuthorityContext(client, auth.operator_action_event_id);
+    const decision = await repo.getDecisionForAuthority(client, auth.decision_event_id);
+    return verifyAuthoritySnapshot(auth, { operatorAction, decision });
   } finally {
     client.release();
   }

@@ -183,7 +183,8 @@ ok(!/attachGradeReceipt\([^)]*\bmodel:\s*["'`]/.test(grade) && !/attachGradeRece
 ok(/model:\s*meta\?\.requestedModel\s*\|\|\s*null/.test(grade) && /modelVersion:\s*meta\?\.model\s*\|\|\s*null/.test(grade), 'provenance.model/modelVersion derive only from meta');
 ok(/\.\.\.provenance,\s*resultId/.test(grade) || /\.\.\.base/.test(grade), 'prediction events and receipt spread the same provenance object');
 ok(!/computeAnthropicCallCostUsd/.test(grade) && !/computeAnthropicCallCostUsd/.test(enrich), 'callers use resolveCallCost');
-ok((enrich.match(/claude-haiku-4-5["']/g) || []).length === 1 && /const VERIFY_MODEL = "claude-haiku-4-5"/.test(enrich), 'enrich verification model literal exists exactly once (VERIFY_MODEL)');
+// B1/B5: the verification lane is pinned to the dated snapshot; the undated alias must not appear as a model literal.
+ok((enrich.match(/claude-haiku-4-5-20251001["']/g) || []).length === 1 && /const VERIFY_MODEL = "claude-haiku-4-5-20251001"/.test(enrich) && (enrich.match(/claude-haiku-4-5["']/g) || []).length === 0, 'enrich verification model literal exists exactly once and is the pinned dated snapshot (VERIFY_MODEL)');
 ok(/model: VERIFY_MODEL,/.test(enrich) && /resolveCallCost\(VERIFY_MODEL, message\.usage\)/.test(enrich), 'enrich request + pricing lookup share VERIFY_MODEL');
 
 console.log = origLog;
