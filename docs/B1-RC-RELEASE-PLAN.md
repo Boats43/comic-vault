@@ -47,3 +47,10 @@ Branch `b1-first-outcome-authority`, parent = Production `b403f33`. The release 
 
 ## 7. Recommendation
 **Code and tests: ready. Production release: HOLD** pending (1) the operator's separate authorizations for steps 2, 3 and 7; (2) the operator's decision on the unverified `Item.UUID`/`SKU` placement (sandbox check, or accept the first live listing as the canary); (3) the operator's confirmation of the Neon restore window; (4) acknowledgement that the READY path remains uncertified.
+
+
+## 8. Preflight addendum (2026-10-12; records only — the release candidate is unchanged)
+* **Step 1 evidence now exists** for backup and restore: see `docs/PRODUCTION-BACKUP-RESTORE-PROCEDURE.md` (backup SHA-256 `535de99c…b03b54`, real restore verified table-by-table). **Still open for Step 1:** the operator must confirm the current Neon plan and restore window in the Console (last recorded: Free tier, 6-hour window, drill 2026-09-01) and record a UTC timestamp immediately before the migration; the backup should be re-taken at that moment if any Production write has happened since 2026-10-12T20:48Z.
+* **Step 7 prerequisite status:** the non-publishing `VerifyAddFixedPriceItem` was **not executed** (no usable credential; photo hosting not authorized); the placement of `Item.UUID`/`Item.SKU` is therefore still unverified by eBay, and the first live OPERATOR_MANUAL listing remains its canary unless a Verify is run first. See the registry entry "B1 PRODUCTION PREFLIGHT".
+* **Standing gate (GK-294):** no non-operator marketplace listing until the READY path has equivalent durable attempt recording, ambiguous-outcome handling, reconciliation and duplicate prevention. The first economic outcome is one separately authorized, founder-supervised OPERATOR_MANUAL listing.
+* **Not part of this release:** GK-292 (issue-token parser), GK-293 (Trading API schema hardening), and any change to GK-228's unknown-grade rule (GK-291 closed).
