@@ -1,3 +1,5 @@
+> **CORRECTION 2026-10-13 (GK-285): every per-scan dollar figure in this document marked † (including `$0.015`, `$0.015-0.030`, `$0.005` and the derived per-book/total figures) is an UNVERIFIED HISTORICAL ESTIMATE. Actual per-scan cost has never been measured end to end (no shared scan/attempt identifier across grade and enrich, cost not persisted, several provider calls unpriced), and the `$0.015/scan` figure must not be cited as a fact. The estimates below are preserved as historical estimates, not as measurements. See `docs/TICKET-REGISTRY.md` GK-285 and `docs/GRAILKEY-STRATEGY.md` (amendment 2026-10-13).**
+
 # COST REDUCTION STATUS
 
 **Date:** 2026-06-29  
@@ -245,7 +247,7 @@ From real session logs (10 test books):
 
 | Stage | Books Hit | Cost per Call | Total |
 |-------|-----------|---------------|-------|
-| Vision scan | 1000 | $0.015 | $15.00 |
+| Vision scan | 1000 | $0.015† | $15.00 |
 | AI verify (100%) | 1000 | $0.025 | $25.00 |
 | Web search (zero comps, 10%) | 100 | $0.020 | $2.00 |
 | **Total** | | | **$42.00** |
@@ -254,7 +256,7 @@ From real session logs (10 test books):
 
 | Stage | Books Hit | Cost per Call | Total |
 |-------|-----------|---------------|-------|
-| Vision scan | 1000 | $0.015 | $15.00 |
+| Vision scan | 1000 | $0.015† | $15.00 |
 | AI verify (conflicts only, 20%) | 200 | $0.025 | $5.00 |
 | Web search (UK gate, 2%) | 20 | $0.020 | $0.40 |
 | **Total** | | | **$20.40** |
@@ -273,7 +275,7 @@ From real session logs (10 test books):
 | Mega-keys | 20-25% | $0.020-0.022 |
 | CGC graded | 5-8% | $0.016-0.017 |
 
-**Average:** ~$0.020 per book (Vision $0.015 + AI $0.005 avg)
+**Average:** ~$0.020† per book (Vision $0.015† + AI $0.005† avg)
 
 ---
 

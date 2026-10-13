@@ -34,6 +34,18 @@ race is empty" (OUTTA alone forbids that framing; see §5's own OUTTA row).
 
 ---
 
+## AMENDMENT 2026-10-13 (b) — wedge status, evidence gate, settlement doctrine, active board (ADOPTED; additive; supersedes only the wording noted)
+
+**A. The commercial wedge is NOT proven.** The candidates are (1) grading disposition ("should I grade this copy?"), (2) acquisition and MAX BUY, (3) broader owner-aligned asset decisions. **Actual dealer behavior decides which one wins** (GK-298 interviews); until then none is promoted, and the earlier amendment's list of candidate wedges is a list of hypotheses, not a plan. No wedge implementation is authorized.
+
+**C. Economic settlement doctrine — UNKNOWN IS NOT ZERO.** A trusted closed outcome must keep these separate, each either a recorded value or an explicit UNKNOWN: gross proceeds · buyer-paid shipping · marketplace fees · actual shipping expense · packaging · refunds · other adjustments · acquisition basis · payout status (and payout date) · realized net · economic profit. A missing component is never silently treated as 0, and a net that depends on an UNKNOWN component is reported as provisional. Known gaps against this doctrine (census 2026-10-13, no schema work authorized): no storage for buyer-paid shipping, packaging, payout/payout date/time-to-cash; acquisition basis is an absent row; missing fee/shipping/refund/credit components read as 0 and can still be labelled KNOWN; `outcome_event` / `outcome_economics_component` have no database-level immutability triggers. **No settlement schema implementation is authorized.**
+
+**D. Evidence gate for the next product decision.** The next product decision requires ALL of: (1) one trusted closed economic outcome; (2) three substantive dealer conversations (GK-298); (3) one measured scan COGS result (GK-285 — the `$0.015/scan` figure remains UNMEASURED); (4) one same-image repeatability result (GK-297, $5 cap, no certified-book purchase). **The older "ten closed outcomes" review is subordinate to this gate** (no text defining that review exists in this repository; it is carried here only as the superseded external reference).
+
+**F. Active board versus strategic roadmap.** ACTIVE (execution): gate deployment and acceptance; Old Man Logan #25 physical verification; ONE supervised OPERATOR_MANUAL listing; reconciliation of that sale; GK-285; GK-297; GK-298. STRATEGIC ROADMAP (NOT active; nothing here may be promoted into implementation without a separate authorization and evidence): Shopify, Whatnot, Universal V2, Economic Router, Reserve Authority, additional asset categories, continuous asset intelligence, subscription metering, outside-user marketplace publishing (blocked on GK-283, GK-294, GK-295), proprietary ML.
+
+---
+
 ## 1. THE DEFENSIBLE GRAILKEY (the one paragraph)
 
 > **The evidence-backed operating system for physical inventory — where every physical copy has permanent identity and history, every recommendation is economically accountable, and every realized outcome makes the next recommendation better.**

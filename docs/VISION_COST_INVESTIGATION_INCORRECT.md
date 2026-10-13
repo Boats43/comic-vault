@@ -1,3 +1,5 @@
+> **CORRECTION 2026-10-13 (GK-285): every per-scan dollar figure in this document marked † (including `$0.015`, `$0.015-0.030`, `$0.005` and the derived per-book/total figures) is an UNVERIFIED HISTORICAL ESTIMATE. Actual per-scan cost has never been measured end to end (no shared scan/attempt identifier across grade and enrich, cost not persisted, several provider calls unpriced), and the `$0.015/scan` figure must not be cited as a fact. The estimates below are preserved as historical estimates, not as measurements. See `docs/TICKET-REGISTRY.md` GK-285 and `docs/GRAILKEY-STRATEGY.md` (amendment 2026-10-13).**
+
 # VISION COST INVESTIGATION
 
 **Date:** 2026-06-29  
@@ -11,7 +13,7 @@
 
 | Stage | Books Hit | Cost per Call | Total | % of Total |
 |-------|-----------|---------------|-------|------------|
-| **Vision scan** | 1000 | **$0.015** | **$15.00** | **73%** 🔴 |
+| **Vision scan** | 1000 | **$0.015†** | **$15.00** | **73%** 🔴 |
 | AI verify | 200 | $0.025 | $5.00 | 25% |
 | Web search | 20 | $0.020 | $0.40 | 2% |
 | **TOTAL** | | | **$20.40** | 100% |
@@ -50,7 +52,7 @@ console.log(`[resize] ${width}×${height} → ${resized.bitmap.width}×${resized
 ```
 Vision API (Opus 4.7):
 - ~2K input tokens (prompt) + ~500 output tokens
-- Cost: ~$0.015-0.045 per call (1024×1024 image, ~800-token response)
+- Cost: ~$0.015-0.045† per call (1024×1024 image, ~800-token response)
 ```
 
 **Breakdown:**
@@ -65,10 +67,10 @@ Vision API (Opus 4.7):
 
 **Reality check from docs/WHAT_WE_HAVE.md:811:**
 ```
-Cost: ~$0.015-0.045 per call (1024×1024 image, ~800-token response)
+Cost: ~$0.015-0.045† per call (1024×1024 image, ~800-token response)
 ```
 
-**Actual cost:** $0.015 per scan (at current pricing tier)
+**Actual cost:** $0.015† per scan (at current pricing tier)
 
 ---
 
@@ -147,7 +149,7 @@ grep -rn "ximilar" api/enrich.js
 
 | Service | Cost per Call | Total (1000 scans) | Use Case |
 |---------|---------------|-------------------|----------|
-| **Vision (Opus)** | $0.015 | **$15.00** | Full identity + grade + defects |
+| **Vision (Opus)** | $0.015† | **$15.00** | Full identity + grade + defects |
 | **Vision (Sonnet)** | $0.003 | **$3.00** | Watch Mode fast ID |
 | **Ximilar** | $0.0049 | **$4.90** | Visual similarity only |
 | **eBay Image Search** | $0.000 | **$0.00** | Free (via eBay API) |
@@ -169,7 +171,7 @@ grep -rn "ximilar" api/enrich.js
 
 | Approach | Identity Cost | Grade Cost | Total |
 |----------|---------------|------------|-------|
-| **Current (Opus full)** | $0.015 | included | **$0.015** |
+| **Current (Opus full)** | $0.015† | included | **$0.015†** |
 | **Ximilar + Sonnet** | $0.0049 | $0.003 | **$0.0079** |
 | **eBay-First (current)** | $0.000 | $0.003 | **$0.003** ✅ |
 
@@ -237,7 +239,7 @@ const duplicate = catalogue.find(
 
 **Current flow:**
 ```
-User scans book → Vision API call ($0.015) → Check catalogue for duplicate
+User scans book → Vision API call ($0.015†) → Check catalogue for duplicate
                     ↑ WASTEFUL if duplicate exists
 ```
 
@@ -280,9 +282,9 @@ User scans book → eBay Image Search (FREE) → Check catalogue by eBay itemId
 
 | Scenario | Frequency | Current Cost | With Guard | Savings |
 |----------|-----------|--------------|------------|---------|
-| **Accidental re-scan** | ~5-10% | $0.015 | $0.000 | **100%** ✅ |
-| **Manual duplicate check** | ~5% | $0.015 | $0.000 | **100%** ✅ |
-| **New book** | ~85-90% | $0.015 | $0.015 | 0% |
+| **Accidental re-scan** | ~5-10% | $0.015† | $0.000 | **100%** ✅ |
+| **Manual duplicate check** | ~5% | $0.015† | $0.000 | **100%** ✅ |
+| **New book** | ~85-90% | $0.015† | $0.015† | 0% |
 
 **Expected savings:** ~5-10% of Vision calls (0.5-1% of total cost)
 
@@ -337,7 +339,7 @@ User scans book → eBay Image Search (FREE) → Check catalogue by eBay itemId
 **Verdict:** **HIGH RISK / HIGH REWARD** — needs A/B testing
 
 **Current model usage:**
-- **Opus 4.7:** Standard scans ($0.015 per call)
+- **Opus 4.7:** Standard scans ($0.015† per call)
 - **Sonnet 4.5:** Watch Mode only ($0.003 per call)
 
 **Proposed test:**

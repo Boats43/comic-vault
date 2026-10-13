@@ -1,3 +1,5 @@
+> **CORRECTION 2026-10-13 (GK-285): every per-scan dollar figure in this document marked † (including `$0.015`, `$0.015-0.030`, `$0.005` and the derived per-book/total figures) is an UNVERIFIED HISTORICAL ESTIMATE. Actual per-scan cost has never been measured end to end (no shared scan/attempt identifier across grade and enrich, cost not persisted, several provider calls unpriced), and the `$0.015/scan` figure must not be cited as a fact. The estimates below are preserved as historical estimates, not as measurements. See `docs/TICKET-REGISTRY.md` GK-285 and `docs/GRAILKEY-STRATEGY.md` (amendment 2026-10-13).**
+
 # Complete Architecture Audit — 2026-06-30
 
 **Investigation Only. No code changes. GREENLIGHT required before any fix.**
@@ -226,7 +228,7 @@ if (isStale) {
 - **Watch mode:** Sonnet fast-ID → self-correct → Opus escalation (3-pass pipeline)
 - **Standard mode:** Single Opus 4.7 call with `STANDARD_PROMPT`
 - Returns: title, issue, publisher, year, grade, keyIssue, variant, creator, certNumber, restoration, defectPenalty, cgcPenaltyFlags, editionWarning
-- Cost: **$0.015-0.030** per scan (Opus Vision), ~2-4s
+- Cost: **$0.015-0.030†** per scan (Opus Vision), ~2-4s
 - **Lock mechanism:** `gradeLocked: true` set on HIGH confidence (line 8107)
 
 **Step 3: Add to Catalogue** (`App.jsx:7991-8047`)
@@ -257,7 +259,7 @@ if (isStale) {
 
 | Step | What It Does | Cost | Necessary? |
 |------|-------------|------|------------|
-| **Vision** | Reads cover → title/issue/publisher/year/grade/keyIssue/variant | $0.015-0.030, 2-4s | ✅ YES — core identity |
+| **Vision** | Reads cover → title/issue/publisher/year/grade/keyIssue/variant | $0.015-0.030†, 2-4s | ✅ YES — core identity |
 | **ComicVine** | Story verification, creator credits | Free, 1-2s | ⚠️ PARTIAL — improves identity confidence but not always available |
 | **PriceCharting** | Price ladder, pop, sales velocity | Free (scrape), 2-3s | ✅ YES — primary pricing source |
 | **eBay Active** | Current market comps | Free (OAuth), 1-2s | ✅ YES — sanity check + floor guard |

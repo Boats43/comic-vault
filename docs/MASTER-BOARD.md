@@ -10,6 +10,24 @@ HEAD at this publication: `6b800f4`.
 
 ---
 
+## UPDATE 2026-10-13 (post-B1; gate committed locally) — RELEASE TRUTH, ACTIVE BOARD, STRATEGIC ROADMAP (read before the older reconciliation table below; nothing below is rewritten)
+
+| Item | Status | Class |
+|---|---|---|
+| Production | **`f9f159c2f1e685f47e84b3545ed85e8c4152f37f`**, deployment **`dpl_GT3VQvXWvUf4BjwH2b9oA2rnpYRM`** (READY 2026-10-13, aliases `app.grailkey.com`, `comic-vault-rouge.vercel.app`, `comic-vault-boats43s-projects.vercel.app`, `comic-vault-git-main-boats43s-projects.vercel.app`) | VERIFIED LIVE (Vercel) |
+| Migration 0040 | **APPLIED and CERTIFIED** (37/37 PASS; `operator_authority_event` 30 columns, 0 rows, 6 indexes, 3 enabled triggers; Production 58 tables / 612 rows / 629 constraints / 170 indexes at 2026-10-13T20:18Z) | OPERATOR-RUN + executor evidence in `C:\gk281\0040-exec` |
+| B1 | **DEPLOYED**; unauthenticated `/api/operator-reconcile` → 401 on both Production domains; build marker `f9f159c`. Authenticated operator smoke and iPhone PWA acceptance against `f9f159c`: **NOT done** (and will not transfer to the post-gate deployment) | VERIFIED LIVE / PENDING |
+| Marketplace operator gate (GK-P0) | **Committed LOCALLY, not pushed, not deployed.** Production (`f9f159c`) still lets any authenticated principal that owns an asset and holds its own eBay connection reach the listing path. Practical exposure today is bounded: the 2026-10-13 census shows ONE `marketplace_connection` row (the operator's). | LOCAL COMMIT |
+| Rollback candidate | After the gate ships, the previous deployment `dpl_GT3VQvXWvUf4BjwH2b9oA2rnpYRM` is **UNGATED** — rolling back to it **does not preserve marketplace-write security** and is NOT a safe emergency action without an independent write disable (none exists in the application; see `docs/B1-RELEASE-SEQUENCING-FINAL.md` "GK-P0 — emergency write disable and rollback") | HOLD |
+| Closed economic outcomes | **0** | HISTORICAL |
+| Local `main` (`97c0397`) | still diverged; never push | HAZARD |
+
+**ACTIVE BOARD (execution, in order):** (1) review and separately authorize the gate release → (2) deploy → (3) authenticated reconcile smoke + iPhone PWA acceptance against the NEW SHA → (4) Old Man Logan #25 physical verification (possession, indicia, UPC, year, variant, identity, condition; HOLD on any contradiction) → (5) eBay provider health check immediately before submission → (6) operator reconciliation procedure ready → (7) ONE separately founder-authorized listing attempt → (8) reconcile the sale; settle per the UNKNOWN-is-not-ZERO doctrine. In parallel (measurement only): GK-285, GK-297, GK-298.
+
+**STRATEGIC ROADMAP (NOT active, not authorized):** Shopify · Whatnot · Universal V2 · Economic Router · Reserve Authority · additional asset categories · continuous asset intelligence · subscription metering · outside-user publishing (GK-283 seller location, GK-294 READY-path attempt safety, GK-295 server-side category certification) · proprietary ML.
+
+---
+
 ## RECONCILIATION 2026-10-13 — read BEFORE any row below (rows are not rewritten; this section overrides stale stamps)
 
 | Item | Status | Class |

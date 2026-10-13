@@ -1,5 +1,7 @@
 # B1-RC release plan — GK-284 durable OPERATOR_MANUAL authority (LOCAL; NOTHING HERE IS AUTHORIZED)
 
+> **STATUS 2026-10-13 (history below preserved):** Step 2 (migration 0040) is APPLIED and CERTIFIED and Step 3 (push + deploy) is DONE — Production is `f9f159c2f1e685f47e84b3545ed85e8c4152f37f`, `dpl_GT3VQvXWvUf4BjwH2b9oA2rnpYRM`. Steps 4-7 (authenticated smoke, iPhone acceptance, the single supervised listing) are PENDING and must be repeated against the post-gate SHA. The index count of the new table is **6** (primary key + `chain_uniq` + four named indexes), not 4. §2 rollback: once the GK-P0 gate ships, re-promoting `f9f159c` is NOT security-preserving — see `docs/B1-RELEASE-SEQUENCING-FINAL.md` GK-P0.
+
 Branch `b1-first-outcome-authority`, parent = Production `b403f33`. The release candidate is the final commit on this branch (its SHA and the file checksums are recorded in the registry entry "B1-RC" and in the return packet, because a document cannot contain its own commit id). **No migration, push, deployment, paid scan or marketplace write is authorized by this document.** Each step below needs its own explicit words from the operator.
 
 ## 1. What the candidate changes in Production behavior

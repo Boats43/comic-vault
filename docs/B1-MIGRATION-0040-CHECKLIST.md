@@ -40,3 +40,7 @@ Runs only after the operator writes **`PRODUCTION MIGRATION 0040 AUTHORIZED`**. 
 
 ---
 **Update 2026-10-13:** item A.3 is satisfied — Neon Console (operator-verified): Free plan, 6-hour history retention, PostgreSQL 18, 0.25 CU, network transfer 81.4% used; no waiver. The 2026-10-12 backup no longer stands (A.6): a fresh encrypted backup is required. Execution detail, the proposed `SET LOCAL lock_timeout/statement_timeout` amendment to §B, and the authorization text: `docs/B1-MIGRATION-0040-AUTHORIZATION-CHECKPOINT.md`.
+
+
+---
+**Executed 2026-10-13:** this checklist was run (see `docs/B1-MIGRATION-0040-AUTHORIZATION-CHECKPOINT.md`); certification 37/37 PASS. Correction: the expected index total for `operator_authority_event` is **6**, not "primary key + 4" — the `UNIQUE` constraint `operator_authority_event_chain_uniq` is backed by a fifth secondary index.
