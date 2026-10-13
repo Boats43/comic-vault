@@ -179,3 +179,51 @@ Expected SHA-256: script `840b2b3b507ef9fed1424c3819be04a312362d062245b042017d38
 **3. After successful certification — remove the credential-reading script and verify (operator, or ask the executor):**
 `! rm -f "C:/gk281/0040-exec/p0040.mjs" "S/p0040.mjs" "S/p0040-final.mjs"; ls -la "C:/gk281/0040-exec"; ls "S" | grep -i p0040 || echo "no p0040 script remains"`
 Expected: `C:/gk281/0040-exec` holds only the five non-secret `*.json` evidence files and the last line prints `no p0040 script remains`. Then record the removal UTC time in the registry.
+
+---
+## EXECUTOR REVISION 2 (2026-10-13) — supersedes the script SHA and commands in H3/H4 above; migration still UNAPPLIED
+
+Independent review of the 373-line script (SHA `840b2b3b…7e71`) found two defects, both corrected in `p0040-final2.mjs` (scratchpad, 513 lines), **SHA-256 `f133d6de4e0bb801aa90599fa6e00fc30a7a3e34fd1daed61e24d4e44d1f3594`**:
+1. **`certify` now asserts.** It prints `PASS`/`FAIL` per assertion and ends `CERTIFICATION PASS` (exit 0) or `CERTIFICATION FAIL (n of m)` (exit 1): artifacts; apply evidence records a commit; new table exists; 30 columns; 0 rows; exactly 6 indexes, the exact name set, each by definition (PK, `chain_uniq`, `attempt_phase_uniq` partial, `asset_idx`, `action_idx`, `review_idx` partial); exactly 3 triggers, exact name set, each BEFORE with the right level (UPDATE/DELETE row-level, TRUNCATE statement-level) calling `economic_ledger_immutable()`, each enabled; every named constraint plus a primary key; pre-existing tables unchanged in columns/constraints/indexes/triggers with none added or removed; table count = previous + 1; extensions unchanged; marker `production`. Pre-existing ROW COUNT changes are informational only. `apply` uses the same new-table assertions inside the transaction before COMMIT.
+2. **`apply` exit codes.** 0 = COMMITTED and verified; 1 = nothing committed (precondition/lint/baseline-changed/lock-timeout/verification mismatch/rollback/any error); 2 = COMMIT OUTCOME UNKNOWN; 3 = watchdog before COMMIT; 130 = signal. Only a confirmed `COMMITTED` exits 0. `check` exits 1 if a precondition fails; an unknown subcommand exits 1.
+Offline proof (no database connection): `node --check` OK; `lint` PASS (exit 0); new `selftest` PASS 33/33 — it mutates synthetic facts (29/31 columns, 1 row, missing/extra/renamed/mis-defined/non-unique/non-partial indexes, missing/AFTER/row-level-truncate/wrong-function/disabled triggers, missing constraints) and synthetic censuses (added column, changed index/trigger count, second/dropped table, extension change, wrong marker) and requires FAIL for each, and PASS for the correct case; exit-code mapping 0/1/2; running `certify`/`apply`/unknown in an empty directory exits 1 without any database connection. The Production-side output format of `pg_get_indexdef`/`pg_get_triggerdef` is assumed from PostgreSQL's documented form (tolerant of optional schema prefixes); a cosmetic mismatch fails safe (apply rolls back; certify FAILs) rather than passing.
+
+Windows PowerShell 5.1 commands (no `2>&1` on native commands; Node's SSL-mode warning prints to stderr and is harmless):
+```powershell
+# 1. copy the two evidence files WITHOUT overwriting or regenerating
+$s = 'C:\Users\matam\AppData\Local\Temp\claude\C--Users-matam-OneDrive-Desktop-comic-vault\f03a756b-6984-43ae-a5e2-816c4f601818\scratchpad'
+$d = 'C:\gk281\0040-exec'
+foreach ($f in 'baseline-step2.json','backup-evidence.json') {
+  $dst = Join-Path $d $f
+  if (Test-Path -LiteralPath $dst) { "SKIPPED (exists, not overwritten): $f" }
+  else { Copy-Item -LiteralPath (Join-Path $s $f) -Destination $dst -ErrorAction Stop; "COPIED: $f" }
+}
+Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $d 'baseline-step2.json'),(Join-Path $d 'backup-evidence.json') | Select-Object Hash,Path
+```
+(Exact expected hashes, case-insensitive: `baseline-step2.json` `b46c3fe744c06a5d26e26e6c8f56d010e91089c7f05f1d1a9ad6dd8f91e65553`; `backup-evidence.json` `df21ff99c63347d135f0bd1c810e228ef9bdf4850a9dcfa605ac8a57c2c4eb6d`.)
+```powershell
+# 2. replace the stable script, gated on the reviewed hash
+$new = Join-Path $s 'p0040-final2.mjs'
+$exp = 'f133d6de4e0bb801aa90599fa6e00fc30a7a3e34fd1daed61e24d4e44d1f3594'
+$got = (Get-FileHash -Algorithm SHA256 -LiteralPath $new).Hash.ToLower()
+if ($got -ne $exp) { throw "scratchpad script hash mismatch: $got" }
+Copy-Item -LiteralPath $new -Destination 'C:\gk281\0040-exec\p0040.mjs' -Force -ErrorAction Stop
+$got2 = (Get-FileHash -Algorithm SHA256 -LiteralPath 'C:\gk281\0040-exec\p0040.mjs').Hash.ToLower()
+if ($got2 -ne $exp) { throw "installed script hash mismatch: $got2" }
+"OK installed, SHA-256 $got2"
+
+# 3. offline checks (no database connection) - both must print exit code 0
+& node 'C:\gk281\0040-exec\p0040.mjs' lint;     "lint exit code: $LASTEXITCODE"
+& node 'C:\gk281\0040-exec\p0040.mjs' selftest; "selftest exit code: $LASTEXITCODE"
+
+# 4. execution (separate steps; only after inspecting the script)
+& node 'C:\gk281\0040-exec\p0040.mjs' apply;   "apply exit code: $LASTEXITCODE"      # 0 only if COMMITTED
+& node 'C:\gk281\0040-exec\p0040.mjs' certify; "certify exit code: $LASTEXITCODE"    # 0 only if CERTIFICATION PASS
+
+# 5. after CERTIFICATION PASS: remove the credential-reading script and verify
+Remove-Item -LiteralPath 'C:\gk281\0040-exec\p0040.mjs' -Force
+Remove-Item -LiteralPath (Join-Path $s 'p0040.mjs'),(Join-Path $s 'p0040-final.mjs'),(Join-Path $s 'p0040-final2.mjs') -Force -ErrorAction SilentlyContinue
+Get-ChildItem -Path 'C:\gk281\0040-exec',$s -Filter 'p0040*' -Recurse -ErrorAction SilentlyContinue | Select-Object FullName   # expect: nothing listed
+Get-ChildItem 'C:\gk281\0040-exec' | Select-Object Name,Length                                                            # expect: only *.json evidence
+```
+Reading the exit codes: `apply` 0 = committed; 1 = nothing committed; 2 = commit outcome unknown -> run `certify`, never re-run `apply`; 3 = watchdog before commit. If `apply` reports "baseline changed since step 2" (Production is live), run `check` (read-only, overwrites `baseline-step2.json` in the stable directory) and then `apply` again.
