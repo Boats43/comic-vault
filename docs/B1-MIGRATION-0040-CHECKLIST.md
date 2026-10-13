@@ -37,3 +37,6 @@ Runs only after the operator writes **`PRODUCTION MIGRATION 0040 AUTHORIZED`**. 
 
 ## F. Still required afterwards (separate words)
 `PUSH AUTHORIZED` → `DEPLOY AUTHORIZED` → read-only certification (Release plan §5 steps 3-6) → separate approval for ONE founder-supervised OPERATOR_MANUAL listing. READY-path listings stay uncertified (GK-294).
+
+---
+**Update 2026-10-13:** item A.3 is satisfied — Neon Console (operator-verified): Free plan, 6-hour history retention, PostgreSQL 18, 0.25 CU, network transfer 81.4% used; no waiver. The 2026-10-12 backup no longer stands (A.6): a fresh encrypted backup is required. Execution detail, the proposed `SET LOCAL lock_timeout/statement_timeout` amendment to §B, and the authorization text: `docs/B1-MIGRATION-0040-AUTHORIZATION-CHECKPOINT.md`.
