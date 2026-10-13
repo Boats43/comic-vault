@@ -52,3 +52,19 @@ Committed record at `f9f159c` (`docs/TICKET-REGISTRY.md`, "B1-RC" RC4): final fr
 
 ## Shell disposition (B3)
 The "running shell" was the 2026-10-12 background command `b5uwoutqp` (PID tree bash 21960 → 3508 → find 11460): my own overbroad read-only `find / -iname "*backup*" …` filesystem search plus `git grep` and an `ls` of `C:\grailkey-data`. It could not modify files, databases, deployments or environments. Terminated (bash tree killed; `find` then exited); no process remains.
+
+---
+# Addendum 2026-10-13 (later) — record protection and push verification for `b1-preflight-records` (NOTHING HERE IS AUTHORIZED)
+
+## Operator-reported status (not independently re-verified by this record)
+Independent cold-start Production database recovery: **PASS** (operator-certified). Local recovery database absence: verified. Checklist items 5-7 above are therefore reported done by the operator; item 4 (Neon plan and restore window, UTC-stamped) is still UNCONFIRMED in this repo. Checklist items 1-3 (fresh Production state and backup coverage) must still be re-run immediately before 0040.
+
+## Record preserved together on `b1-preflight-records`
+Sequencing record (this file) · `docs/B1-MIGRATION-0040-CHECKLIST.md` · `docs/PRODUCTION-BACKUP-RESTORE-PROCEDURE.md` · `docs/EBAY-VERIFY-ROUTE-DESIGN.md` · `docs/B1-RC-RELEASE-PLAN.md` (§2 is the rollback procedure) · `db/data0/0040_operator_manual_authority_rollback.sql` · `docs/OPERATOR-RECONCILIATION-PROCEDURE.md` · `docs/TICKET-REGISTRY.md` (B1-RC, B1 PREFLIGHT, B1 RELEASE GATE v2, and the 2026-10-13 reconciliation entry).
+
+## Push verification for this documentation branch (read-only evidence, 2026-10-13)
+* Project `prj_2tECtpKowmM7oFT7CYOQFZTssP72`, team plan `pro`, linked to GitHub `Boats43/comic-vault`. `vercel.json` has no `git`, `ignoreCommand` or branch override.
+* **Not readable with the available tools:** the project-level "Production Branch" and "Ignored Build Step" settings (`get_project` does not return them).
+* Indirect evidence: all 20 most recent Production deployments have `githubCommitRef: main`; the two non-`main` refs ever seen on this project (`test/no-polybag`, `ebay-first-id`, both months old) produced deployments with `target: null` (preview). Both Production domains and `app.grailkey.com` have `gitBranch: null` and `customEnvironmentId: null` (bound to Production, not to a branch).
+* Risk if the inference were wrong: this branch contains the full B1 candidate code (`f9f159c`) on top of Production `b403f33`; a mistaken Production build would ship code that expects `operator_authority_event` before migration 0040 exists. That is the exact ordering the release plan forbids.
+* **Disposition: the push of `b1-preflight-records` was HELD by the executor** because the setting itself could not be read. The branch is committed locally. To release the hold the operator can confirm "Production Branch = main" (Vercel dashboard, Project Settings, Git) or state that the indirect evidence is sufficient.

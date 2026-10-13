@@ -10,6 +10,27 @@ HEAD at this publication: `6b800f4`.
 
 ---
 
+## RECONCILIATION 2026-10-13 — read BEFORE any row below (rows are not rewritten; this section overrides stale stamps)
+
+| Item | Status | Class |
+|---|---|---|
+| Production | `b403f33`, `dpl_G3EswX5MBKpMSKQrVrC7M11HtYrY`, aliases `app.grailkey.com` + 3 vercel.app aliases | VERIFIED LIVE (Vercel, 2026-10-13) |
+| `origin/main` | `b403f33` | VERIFIED LIVE (git) |
+| B1 release candidate | `f9f159c2f1e685f47e84b3545ed85e8c4152f37f`, branch `b1-first-outcome-authority`, frozen, unpushed | VERIFIED LIVE (git) |
+| Migration 0040 | HOLD; `operator_authority_event` absent at the 2026-10-13T02:49Z preflight | HISTORICAL EVIDENCE (not re-measured) |
+| Production DB shape | 57 tables / 593 rows; `operator_action_event`, `outcome_event` 0 rows | HISTORICAL EVIDENCE (2026-10-13T02:49Z) |
+| Closed economic outcomes | 0 | HISTORICAL EVIDENCE / consistent with empty `outcome_event` |
+| Independent cold-start recovery | PASS; local recovery DB absence verified | OPERATOR-REPORTED (not re-verified) |
+| Neon plan / restore window | UNCONFIRMED (last known Free, 6 h, 2026-09-01) | UNVERIFIED |
+| WATCH provenance | RELEASED `653f418` | VERIFIED (deployment list) |
+| Local `main` | `97c0397`, 4 ahead / 20 behind `origin/main`; NEVER push | VERIFIED (git) — HAZARD |
+| Non-operator marketplace write | blocked until GK-283, GK-294, GK-295 close | per B5 decision |
+| Commercial test | ONE SALE · THREE DEALERS · TWO MEASUREMENTS — GK-298 (dealers), GK-285 (COGS), GK-297 (repeatability), GK-299 (banked gap) | OPEN |
+
+**Stale rows below:** the "HEAD at this publication: `6b800f4`" stamp; §4 Economics ("design draft only, not applied" — the outcome-ledger tables now exist in Production, empty, and are real-DB-proven in Development); "Migration truth"; §3 Permanent Asset wherever it says Production `gk_asset` has 0 rows (a write dated 2026-09-24T00:51Z exists; current count UNVERIFIED). Strategy amendment: `docs/GRAILKEY-STRATEGY.md` "AMENDMENT 2026-10-13".
+
+---
+
 ## 1. Runtime (comic-pricing pipeline)
 
 | Field | Value |

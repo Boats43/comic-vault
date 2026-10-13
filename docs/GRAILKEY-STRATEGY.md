@@ -17,6 +17,23 @@ race is empty" (OUTTA alone forbids that framing; see §5's own OUTTA row).
 
 ---
 
+## AMENDMENT 2026-10-13 — owner-outcome north star and the immediate commercial test (ADOPTED; additive; sections below are NOT rewritten)
+
+**North star (amends the metric framing under §7):** **GrailKey optimizes the asset owner's risk-adjusted economic outcome.** The customer-facing question is **"What should I do with this exact physical asset?"** — identify, value, and recommend a disposition (list, hold, pass, grade, sell raw, trade, consign, sell to a dealer), then measure what actually happened. The earlier "inventory dollars → evidence-backed action per operator hour" remains a *measurement* of that, not the goal.
+
+**Customer hypothesis (NOT a validated market):** comic dealers. §6 ruling 3's DEALER tier is a hypothesis until interviews (GK-298) support it; no pricing-tier decision follows from it yet.
+
+**The immediate commercial test — ONE SALE. THREE DEALERS. TWO MEASUREMENTS.**
+* ONE governed sale (B1 supervised OPERATOR_MANUAL listing) and its eventual economic reconciliation — the first closed economic outcome (closed outcomes today: **0**).
+* THREE real dealer workflow interviews, operator-owned, Phoenix area (GK-298).
+* TWO measurements: full end-to-end scan COGS (GK-285; the $0.015/scan figure is UNMEASURED) and same-image grade repeatability without purchasing certified books (GK-297; $5 cap, provisional ≥90% same-bucket / σ ≤ 0.25 grade steps, subject to a bucket definition).
+
+**Candidate wedges — banked, NOT implemented:** grading-versus-raw-sale decisions · MAX BUY · inventory disposition. Prioritization waits for customer and technical evidence. Known technical input: durable actions are only LIST/HOLD/PASS and there is no direct-sale/dealer outcome type (GK-299); the Buyer Decision Ledger records BUY/PASS and an optional purchase price tied to the decision, not to a physical asset (registry finding, 2026-10-13).
+
+**§7 90-Day board status note:** the checklist below is a 2026-08-22 snapshot; "Cross-device asset", "Durable economics" and "eBay projection" have since moved in Development/Production but "Outcome loop" is still unchecked (0 closed outcomes). Re-stamp each box against `docs/MASTER-BOARD.md` before using it as a scoreboard. **§8 stands for the engineering sequence**, but its "next three things outrank everything" list is now subordinate to the commercial test above. The §6 ruling 4 NOT-YET list is unchanged, and gains: *no wedge build before customer or technical evidence.*
+
+---
+
 ## 1. THE DEFENSIBLE GRAILKEY (the one paragraph)
 
 > **The evidence-backed operating system for physical inventory — where every physical copy has permanent identity and history, every recommendation is economically accountable, and every realized outcome makes the next recommendation better.**
