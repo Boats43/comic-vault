@@ -89,3 +89,17 @@ required after 0040 is certified.
 * Passphrase custody for the NEW backup moves to the operator after step B (password manager, kept apart from the ciphertext).
 * Network transfer 81.4% (Free plan) — if Production traffic grows, the cap could affect availability independent of this migration.
 * GK-283, GK-294, GK-295 still gate non-operator marketplace writes; they do not gate 0040.
+
+---
+## Authorization received 2026-10-13 — `PRODUCTION MIGRATION 0040 AUTHORIZED` (amendments recorded; EXECUTION BLOCKED at step 1, nothing applied)
+
+Operator authorized applying `db/data0/0040_operator_manual_authority.sql` (SHA-256 `6641e24b41cb49f15b37a99179f87d6e877833ba943d1e7b3e384f13d9584830`) from `f9f159c2f1e685f47e84b3545ed85e8c4152f37f` to Neon Production (`grailkey-catalog`, branch `main`, PostgreSQL 18, direct non-pooled endpoint), following the checkpoint at `468de76af3a46eea52c1d0c9213a5e7242f04bec`, with these explicitly authorized amendments (release evidence):
+1. The 60-minute backup-to-apply expiration is REMOVED (the baseline recheck in step 4 and the 6-hour Neon history window still bound staleness).
+2. The manual pause for off-machine custody of the new backup is REMOVED.
+3. A fresh encrypted backup, created and verified before applying, is RETAINED as a requirement.
+4. `SET LOCAL lock_timeout = '5s'` and `SET LOCAL statement_timeout = '60s'` inside the transaction are RETAINED.
+No PITR waiver is issued. Not authorized: push, deployment, rollback execution, other migrations, marketplace writes, paid scans, application-code changes, restore drills.
+
+**Pre-execution clarification (derived from the migration file itself, recorded before any run):** the checklist's "primary key + 4 further indexes" counts only the four `CREATE INDEX` statements. The file also declares `CONSTRAINT operator_authority_event_chain_uniq UNIQUE (...)`, which PostgreSQL backs with a fifth secondary index. The expected catalog for the new table is therefore **1 primary key + 1 constraint-backed unique index + the 4 named indexes = 6 indexes**; the in-transaction check is written to that expectation and to the four named indexes + PK, not to a total of 5.
+
+**Execution status at this record (2026-10-13): step 1 PARTIALLY complete, then HELD.** Done and passing: candidate tip `f9f159c2…` exact; migration and rollback hashes equal the authorized values; Production deployment still `dpl_G3EswX5MBKpMSKQrVrC7M11HtYrY` / `b403f33`. NOT done: Production environment marker, direct-endpoint, and `operator_authority_event` absence checks, the baseline census, the backup — **no Production database connection was made.** Reason: the documented credential source `.env.production-pull.local` holds the Vercel `[SENSITIVE]` placeholder for `GRAILKEY_CATALOG_DATABASE_URL`, not a usable URL, and the executor was not told which other local file is the sanctioned Production credential source. Probing other local env files to find one was refused by the permission layer as credential exploration and was not pursued. No backup was created; no migration was applied.
