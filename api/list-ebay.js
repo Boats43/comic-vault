@@ -56,6 +56,8 @@ import { recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForList
 import { sanitizeQ41Ack, buildAckWarnings, classifyAddItemResponse } from "../src/lib/operatorAuthority.js";
 import { attemptListedOutcome } from "../src/lib/marketplaceOutcomeBridge.js";
 import { assertListingAuthorized, ListingPreflightFailedError } from "../src/lib/inventoryListingPreflight.js";
+// GK-P0 -- the OPERATOR-ONLY gate for every marketplace-mutating route (see src/lib/marketplaceOperatorGate.js).
+import { requireMarketplaceOperator } from "../src/lib/marketplaceOperatorGate.js";
 // GK-265 PHASE 3 -- principal-scoped eBay seller execution. Every real
 // Trading API call in this file (GetItem, UploadSiteHostedPictures,
 // GetUser, AddFixedPriceItem, EndItem via delist-ebay.js) now uses the
@@ -617,6 +619,18 @@ export const __dryRunBuildListingXml = (item, pictureUrls, plan) => buildXml(ite
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  // GK-P0 (2026-10-13) -- OPERATOR-ONLY. Runs before ANY other work in this handler: before the application-credential
+  // check, before the optional-auth block below, before the status / bundle / single-item branches, before any picture
+  // upload (Media API or UploadSiteHostedPictures), before GetUser / AddFixedPriceItem, and before the durable
+  // OPERATOR_MANUAL authority or attempt-ledger write. 401 unauthenticated, 403 not an operator, 503 operator authority
+  // cannot be established. Nothing the client sends (role, principal id, operator flag) is read. The B1 protections
+  // below (Q41, price binding, inventory authority, attempt ledger, reconciliation) are unchanged.
+  const operatorGate = await requireMarketplaceOperator(req, { label: "list-ebay" });
+  if (!operatorGate.ok) {
+    res.status(operatorGate.status).json(operatorGate.body);
     return;
   }
 

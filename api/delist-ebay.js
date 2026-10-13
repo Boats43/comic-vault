@@ -24,7 +24,8 @@
 // X-EBAY-API-IAF-TOKEN -- never the legacy global EBAY_AUTH_TOKEN /
 // RequesterCredentials path, and never any other seller's credential.
 
-import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
+// GK-P0 -- OPERATOR-ONLY gate (replaces the bare verifyToken check; same 401 for an unauthenticated caller).
+import { requireMarketplaceOperator } from "../src/lib/marketplaceOperatorGate.js";
 import { resolveOwnedAssetForListing, AuthorizationFailedError } from "../src/modules/assets/index.js";
 import {
   resolveEbayUserAccessToken,
@@ -44,12 +45,6 @@ const extractTag = (xml, tag) => {
   return m ? m[1] : null;
 };
 
-const extractBearerToken = (req) => {
-  const header = req.headers?.authorization || req.headers?.Authorization;
-  if (!header || !header.startsWith("Bearer ")) return null;
-  return header.slice("Bearer ".length).trim();
-};
-
 export default async function handler(req, res) {
   const rateCheck = checkRateLimit(req);
   res.setHeader("x-ratelimit-remaining", String(rateCheck.remaining));
@@ -64,16 +59,15 @@ export default async function handler(req, res) {
     return;
   }
 
-  let principalId;
-  try {
-    ({ principalId } = verifyToken(extractBearerToken(req)));
-  } catch (e) {
-    if (!(e instanceof InvalidTokenError)) {
-      console.error("[delist] unexpected token-verification error:", e?.message || e);
-    }
-    res.status(401).json({ error: "Missing, invalid, or expired token" });
+  // GK-P0 (2026-10-13) -- OPERATOR-ONLY, before the ownership lookup, before the seller token is resolved and before
+  // EndItem. 401 unauthenticated, 403 not an operator, 503 operator authority cannot be established. principalId comes
+  // ONLY from the verified session token (never the body).
+  const operatorGate = await requireMarketplaceOperator(req, { label: "delist" });
+  if (!operatorGate.ok) {
+    res.status(operatorGate.status).json(operatorGate.body);
     return;
   }
+  const principalId = operatorGate.principalId;
 
   const { ebayItemId } = req.body || {};
   if (!ebayItemId) {

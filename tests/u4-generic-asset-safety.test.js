@@ -5,7 +5,7 @@
 //
 //   - api/list-ebay.js rejects a generic asset server-side, BEFORE any
 //     eBay network call, for both the single-item and bundle paths —
-//     real handler invocation, no DB needed (the check runs before the
+//     real handler invocation, needs an operator session (GK-P0: the operator gate now runs BEFORE the
 //     GrailKey auth/linkage gate), global.fetch replaced with a mock
 //     that throws if ever called (proves zero eBay calls happen)
 //   - the SAME handler is unaffected for an ordinary comic item (no
@@ -67,6 +67,18 @@ global.fetch = async () => {
 
 const listEbayHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
 
+// GK-P0 (2026-10-13): api/list-ebay.js is OPERATOR-ONLY and that gate runs before every other check, so these requests must carry a real
+// operator session. A throwaway operator-kind principal is minted in the Development database (same convention as the B1 suites).
+process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'development';
+if (!process.env.GRAILKEY_SESSION_SECRET) process.env.GRAILKEY_SESSION_SECRET = 'u4-generic-asset-safety-test-secret-0123456789abcdef';
+const { default: pgModule } = await import('pg');
+const { issueToken } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'auth', 'token.js')).href);
+const gateDb = new pgModule.Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });
+await gateDb.connect();
+const gateOperatorId = (await gateDb.query('SELECT uuidv7() AS id')).rows[0].id;
+await gateDb.query('INSERT INTO data1_dev.gk_principal (id, display_name, kind) VALUES ($1, $2, $3)', [gateOperatorId, 'u4-gate-operator', 'operator']);
+const opHeaders = () => ({ 'x-forwarded-for': `10.9.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`, authorization: `Bearer ${issueToken({ principalId: gateOperatorId }).token}` });
+
 console.log('-- api/list-ebay.js: generic assets are rejected before any eBay call --\n');
 
 const genericItem = {
@@ -74,7 +86,7 @@ const genericItem = {
   assetCategory: 'generic',
   price: '$0',
 };
-const genericReq = { method: 'POST', headers: {}, body: genericItem };
+const genericReq = { method: 'POST', headers: opHeaders(), body: genericItem };
 const genericRes = mockRes();
 await listEbayHandler(genericReq, genericRes);
 assertTrue(genericRes.statusCode === 400, `single-item generic asset -> 400 (got ${genericRes.statusCode}, body=${JSON.stringify(genericRes.body)})`);
@@ -83,7 +95,7 @@ assertTrue(fetchCallCount === 0, `zero eBay network calls were made (got ${fetch
 
 console.log('\n-- api/list-ebay.js: a bundle containing a generic member is rejected before any eBay call --\n');
 const bundleReq = {
-  method: 'POST', headers: {},
+  method: 'POST', headers: opHeaders(),
   body: {
     bundle: true,
     items: [
@@ -96,7 +108,7 @@ const bundleRes = mockRes();
 // GRAILKEY_CATALOG_ENVIRONMENT is not 'production' in this test process
 // (never set above), so the bundle branch reaches the per-item generic
 // check rather than the unrelated Production-only bundle-disable gate.
-delete process.env.GRAILKEY_CATALOG_ENVIRONMENT;
+process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'development'; // GK-P0: the operator gate needs the environment-identity guard configured (the bundle Production-disable keys on === 'production' only)
 await listEbayHandler(bundleReq, bundleRes);
 assertTrue(bundleRes.statusCode === 400, `bundle with a generic member -> 400 (got ${bundleRes.statusCode}, body=${JSON.stringify(bundleRes.body)})`);
 assertTrue(bundleRes.body?.error === 'GENERIC_ASSET_NOT_LISTABLE', `bundle error code is GENERIC_ASSET_NOT_LISTABLE (got ${bundleRes.body?.error})`);
@@ -107,11 +119,12 @@ console.log('\n-- api/list-ebay.js: an ordinary comic item (no assetCategory) is
 // PRE-EXISTING "title required" gate exactly as before this dispatch,
 // never the new GENERIC_ASSET_NOT_LISTABLE branch. This is the
 // regression proof that comic behavior is byte-for-byte unchanged.
-const comicNoTitleReq = { method: 'POST', headers: {}, body: { price: '$10' } };
+const comicNoTitleReq = { method: 'POST', headers: opHeaders(), body: { price: '$10' } };
 const comicNoTitleRes = mockRes();
 await listEbayHandler(comicNoTitleReq, comicNoTitleRes);
 assertTrue(comicNoTitleRes.statusCode === 400 && comicNoTitleRes.body?.error === 'title required', `comic item with no assetCategory still hits the pre-existing "title required" gate unchanged (got ${comicNoTitleRes.statusCode}, ${JSON.stringify(comicNoTitleRes.body)})`);
 assertTrue(fetchCallCount === 0, `still zero eBay network calls (got ${fetchCallCount})`);
+await gateDb.end();
 
 // ── A2 — exact mirrors of the App.jsx predicates, same convention as
 // tests/grailkey-operator-panel-capture-wiring.test.js's own pure-helper
