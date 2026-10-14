@@ -95,6 +95,26 @@ export function retireEvidenceIdempotencyKey(itemId, captureView) {
 // explicitly excludes this field). Retries using the EXACT ORIGINAL
 // bytes stored in that entry — never re-derives from item.images (which
 // may have been reordered/trimmed since), never reconstructs from a URL.
+// GK-300 D2 -- retry classifier. Only a 409 MEDIA_CAPACITY_EXCEEDED is TERMINAL: the asset is
+// full, so repeating the same append on every reconnect can never succeed. The queued entry is
+// KEPT (exact bytes, role, idempotency key preserved) but flagged `terminal` so it is no longer
+// retried automatically and the operator panel can show an actionable message. Every other
+// failure stays transient exactly as before (no session, network, 5xx, 401, 429, other 4xx).
+export const RETRY_OUTCOME = Object.freeze({ APPENDED: "APPENDED", TERMINAL_CAPACITY: "TERMINAL_CAPACITY", TRANSIENT: "TRANSIENT" });
+
+export function classifyRetryResult(r) {
+  if (r && r.ok && r.body && r.body.mediaId) return RETRY_OUTCOME.APPENDED;
+  if (r && r.status === 409 && r.body && r.body.error === "MEDIA_CAPACITY_EXCEEDED") return RETRY_OUTCOME.TERMINAL_CAPACITY;
+  return RETRY_OUTCOME.TRANSIENT;
+}
+
+export const CAPACITY_TERMINAL_MESSAGE =
+  "Not saved: this asset already holds the maximum of 20 evidence photos. The photo is kept on this device and will not be retried automatically.";
+
+export function markTerminalCapacity(entry, now = Date.now()) {
+  return { ...entry, terminal: { code: "MEDIA_CAPACITY_EXCEEDED", status: 409, at: now, message: CAPACITY_TERMINAL_MESSAGE } };
+}
+
 export async function retryPendingPhysicalMediaAppends(items, onResolved) {
   // LIVE EXPOSURE CLOSURE (2026-10-04) — pending evidence entries hold raw
   // photo bytes belonging to the principal whose scoped DB they came from.
@@ -112,15 +132,22 @@ export async function retryPendingPhysicalMediaAppends(items, onResolved) {
     const pending = item?._pendingEvidenceAppends;
     if (!Array.isArray(pending) || pending.length === 0) continue;
     const stillPending = [];
+    let changed = false;
     for (const entry of pending) {
-      const result = await appendPhysicalMediaEvidence(entry);
-      if (result?.mediaId) {
+      // GK-300 D2 -- a terminal entry is preserved untouched and never auto-retried.
+      if (entry && entry.terminal) { stillPending.push(entry); continue; }
+      const outcome = classifyRetryResult(await appendPhysicalMediaEvidenceDetailed(entry));
+      if (outcome === RETRY_OUTCOME.APPENDED) {
         retireEvidenceIdempotencyKey(item.id, entry.captureView);
+        changed = true;
+      } else if (outcome === RETRY_OUTCOME.TERMINAL_CAPACITY) {
+        stillPending.push(markTerminalCapacity(entry));
+        changed = true;
       } else {
         stillPending.push(entry);
       }
     }
-    if (stillPending.length !== pending.length && typeof onResolved === "function") {
+    if ((changed || stillPending.length !== pending.length) && typeof onResolved === "function") {
       onResolved(item.id, stillPending);
     }
   }

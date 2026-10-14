@@ -49,7 +49,7 @@ import { autoClaimProvableLegacy } from "./lib/legacyLocalClaim.js";
 import { fetchServerCollection, deleteServerCollectionItem, pushCollectionItem } from "./lib/collectionSync.js";
 import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
 import { registerPendingPersist, awaitPendingPersist } from "./lib/pendingPersist.js";
-import { appendPhysicalMediaEvidence, appendPhysicalMediaEvidenceDetailed, getOrCreateEvidenceIdempotencyKey, retireEvidenceIdempotencyKey, retryPendingPhysicalMediaAppends } from "./lib/physicalMediaAppend.js";
+import { appendPhysicalMediaEvidenceDetailed, getOrCreateEvidenceIdempotencyKey, retireEvidenceIdempotencyKey, retryPendingPhysicalMediaAppends } from "./lib/physicalMediaAppend.js";
 import { captureEvidencePhoto } from "./lib/evidenceCapture.js";
 import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
 import { computeFeeAmount, computeNetProfit, computeMaxBuy, evaluateAgainstMaxBuy } from "./lib/maxBuyCalculator.js";
@@ -15043,15 +15043,12 @@ export default function App() {
   // ALL photos so the identification benefits from multi-angle coverage.
   // Updates the stored entry with fresh grade fields + new images array.
   const addPhotoToComic = useCallback(async (item, file, evidenceOptions) => {
-    // GK-227 — POST-CAPTURE PHYSICAL MEDIA APPEND. `evidenceOptions`
-    // ({gkAssetId, captureView}) is supplied ONLY by
-    // GrailKeyOperatorPanel.jsx's own explicit "Add Evidence Photo"
-    // control (rendered only when this item is linked to a real
-    // gkAssetId, one explicit role at a time, never inferred). Every
-    // OTHER caller of this function (the ordinary catalogue photo strip)
-    // omits it — that path is completely unaffected, byte-for-byte, by
-    // this dispatch.
-    const { gkAssetId: evidenceGkAssetId, captureView: evidenceCaptureView } = evidenceOptions || {};
+    // GK-300 -- durable physical-evidence capture NO LONGER runs through this function: the
+    // operator panel uses addEvidencePhoto (no re-grade, independent of the catalogue photo
+    // limit). The only caller (CollectionDetail's strip) passes no third argument. The optional
+    // declared `captureView` below is retained solely as the GK-271 declared-views plumbing for
+    // the grade request (asserted by tests/gk271b-evidence-contract.test.js); nothing supplies it today.
+    const { captureView: evidenceCaptureView } = evidenceOptions || {};
     const existingPhotos = getComicPhotos(item);
     if (existingPhotos.length >= 4) {
       throw new Error("Maximum 4 photos reached");
@@ -15153,34 +15150,6 @@ export default function App() {
     if (wasSupersededByCorrection(addPhotoOwnership, activeScanRef.current)) {
       logStaleScanResponse('add-photo', { scanId: addPhotoOwnership.scanId }, addPhotoOwnership, activeScanRef.current, 'scanid-mismatch', SCAN_OWNERSHIP_MODE.ENFORCE);
       throw new Error('Add photo superseded by a newer operation — not applied.');
-    }
-
-    // GK-227 — physical-evidence append, additive to (not a replacement
-    // for) the catalogue write below. Uses `newThumb` — the SAME bytes
-    // just added to `images` above, never a URL, never remoteImages,
-    // never a value re-derived later. Attempted BEFORE the catalogue
-    // write so a failure's `_pendingEvidenceAppends` marker is part of
-    // the SAME local persist, not a second one.
-    if (evidenceGkAssetId && evidenceCaptureView) {
-      const idempotencyKey = getOrCreateEvidenceIdempotencyKey(item.id, evidenceCaptureView);
-      const evidenceResult = await appendPhysicalMediaEvidence({
-        gkAssetId: evidenceGkAssetId,
-        dataUrl: newThumb,
-        captureView: evidenceCaptureView,
-        idempotencyKey,
-      });
-      if (evidenceResult?.mediaId) {
-        retireEvidenceIdempotencyKey(item.id, evidenceCaptureView);
-      } else {
-        // Best-effort failed — preserve the exact bytes for retry
-        // (never reconstructed from a URL later), mark pending
-        // explicitly. Never claims success the caller didn't earn.
-        const priorPending = Array.isArray(item._pendingEvidenceAppends) ? item._pendingEvidenceAppends : [];
-        updated._pendingEvidenceAppends = [
-          ...priorPending.filter((p) => p.captureView !== evidenceCaptureView),
-          { gkAssetId: evidenceGkAssetId, captureView: evidenceCaptureView, dataUrl: newThumb, idempotencyKey },
-        ];
-      }
     }
 
     try {

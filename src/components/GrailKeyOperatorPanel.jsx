@@ -639,7 +639,9 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
             const localPending = Array.isArray(item?._pendingEvidenceAppends) ? item._pendingEvidenceAppends : [];
             return ALL_CAPTURE_VIEWS.map((role) => {
               const present = checklist[role];
-              const isPending = !present && localPending.some((p) => p.captureView === role);
+              const pendingEntry = !present ? localPending.find((p) => p.captureView === role) : null;
+              const isTerminal = Boolean(pendingEntry && pendingEntry.terminal); // GK-300 D2: capacity-refused, not auto-retried
+              const isPending = Boolean(pendingEntry) && !isTerminal;
               const uploading = evidenceAppendState === role;
               const errored = evidenceAppendState?.role === role ? evidenceAppendState.error : null;
               return (
@@ -669,6 +671,9 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
                         </button>
                       ))}
                     </span>
+                  )}
+                  {!present && isTerminal && !uploading && (
+                    <span style={{ color: "#e05656", fontSize: 10, marginLeft: 6 }}>{pendingEntry.terminal.message}</span>
                   )}
                   {!present && isPending && !uploading && (
                     <span style={{ color: "#c9a227", fontSize: 10, marginLeft: 6 }}>local photo saved — kernel evidence sync pending, will retry automatically</span>
