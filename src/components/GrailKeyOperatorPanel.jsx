@@ -124,7 +124,7 @@ function formatPendingAge(createdAt) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
-export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, onAddPhoto, onSameCopyRetired }) {
+export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, onAddEvidence, onSameCopyRetired }) {
   const [state, setState] = useState({ status: "loading" }); // loading | none | found | error
   const [submitting, setSubmitting] = useState(null); // which actionCode is in flight
   const [lastResult, setLastResult] = useState(null); // { actionCode, operatorActionEventId }
@@ -496,7 +496,7 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
   // `source`: "camera" (Take Photo) or "library" (Choose Existing Photo).
   // Both feed the identical handler, so role, bytes and idempotency are the same.
   function requestEvidencePhoto(role, source = "camera") {
-    if (evidenceAppendState !== "idle" || !onAddPhoto) return;
+    if (evidenceAppendState !== "idle" || !onAddEvidence) return;
     setPendingRole(role);
     const ref = source === "library" ? evidenceLibraryInputRef : evidenceFileInputRef;
     ref.current?.click();
@@ -508,17 +508,17 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
     if (evidenceLibraryInputRef.current) evidenceLibraryInputRef.current.value = "";
     const role = pendingRole;
     setPendingRole(null);
-    if (!file || !role || !onAddPhoto || !gkAssetId) return;
+    if (!file || !role || !onAddEvidence || !gkAssetId) return;
     setEvidenceAppendState(role);
     try {
-      // Reuses the SAME addPhotoToComic pipeline the ordinary photo strip
-      // uses (local persist + catalogue sync) — this call additionally
-      // supplies {gkAssetId, captureView}, which is what makes it ALSO
-      // attempt a durable kernel-media append with this exact role and
-      // these exact fresh bytes. Local/catalogue success happens either
-      // way; kernel-evidence success is verified afterward by reloading
-      // the real graph below, never assumed from this call alone.
-      await onAddPhoto(item, file, { gkAssetId, captureView: role });
+      // GK-300 -- GOVERNED EVIDENCE CAPTURE, decoupled from identity resolution:
+      // this appends the photo to the durable kernel media under this exact
+      // declared role. It makes NO /api/grade call and changes no identity,
+      // grade, price or catalogue photo. A transient failure queues the exact
+      // bytes locally for retry; a definitive refusal (e.g. capacity) throws
+      // and is shown below. Kernel-evidence success is verified afterward by
+      // reloading the real graph, never assumed from this call alone.
+      await onAddEvidence(item, file, { gkAssetId, captureView: role });
       await load();
       setEvidenceAppendState("idle");
     } catch (err) {
@@ -653,7 +653,7 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
                         <button
                           key={source}
                           onClick={() => requestEvidencePhoto(role, source)}
-                          disabled={evidenceAppendState !== "idle" || !onAddPhoto}
+                          disabled={evidenceAppendState !== "idle" || !onAddEvidence}
                           style={{
                             background: "transparent", border: "1px solid rgba(212,175,55,0.3)", borderRadius: 4,
                             color: "#d4af37", fontSize: 11, padding: "3px 8px",

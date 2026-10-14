@@ -75,6 +75,7 @@ export {
   ConflictError,
   IdempotentReplayError,
   IdempotencyConflictError,
+  MediaCapacityExceededError,
   ValidationFailedError,
   AuthorizationFailedError,
   PhysicalCopyDecisionRequiredError,

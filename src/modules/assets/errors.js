@@ -44,6 +44,17 @@ export class ValidationFailedError extends AssetServiceError {
   }
 }
 
+// GK-300 — per-asset durable media capacity (MAX_MEDIA_PER_ASSET, repository.js)
+// reached. A state conflict, not a malformed request: the same append would
+// succeed on an asset with room. Mapped to HTTP 409 by api/asset-media-append.js.
+export class MediaCapacityExceededError extends AssetServiceError {
+  constructor(message, { limit, current } = {}) {
+    super('MEDIA_CAPACITY_EXCEEDED', message);
+    this.limit = limit;
+    this.current = current;
+  }
+}
+
 export class AuthorizationFailedError extends AssetServiceError {
   constructor(message) {
     super('AUTHORIZATION_FAILED', message);

@@ -31,9 +31,12 @@ export const CAPTURE_VIEWS = ["FRONT", "BACK", "SPINE", "PAGES", "DETAIL"];
 
 // dataUrl MUST be this device's own real local data: URL — never a
 // remoteImages proxy path, never a marketplace/reference URL.
-export async function appendPhysicalMediaEvidence({ gkAssetId, dataUrl, captureView, idempotencyKey }) {
-  if (!gkAssetId || !captureView || !idempotencyKey) return null;
-  if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return null;
+// GK-300 -- same request, but reports WHY it failed so a caller can tell a definitive
+// refusal (e.g. 409 MEDIA_CAPACITY_EXCEEDED) from a transient one. status is null when
+// there is no session / no network / the request never reached the server.
+export async function appendPhysicalMediaEvidenceDetailed({ gkAssetId, dataUrl, captureView, idempotencyKey }) {
+  if (!gkAssetId || !captureView || !idempotencyKey) return { ok: false, status: null, body: null };
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return { ok: false, status: null, body: null };
   try {
     const res = await authFetch("/api/asset-media-append", {
       method: "POST",
@@ -46,11 +49,17 @@ export async function appendPhysicalMediaEvidence({ gkAssetId, dataUrl, captureV
         idempotencyKey,
       }),
     });
-    if (!res || !res.ok) return null;
-    return await res.json().catch(() => null);
+    if (!res) return { ok: false, status: null, body: null };
+    const body = await res.json().catch(() => null);
+    return { ok: Boolean(res.ok), status: res.status, body };
   } catch {
-    return null;
+    return { ok: false, status: null, body: null };
   }
+}
+
+export async function appendPhysicalMediaEvidence(args) {
+  const r = await appendPhysicalMediaEvidenceDetailed(args);
+  return r.ok ? r.body : null;
 }
 
 function pendingKey(itemId, captureView) {

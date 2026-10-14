@@ -43,7 +43,7 @@
 // only; every writer below passes it through as `occurredAt ?? null` —
 // never substitutes "now" or infers it from recorded_at.
 
-import { NotFoundError } from './errors.js';
+import { NotFoundError, MediaCapacityExceededError } from './errors.js';
 
 const uuidv7 = async (client) => (await client.query('SELECT uuidv7() as id')).rows[0].id;
 
@@ -190,7 +190,52 @@ export async function getLiveIdentityAssignment(client, assetId) {
   return res.rows[0] || null;
 }
 
+// GK-300 — PER-ASSET DURABLE MEDIA CAPACITY.
+//
+// MAX_MEDIA_PER_ASSET bounds the number of durable media rows (EVERY row for the
+// asset counts, including legacy rows whose capture_view is NULL) so evidence
+// capture cannot grow storage without limit. It is deliberately NOT tied to the
+// legacy four-photo catalogue limit in the client; the kernel evidence path is
+// independent of catalogue photo count.
+export const MAX_MEDIA_PER_ASSET = 20;
+
+// Advisory-lock namespace for the per-asset media-capacity check. This is the
+// second argument (the "class" key) of hashtextextended(<gkAssetId>, <class>):
+// it only needs to be a stable integer that no other lock family shares, so a
+// media append for asset A never contends with an unrelated lock for asset A.
+// DISTINCT from 40284, the marketplace-attempt namespace used by
+// lockAssetAttempts() below (authorize/submit/reconcile serialisation) -- the
+// two operations are unrelated and must not block each other. 40291 is unused
+// elsewhere in this repository (grep'd before assignment); any new lock
+// family must pick its own named constant, never an inline literal.
+export const MEDIA_CAPACITY_LOCK_NAMESPACE = 40291;
+
+// Serialises media inserts for ONE asset inside the caller's transaction
+// (pg_advisory_xact_lock: released automatically at COMMIT/ROLLBACK). Must be
+// called inside BEGIN..COMMIT; outside a transaction the lock is released
+// immediately and serialises nothing.
+export async function lockAssetMediaCapacity(client, gkAssetId) {
+  await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1::text, ${MEDIA_CAPACITY_LOCK_NAMESPACE}))`, [gkAssetId]);
+}
+
+export async function countAssetMedia(client, gkAssetId) {
+  const r = await client.query(`SELECT count(*)::int AS n FROM data1_dev.media WHERE asset_id = $1`, [gkAssetId]);
+  return r.rows[0].n;
+}
+
 export async function insertMedia(client, { assetId, mediaType, contentHash, objectUri, contentType, recordedByPrincipalId, occurredAt, captureView }) {
+  // GK-300 -- the AUTHORITATIVE capacity check. Single choke point for every
+  // media insert (attachMedia, attachMediaMetadata, capture-time attach): take
+  // the per-asset lock, recount, refuse at the limit. Concurrent appends are
+  // serialised by the lock, so the row count can never exceed the limit.
+  await lockAssetMediaCapacity(client, assetId);
+  const current = await countAssetMedia(client, assetId);
+  if (current >= MAX_MEDIA_PER_ASSET) {
+    throw new MediaCapacityExceededError(
+      `asset ${assetId} already holds ${current} media rows (limit ${MAX_MEDIA_PER_ASSET})`,
+      { limit: MAX_MEDIA_PER_ASSET, current }
+    );
+  }
   const id = await uuidv7(client);
   await client.query(
     `INSERT INTO data1_dev.media (id, asset_id, media_type, content_hash, object_uri, content_type, recorded_by_principal_id, occurred_at, capture_view)

@@ -40,7 +40,7 @@
 // second copy of any of that logic lives here.
 
 import { verifyToken, InvalidTokenError } from '../src/modules/auth/index.js';
-import { attachMedia, NotFoundError, AuthorizationFailedError, ValidationFailedError, IdempotencyConflictError } from '../src/modules/assets/index.js';
+import { attachMedia, NotFoundError, AuthorizationFailedError, ValidationFailedError, IdempotencyConflictError, MediaCapacityExceededError } from '../src/modules/assets/index.js';
 import { checkRateLimit } from './rate-limit.js';
 
 const CAPTURE_VIEWS = ['FRONT', 'BACK', 'SPINE', 'PAGES', 'DETAIL'];
@@ -141,6 +141,11 @@ export default async function handler(req, res) {
     }
     if (e instanceof ValidationFailedError) {
       return res.status(400).json({ error: e.message });
+    }
+    if (e instanceof MediaCapacityExceededError) {
+      // GK-300 -- a stable, non-retryable-until-state-changes refusal. The
+      // client must NOT queue this for automatic retry.
+      return res.status(409).json({ error: 'MEDIA_CAPACITY_EXCEEDED', limit: e.limit, current: e.current });
     }
     if (e instanceof IdempotencyConflictError) {
       return res.status(409).json({ error: e.message });

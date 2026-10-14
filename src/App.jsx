@@ -49,7 +49,8 @@ import { autoClaimProvableLegacy } from "./lib/legacyLocalClaim.js";
 import { fetchServerCollection, deleteServerCollectionItem, pushCollectionItem } from "./lib/collectionSync.js";
 import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
 import { registerPendingPersist, awaitPendingPersist } from "./lib/pendingPersist.js";
-import { appendPhysicalMediaEvidence, getOrCreateEvidenceIdempotencyKey, retireEvidenceIdempotencyKey, retryPendingPhysicalMediaAppends } from "./lib/physicalMediaAppend.js";
+import { appendPhysicalMediaEvidence, appendPhysicalMediaEvidenceDetailed, getOrCreateEvidenceIdempotencyKey, retireEvidenceIdempotencyKey, retryPendingPhysicalMediaAppends } from "./lib/physicalMediaAppend.js";
+import { captureEvidencePhoto } from "./lib/evidenceCapture.js";
 import { selectCurrentOperatorAction } from "./lib/operatorActionAlignment.js";
 import { computeFeeAmount, computeNetProfit, computeMaxBuy, evaluateAgainstMaxBuy } from "./lib/maxBuyCalculator.js";
 import { pushBuyerDecision, pushBuyerAcquisition } from "./lib/buyerDecisionSync.js";
@@ -4454,6 +4455,7 @@ export function CollectionDetail({
   onClearOperatorGrade,
   onAbortEnrich,
   onAddPhoto,
+  onAddEvidence,
   onSameCopyRetired,
   onUpdateField,
   onGenericChange,
@@ -4948,7 +4950,7 @@ export function CollectionDetail({
         )}
       </div>
 
-      <GrailKeyOperatorPanel collectionItemId={item.id} item={item} photos={photos} onAddPhoto={onAddPhoto} onSameCopyRetired={onSameCopyRetired} />
+      <GrailKeyOperatorPanel collectionItemId={item.id} item={item} photos={photos} onAddEvidence={onAddEvidence} onSameCopyRetired={onSameCopyRetired} />
 
       {/* GK-273 — Research the Market: operator-run escalation, shown only when the structured market result is insufficient. Read-only beside price authority. */}
       <ResearchMarketPanel item={item} />
@@ -15011,6 +15013,32 @@ export default function App() {
     return finalUpdated;
   }, []);
 
+  // GK-300 -- GOVERNED EVIDENCE CAPTURE (operator panel). Separate from addPhotoToComic
+  // below: no /api/grade, no spend units, no identity/grade/price change, no catalogue
+  // image change, independent of the four-photo catalogue limit. The only local state
+  // touched is the retry queue (_pendingEvidenceAppends), local-only scratch state.
+  // Evidence capture is not identity resolution.
+  const addEvidencePhoto = useCallback(async (item, file, { gkAssetId, captureView } = {}) => {
+    const out = await captureEvidencePhoto({
+      file, itemId: item.id, gkAssetId, captureView, pendingAppends: item._pendingEvidenceAppends,
+      deps: {
+        fileToBase64,
+        makeThumbnail,
+        appendDetailed: appendPhysicalMediaEvidenceDetailed,
+        getKey: getOrCreateEvidenceIdempotencyKey,
+        retireKey: retireEvidenceIdempotencyKey,
+      },
+    });
+    const before = JSON.stringify(item._pendingEvidenceAppends || []);
+    if (JSON.stringify(out.pendingAppends) !== before) {
+      const apply = (x) => ({ ...x, _pendingEvidenceAppends: out.pendingAppends });
+      await putComic(apply(item));
+      setCatalogue((prev) => prev.map((x) => (x.id === item.id ? apply(x) : x)));
+      setSelectedItem((cur) => (cur && cur.id === item.id ? apply(cur) : cur));
+    }
+    return out;
+  }, []);
+
   // Append a new photo to an existing comic and re-run /api/grade with
   // ALL photos so the identification benefits from multi-angle coverage.
   // Updates the stored entry with fresh grade fields + new images array.
@@ -16415,6 +16443,7 @@ export default function App() {
               }
             }}
             onAddPhoto={addPhotoToComic}
+            onAddEvidence={addEvidencePhoto}
             onSameCopyRetired={handleSameCopyRetired}
             onUpdateField={updateComicField}
             currentIndex={catalogue.indexOf(selectedItem)}

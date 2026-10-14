@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto';
 import * as repo from './repository.js';
 import { acquireConnection } from './db.js';
 import { checkIdempotencyReplay, claimIdempotencyKey, computeRequestFingerprint } from './idempotency.js';
-import { AssetServiceError, NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError, IdempotencyConflictError, PhysicalCopyDecisionRequiredError, PhysicalCopyCandidateCheckUnavailableError, ListingAttemptBlockedError } from './errors.js';
+import { AssetServiceError, NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError, IdempotencyConflictError, PhysicalCopyDecisionRequiredError, PhysicalCopyCandidateCheckUnavailableError, ListingAttemptBlockedError, MediaCapacityExceededError } from './errors.js';
 import { OPERATOR_AUTHORITY_TYPE, RECONCILIATION_POLICY_VERSION, AMBIGUOUS_REVIEW_WINDOW_HOURS, assessListingAttemptGuard, reduceAttemptState, buildApprovalEvidence, evidenceScalars, buildGoverningGradeSnapshot, attemptCorrelation, evaluateOperatorReconciliation, reviewStatus, verifyAuthoritySnapshot, sameCents, toCents } from '../../lib/operatorAuthority.js';
 import { decisionGovernance } from '../../lib/decisionTrust.js';
 import { isPlausiblePhysicalCopyCandidate } from '../../lib/duplicateCopyDetection.js';
@@ -520,6 +520,22 @@ export async function attachMedia({ principalId, gkAssetId, bytes, contentType, 
     await assertPrincipalActive(preflight, principalId);
     await assertAssetExists(preflight, gkAssetId);
     await assertPrincipalOwnsAsset(preflight, principalId, gkAssetId);
+    // GK-300 -- capacity pre-check, strictly BEFORE the storage PUT so a
+    // rejected append never creates a Blob object in the normal case. This is
+    // an optimisation only; the AUTHORITATIVE, race-free check is the locked
+    // recount inside repo.insertMedia. A genuine idempotent REPLAY of an
+    // already-recorded append must still succeed at capacity, so a full asset
+    // is refused here only when this key has no recorded result.
+    const currentMedia = await repo.countAssetMedia(preflight, gkAssetId);
+    if (currentMedia >= repo.MAX_MEDIA_PER_ASSET) {
+      const replayExists = await checkIdempotencyReplay(preflight, { operation: 'attachMedia', idempotencyKey, requestFingerprint });
+      if (!replayExists) {
+        throw new MediaCapacityExceededError(
+          `asset ${gkAssetId} already holds ${currentMedia} media rows (limit ${repo.MAX_MEDIA_PER_ASSET})`,
+          { limit: repo.MAX_MEDIA_PER_ASSET, current: currentMedia }
+        );
+      }
+    }
   } finally {
     preflight.release();
   }
