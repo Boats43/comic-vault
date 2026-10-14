@@ -34,7 +34,8 @@ import { runGradeAttempt, postGradeWithAttempt, KINDS as GRADE_ATTEMPT_KINDS, ma
 // Rapid double submission / duplicate change events for the SAME file: the second is ignored while the first runs.
 const gradeBlobFlights = new Set();
 import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction, detectIdentityConflict } from "./lib/dataQualityGuard.js";
-import { resolveGoverningGrade, resolveGoverningGradingFormat, validateOperatorGrade, pickGradingAuthorityFields } from "./lib/gradeAuthority.js";
+import { resolvePhotoRegradeIdentity } from "./lib/photoIdentityLock.js";
+import { resolveGoverningGrade,resolveGoverningGradingFormat, validateOperatorGrade, pickGradingAuthorityFields } from "./lib/gradeAuthority.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
@@ -4532,6 +4533,7 @@ export function CollectionDetail({
   const [packetEditDesc, setPacketEditDesc] = useState("");
   const [packetEditPrice, setPacketEditPrice] = useState("");
   const addPhotoRef = useRef(null);
+  const addLibraryRef = useRef(null); // Choose Existing Photo: file picker, no `capture` attribute
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
   const touchStartT = useRef(null);
@@ -4828,9 +4830,16 @@ export function CollectionDetail({
     addPhotoRef.current?.click();
   };
 
+  // Choose Existing Photo — same onAddPhoto pipeline as Take Photo.
+  const handleAddLibraryClick = () => {
+    if (!canAddMore || addingPhoto) return;
+    addLibraryRef.current?.click();
+  };
+
   const handleAddPhotoChange = async (e) => {
     const file = e.target.files?.[0];
     if (addPhotoRef.current) addPhotoRef.current.value = "";
+    if (addLibraryRef.current) addLibraryRef.current.value = "";
     if (!file || !onAddPhoto) return;
     setAddingPhoto(true);
     setAddPhotoError(null);
@@ -4976,15 +4985,23 @@ export function CollectionDetail({
           const PHOTO_LABELS = ['Front', 'Back', 'Spine', 'Pages'];
           const missing = PHOTO_LABELS.slice(Math.min(photos.length, 4));
           if (missing.length === 0) return null;
+          const choiceBtn = {
+            border: "none",
+            background: "transparent",
+            color: "#d4af37",
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: addingPhoto ? "wait" : "pointer",
+            padding: "6px 2px",
+            width: "100%",
+          };
           return missing.map((label) => (
-            <button
+            <div
               key={label}
-              onClick={handleAddPhotoClick}
-              disabled={addingPhoto}
               style={{
                 height: 120,
-                minWidth: 80,
-                width: 80,
+                minWidth: 100,
+                width: 100,
                 flexShrink: 0,
                 border: "2px dashed rgba(212,175,55,0.5)",
                 borderRadius: 8,
@@ -4992,12 +5009,11 @@ export function CollectionDetail({
                 color: "#d4af37",
                 fontSize: 11,
                 fontWeight: 600,
-                cursor: addingPhoto ? "wait" : "pointer",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 4,
+                gap: 2,
                 padding: 6,
               }}
             >
@@ -5005,11 +5021,12 @@ export function CollectionDetail({
                 <div style={{ width: 20, height: 20, border: "2px solid rgba(212,175,55,0.3)", borderTopColor: "#d4af37", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
               ) : (
                 <>
-                  <span style={{ fontSize: 20, lineHeight: 1, opacity: 0.6 }}>{"\uD83D\uDCF7"}</span>
                   <span>{label}</span>
+                  <button type="button" onClick={handleAddPhotoClick} disabled={addingPhoto} style={choiceBtn}>{"\uD83D\uDCF7"} Take Photo</button>
+                  <button type="button" onClick={handleAddLibraryClick} disabled={addingPhoto} style={choiceBtn}>{"\uD83D\uDDBC"} Choose Existing</button>
                 </>
               )}
-            </button>
+            </div>
           ));
         })()}
         <input
@@ -5017,6 +5034,13 @@ export function CollectionDetail({
           type="file"
           accept="image/*"
           capture="environment"
+          onChange={handleAddPhotoChange}
+          hidden
+        />
+        <input
+          ref={addLibraryRef}
+          type="file"
+          accept="image/*"
           onChange={handleAddPhotoChange}
           hidden
         />
@@ -15049,13 +15073,15 @@ export default function App() {
     const data = res.data || {};
     if (!res.ok) throw new Error(spendRefusalText(data, "Failed to re-analyze"));
 
-    const photoIssue = data.issue || data.title?.match(/#(\d+)/)?.[1] || item.issue || null;
+    // GK-300 — operator-confirmed identity fields are pinned to the stored
+    // value; a photo re-grade can never overwrite them.
+    const photoIdentity = resolvePhotoRegradeIdentity(item, data);
     const updated = {
       ...item,
-      title: data.title || item.title,
-      issue: photoIssue,
-      publisher: data.publisher || item.publisher,
-      year: data.year || item.year,
+      title: photoIdentity.title,
+      issue: photoIdentity.issue,
+      publisher: photoIdentity.publisher,
+      year: photoIdentity.year,
       grade: data.grade || item.grade,
       _gradeProof: typeof data.gradeProof === "string" ? data.gradeProof : item._gradeProof, // GK-280A
       isGraded: data.isGraded === true,

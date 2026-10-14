@@ -158,7 +158,8 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
   // below (load() re-fetches it), never claimed independently.
   const [evidenceAppendState, setEvidenceAppendState] = useState("idle");
   const [pendingRole, setPendingRole] = useState(null);
-  const evidenceFileInputRef = useRef(null);
+  const evidenceFileInputRef = useRef(null); // Take Photo (camera, `capture`)
+  const evidenceLibraryInputRef = useRef(null); // Choose Existing Photo (picker, no `capture`)
 
   const load = useCallback(async () => {
     if (!collectionItemId || !isAuthenticated()) {
@@ -492,15 +493,19 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
 
   // GK-227 — explicit role must be chosen BEFORE the file picker opens;
   // never inferred from filename or which slot this happens to be.
-  function requestEvidencePhoto(role) {
+  // `source`: "camera" (Take Photo) or "library" (Choose Existing Photo).
+  // Both feed the identical handler, so role, bytes and idempotency are the same.
+  function requestEvidencePhoto(role, source = "camera") {
     if (evidenceAppendState !== "idle" || !onAddPhoto) return;
     setPendingRole(role);
-    evidenceFileInputRef.current?.click();
+    const ref = source === "library" ? evidenceLibraryInputRef : evidenceFileInputRef;
+    ref.current?.click();
   }
 
   async function handleEvidenceFileChange(e) {
     const file = e.target.files?.[0];
     if (evidenceFileInputRef.current) evidenceFileInputRef.current.value = "";
+    if (evidenceLibraryInputRef.current) evidenceLibraryInputRef.current.value = "";
     const role = pendingRole;
     setPendingRole(null);
     if (!file || !role || !onAddPhoto || !gkAssetId) return;
@@ -643,18 +648,27 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
                     {present ? "✓" : "—"} {role}{role === "DETAIL" ? " (optional)" : ""}
                   </span>
                   {!present && (
-                    <button
-                      onClick={() => requestEvidencePhoto(role)}
-                      disabled={evidenceAppendState !== "idle" || !onAddPhoto}
-                      style={{
-                        background: "transparent", border: "1px solid rgba(212,175,55,0.3)", borderRadius: 4,
-                        color: "#d4af37", fontSize: 11, padding: "3px 8px",
-                        cursor: evidenceAppendState !== "idle" ? "not-allowed" : "pointer",
-                        opacity: evidenceAppendState !== "idle" && !uploading ? 0.5 : 1,
-                      }}
-                    >
-                      {uploading ? "Adding…" : isPending ? "Retry" : "+ Add"}
-                    </button>
+                    <span style={{ display: "inline-flex", gap: 4 }}>
+                      {["camera", "library"].map((source) => (
+                        <button
+                          key={source}
+                          onClick={() => requestEvidencePhoto(role, source)}
+                          disabled={evidenceAppendState !== "idle" || !onAddPhoto}
+                          style={{
+                            background: "transparent", border: "1px solid rgba(212,175,55,0.3)", borderRadius: 4,
+                            color: "#d4af37", fontSize: 11, padding: "3px 8px",
+                            cursor: evidenceAppendState !== "idle" ? "not-allowed" : "pointer",
+                            opacity: evidenceAppendState !== "idle" && !uploading ? 0.5 : 1,
+                          }}
+                        >
+                          {uploading && source === "camera"
+                            ? "Adding…"
+                            : source === "camera"
+                              ? (isPending ? "Retry · Take Photo" : "Take Photo")
+                              : "Choose Existing Photo"}
+                        </button>
+                      ))}
+                    </span>
                   )}
                   {!present && isPending && !uploading && (
                     <span style={{ color: "#c9a227", fontSize: 10, marginLeft: 6 }}>local photo saved — kernel evidence sync pending, will retry automatically</span>
@@ -669,6 +683,13 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
             type="file"
             accept="image/*"
             capture="environment"
+            style={{ display: "none" }}
+            onChange={handleEvidenceFileChange}
+          />
+          <input
+            ref={evidenceLibraryInputRef}
+            type="file"
+            accept="image/*"
             style={{ display: "none" }}
             onChange={handleEvidenceFileChange}
           />
