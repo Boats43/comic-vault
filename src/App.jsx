@@ -35,6 +35,7 @@ import { runGradeAttempt, postGradeWithAttempt, KINDS as GRADE_ATTEMPT_KINDS, ma
 const gradeBlobFlights = new Set();
 import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction, detectIdentityConflict } from "./lib/dataQualityGuard.js";
 import { resolvePhotoRegradeIdentity } from "./lib/photoIdentityLock.js";
+import { effectiveRoles, missingRoles, addPhotoWithRole, declaredViews, PHOTO_ROLE_LABELS } from "./lib/photoSlots.js";
 import { resolveGoverningGrade,resolveGoverningGradingFormat, validateOperatorGrade, pickGradingAuthorityFields } from "./lib/gradeAuthority.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
@@ -4534,6 +4535,7 @@ export function CollectionDetail({
   const [packetEditPrice, setPacketEditPrice] = useState("");
   const addPhotoRef = useRef(null);
   const addLibraryRef = useRef(null); // Choose Existing Photo: file picker, no `capture` attribute
+  const pendingPhotoRoleRef = useRef(null); // GK-300 — the role the operator tapped, carried to the file-input onChange
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
   const touchStartT = useRef(null);
@@ -4608,7 +4610,6 @@ export function CollectionDetail({
   }, [swipeHint]);
 
   const photos = getComicPhotos(item);
-  const canAddMore = photos.length < 4;
   const isListed = item.status === "listed" && item.ebayUrl;
 
   // Pricing: single source of truth via getDisplayPrice.
@@ -4825,14 +4826,16 @@ export function CollectionDetail({
     }
   };
 
-  const handleAddPhotoClick = () => {
-    if (!canAddMore || addingPhoto) return;
+  const handleAddPhotoClick = (role) => {
+    if (addingPhoto) return;
+    pendingPhotoRoleRef.current = role;
     addPhotoRef.current?.click();
   };
 
   // Choose Existing Photo — same onAddPhoto pipeline as Take Photo.
-  const handleAddLibraryClick = () => {
-    if (!canAddMore || addingPhoto) return;
+  const handleAddLibraryClick = (role) => {
+    if (addingPhoto) return;
+    pendingPhotoRoleRef.current = role;
     addLibraryRef.current?.click();
   };
 
@@ -4840,11 +4843,13 @@ export function CollectionDetail({
     const file = e.target.files?.[0];
     if (addPhotoRef.current) addPhotoRef.current.value = "";
     if (addLibraryRef.current) addLibraryRef.current.value = "";
-    if (!file || !onAddPhoto) return;
+    const slotRole = pendingPhotoRoleRef.current;
+    pendingPhotoRoleRef.current = null;
+    if (!file || !onAddPhoto || !slotRole) return; // never add a photo without an explicitly selected role
     setAddingPhoto(true);
     setAddPhotoError(null);
     try {
-      await onAddPhoto(item, file);
+      await onAddPhoto(item, file, { slotRole });
     } catch (err) {
       setAddPhotoError(err.message || "Failed to add photo");
     } finally {
@@ -4967,7 +4972,8 @@ export function CollectionDetail({
           <img
             key={i}
             src={src}
-            alt=""
+            alt={PHOTO_ROLE_LABELS[effectiveRoles(photos.length, item.photoRoles)[i]] || ""}
+            title={PHOTO_ROLE_LABELS[effectiveRoles(photos.length, item.photoRoles)[i]] || undefined}
             loading="lazy"
             onClick={() => setExpandedPhoto(src)}
             style={{
@@ -4982,8 +4988,8 @@ export function CollectionDetail({
           />
         ))}
         {(() => {
-          const PHOTO_LABELS = ['Front', 'Back', 'Spine', 'Pages'];
-          const missing = PHOTO_LABELS.slice(Math.min(photos.length, 4));
+          // GK-300 — slots are keyed by ROLE: a slot is offered iff no photo holds that role.
+          const missing = missingRoles(photos.length, item.photoRoles).map((r) => PHOTO_ROLE_LABELS[r]);
           if (missing.length === 0) return null;
           const choiceBtn = {
             border: "none",
@@ -5022,8 +5028,8 @@ export function CollectionDetail({
               ) : (
                 <>
                   <span>{label}</span>
-                  <button type="button" onClick={handleAddPhotoClick} disabled={addingPhoto} style={choiceBtn}>{"\uD83D\uDCF7"} Take Photo</button>
-                  <button type="button" onClick={handleAddLibraryClick} disabled={addingPhoto} style={choiceBtn}>{"\uD83D\uDDBC"} Choose Existing</button>
+                  <button type="button" onClick={() => handleAddPhotoClick(label.toUpperCase())} disabled={addingPhoto} style={choiceBtn}>{"\uD83D\uDCF7"} Take Photo</button>
+                  <button type="button" onClick={() => handleAddLibraryClick(label.toUpperCase())} disabled={addingPhoto} style={choiceBtn}>{"\uD83D\uDDBC"} Choose Existing</button>
                 </>
               )}
             </div>
@@ -15023,9 +15029,16 @@ export default function App() {
     // OTHER caller of this function (the ordinary catalogue photo strip)
     // omits it — that path is completely unaffected, byte-for-byte, by
     // this dispatch.
-    const { gkAssetId: evidenceGkAssetId, captureView: evidenceCaptureView } = evidenceOptions || {};
+    // GK-300 — `slotRole` is the role the operator explicitly selected on the
+    // Collection photo strip (FRONT/BACK/SPINE/PAGES). The photo is stored
+    // under THAT role (item.photoRoles, parallel to images), never by upload
+    // order. The kernel evidence path's captureView doubles as the role.
+    const { gkAssetId: evidenceGkAssetId, captureView: evidenceCaptureView, slotRole } = evidenceOptions || {};
+    const photoRole = evidenceCaptureView || slotRole || null;
     const existingPhotos = getComicPhotos(item);
-    if (existingPhotos.length >= 4) {
+    const roleAlreadyHeld = photoRole && photoRole !== "DETAIL"
+      && effectiveRoles(existingPhotos.length, item.photoRoles).includes(photoRole);
+    if (existingPhotos.length >= 4 && !roleAlreadyHeld) {
       throw new Error("Maximum 4 photos reached");
     }
     // GrailKey Directive V, Task 2 (GK-88, ownership perimeter) — mints
@@ -15036,7 +15049,17 @@ export default function App() {
 
     const rawB64 = await fileToBase64(file);
     const newThumb = await makeThumbnail(rawB64, 1200, 0.85);
-    const nextPhotos = [...existingPhotos, newThumb];
+    let nextPhotos;
+    let nextPhotoRoles;
+    if (photoRole) {
+      const placed = addPhotoWithRole(existingPhotos, item.photoRoles, newThumb, photoRole);
+      nextPhotos = placed.images;
+      nextPhotoRoles = placed.photoRoles;
+    } else {
+      // No explicit role supplied (no UI path does this today): legacy append, role undeclared.
+      nextPhotos = [...existingPhotos, newThumb];
+      nextPhotoRoles = [...existingPhotos.map((_, i) => (Array.isArray(item.photoRoles) ? item.photoRoles[i] ?? null : null)), null];
+    }
 
     // GRADE AUTHORITY: the server no longer honours any client "grade lock"
     // (the old gradeLocked/existingGrade short-circuit was removed — model
@@ -15056,8 +15079,9 @@ export default function App() {
         // GK-271 — declared capture views, parallel to `images`. Only the
         // operator-supplied role for the photo just added is known; every
         // other entry is null (never inferred from order/count).
-        ...(evidenceCaptureView
-          ? { imageViews: nextPhotos.map((_, i) => (i === nextPhotos.length - 1 ? evidenceCaptureView : null)) }
+        // Only operator-DECLARED roles are sent (never positional guesses).
+        ...(declaredViews(nextPhotoRoles, nextPhotos.length)
+          ? { imageViews: declaredViews(nextPhotoRoles, nextPhotos.length) }
           : {}),
         existingGrade: {
           grade: item.grade,
@@ -15106,6 +15130,7 @@ export default function App() {
           ? (item.editionConfirmed || false)
           : false,
       images: nextPhotos,
+      photoRoles: nextPhotoRoles, // GK-300 — explicit role per photo (parallel to images)
       // Drop the legacy single `image` field if it's still hanging around
       // from an older record — `images` is the source of truth now.
       image: undefined,
@@ -15159,7 +15184,7 @@ export default function App() {
       await putComic(updated);
     } catch {
       // Quota fallback: drop the oldest photo and retry.
-      const trimmed = { ...updated, images: nextPhotos.slice(-3) };
+      const trimmed = { ...updated, images: nextPhotos.slice(-3), photoRoles: nextPhotoRoles.slice(-3) };
       await putComic(trimmed);
       setCatalogue((prev) =>
         prev.map((x) => (x.id === item.id ? trimmed : x))

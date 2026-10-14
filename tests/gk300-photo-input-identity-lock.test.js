@@ -67,7 +67,7 @@ ok(panelInputs.every((t) => /onChange=\{handleEvidenceFileChange\}/.test(t)), 'o
 ok(/Take Photo/.test(panel) && /Choose Existing Photo/.test(panel), 'operator panel: both choices labeled');
 ok(/requestEvidencePhoto\(role, source\)/.test(panel) && /setPendingRole\(role\)/.test(panel), 'role is chosen explicitly before either picker opens');
 
-const strip = app.slice(app.indexOf("const PHOTO_LABELS = ['Front'"), app.indexOf('{/* Fullscreen photo overlay */}'));
+const strip = app.slice(app.indexOf('GK-300 — slots are keyed by ROLE'), app.indexOf('{/* Fullscreen photo overlay */}'));
 const stripInputs = inputsOf(strip);
 ok(stripInputs.length === 2 && stripInputs.filter((t) => /capture=/.test(t)).length === 1, 'catalogue strip: one camera + one picker input');
 ok(stripInputs.every((t) => /onChange=\{handleAddPhotoChange\}/.test(t)), 'catalogue strip: both inputs use onAddPhoto handler');
