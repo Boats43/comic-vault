@@ -6242,7 +6242,22 @@ export default async function handler(req, res) {
     let confirmedVariant = manualVariantAccepted
       ? writeConfirmed('confirmedVariant', null, manualCorrectionRequest.workingIdentity.variant, 'unknown', 'user', 'grailkey-directive-t-task4-manual-variant')
       : writeConfirmed('confirmedVariant', null, identityIsProvisionalOverride ? null : safeVariantForConfirmed, 'unknown', 'vision', 'ship-20a.6.18-init');
-    let variantIdentitySource = 'vision';
+    // P0 (2026-10-16, Old Man Logan #25) — OPERATOR-CONFIRMED VARIANT AUTHORITY. The variant is the operator's when either a
+    // validated manual correction in THIS request accepted it, or the owned row's DURABLE identityAuthority.variant is
+    // OPERATOR_CONFIRMED (read server-side, never a client claim). Its source was hard-coded 'vision' here, so the
+    // Directive-AM F-3 reconciler treated the operator's own value as a bare Vision claim and CLEARED it (authority NONE),
+    // dropping it from the card and from sold-evidence variant filtering (userVariant: null). An operator-confirmed value
+    // is not subject to a check designed to catch Vision's uncorroborated claims.
+    const operatorVariantLock = (manualVariantAccepted && manualCorrectionRequest.workingIdentity.variant)
+      ? { value: manualCorrectionRequest.workingIdentity.variant, source: 'manual-correction' }
+      : ((durableGradingAttributesGK213C?.identityAuthority?.variant === 'OPERATOR_CONFIRMED'
+          && typeof durableGradingAttributesGK213C.variant === 'string' && durableGradingAttributesGK213C.variant.trim())
+          ? { value: durableGradingAttributesGK213C.variant, source: 'durable-operator-confirmed' }
+          : null);
+    if (operatorVariantLock && confirmedVariant !== operatorVariantLock.value) {
+      confirmedVariant = writeConfirmed('confirmedVariant', confirmedVariant, operatorVariantLock.value, 'unknown', 'operator-confirmed', 'p0-operator-variant-authority');
+    }
+    let variantIdentitySource = operatorVariantLock ? 'operator-confirmed' : 'vision';
     let variantConsensus = null;
     let variantOverriddenVision = false;
     // Slice C (2026-07-22) — pool-corroborated "the market has signed
@@ -6549,6 +6564,15 @@ export default async function handler(req, res) {
     // visual extraction — GK-122's "Signed"/registry-gap class) now
     // clears "Dan Parent NYCC Foil variant" too, not merely Kirkham's
     // case — same rule, applied uniformly, not carved out per-book.
+    // P0 (2026-10-16) — pool/Vision writers above may have replaced the seed; an operator-confirmed variant is pinned back
+    // and is exempt from the reconciler below (it is not a Vision claim).
+    if (operatorVariantLock) {
+      if (confirmedVariant !== operatorVariantLock.value) {
+        confirmedVariant = writeConfirmed('confirmedVariant', confirmedVariant, operatorVariantLock.value, variantIdentitySource, 'operator-confirmed', 'p0-operator-variant-authority-pin');
+      }
+      variantIdentitySource = 'operator-confirmed';
+      out.operatorVariantAuthority = operatorVariantLock.source;
+    }
     if (variantIdentitySource === 'vision' && confirmedVariant) {
       const firstEligibleForVariant = selectFirstEligibleVisual(parsedVisualRows);
       // GrailKey Directive AU (GK-136), 4a-ii — the same family+issue-scoped
