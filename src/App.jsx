@@ -39,6 +39,7 @@ import { resolveGoverningGrade,resolveGoverningGradingFormat, validateOperatorGr
 import { governingTitleForMerge } from "./lib/operatorIdentityAuthority.js";
 import { reIdentifyControlState, reIdentifyDisclosure } from "./lib/reIdentifyControl.js";
 import { fetchServerPhotoAsDataUrl } from "./lib/serverPhotoForReidentify.js";
+import { selectFrontEvidenceMedia, fetchCertifiedListingPhoto } from "./lib/listingPhotoSelection.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
@@ -13830,8 +13831,8 @@ export default function App() {
     // getComicPhotos(item) is the SAME array this file already uses
     // everywhere else (photo strip, packet generation) — sending it here
     // too, not inventing a new source of truth.
-    const allPhotos = getComicPhotos(item);
-    const coverPhoto = allPhotos[0] || null;
+    let allPhotos = getComicPhotos(item);
+    let coverPhoto = allPhotos[0] || null;
     // Q41: acknowledged-override listings carry their audit payload to the
     // server so [Q41-override] appears in Vercel logs (client console does
     // not reach log capture).
@@ -13879,6 +13880,21 @@ export default function App() {
             operatorActionEventId: currentAction.id,
           };
           grailkeyBearerToken = getSession()?.token || null;
+          // OUTGOING PHOTO REPAIR (2026-10-16) — publish the asset's CERTIFIED durable FRONT evidence, not a catalogue
+          // display photo: the exact stored bytes come through the existing authenticated media pathway and are re-verified
+          // against the media row's hash before they leave the device (src/lib/listingPhotoSelection.js). The server photo
+          // guard is unchanged and re-checks. A FRONT that cannot be retrieved/verified fails the listing closed here. An
+          // asset with no FRONT row keeps the existing behavior (the server guard still decides) — never a silent substitute.
+          const front = selectFrontEvidenceMedia(graph);
+          if (front.ok) {
+            const got = await fetchCertifiedListingPhoto({
+              row: front.row,
+              fetchMedia: (mediaId) => authFetch(`/api/asset-media?mediaId=${encodeURIComponent(mediaId)}`),
+            });
+            if (!got.ok) throw new Error(got.message);
+            allPhotos = got.images;
+            coverPhoto = got.images[0];
+          }
         }
       }
       // A missing/non-ok graph response (not linked, 404, network error)
