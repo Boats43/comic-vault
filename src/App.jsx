@@ -36,6 +36,7 @@ const gradeBlobFlights = new Set();
 import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction, detectIdentityConflict } from "./lib/dataQualityGuard.js";
 import { resolvePhotoRegradeIdentity } from "./lib/photoIdentityLock.js";
 import { resolveGoverningGrade,resolveGoverningGradingFormat, validateOperatorGrade, pickGradingAuthorityFields } from "./lib/gradeAuthority.js";
+import { governingTitleForMerge } from "./lib/operatorIdentityAuthority.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
@@ -12020,7 +12021,7 @@ export default function App() {
                 originalTitle: enrich.originalTitle || cur.originalTitle || null,
                 originalYear: enrich.originalYear || cur.originalYear || null,
                 originalKeyIssue: enrich.originalKeyIssue || cur.originalKeyIssue || null,
-                title: enrich.title || cur.title,
+                title: governingTitleForMerge(cur, enrich.title), // P0 2026-10-16: an OPERATOR_CONFIRMED title is never replaced by enrichment
                 // GK-259 — governing-grade provenance-display fields, same
                 // presence-aware pattern and field set refreshMarketData
                 // already uses (App.jsx, ~line 14007) — never consulted for
@@ -13389,7 +13390,7 @@ export default function App() {
                 originalTitle: enrich.originalTitle || cur.originalTitle || null,
                 originalYear: enrich.originalYear || cur.originalYear || null,
                 originalKeyIssue: enrich.originalKeyIssue || cur.originalKeyIssue || null,
-                title: enrich.title || cur.title,
+                title: governingTitleForMerge(cur, enrich.title), // P0 2026-10-16: an OPERATOR_CONFIRMED title is never replaced by enrichment
                 // GK-259 — governing-grade provenance-display fields, same
                 // presence-aware pattern and field set refreshMarketData
                 // already uses (App.jsx, ~line 14007) — never consulted for
@@ -14281,7 +14282,7 @@ export default function App() {
       // Q87: stamp the revision this ID_REQUIRED verdict was computed at;
       // cleared when identity becomes confident.
       q87CheckedRevision: idGatedRM ? (item.identityRevision || 0) : null,
-      title: enrich.title || item.title,
+      title: governingTitleForMerge(item, enrich.title), // P0 2026-10-16: an OPERATOR_CONFIRMED title is never replaced by enrichment
       // GK-213B — provenance display fields only, never consulted for any
       // authority decision client-side (governing selection itself already
       // happened server-side, in api/enrich.js, before this response was sent).

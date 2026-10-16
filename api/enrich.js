@@ -182,6 +182,7 @@ import { randomUUID } from "node:crypto";
 import { buildPipelineAudit } from "../src/lib/pipelineAudit.js";
 import { resetTitleStripStats, logTitleStripSummary } from "../src/lib/titleStripStats.js";
 import { writeConfirmed } from "../src/lib/identityWriteLog.js";
+import { resolveOperatorTitleLock, anchorConflictsWithOperatorTitle } from "../src/lib/operatorIdentityAuthority.js";
 import { resolveCallCost } from "../src/lib/anthropicPricing.js";
 import { verifyGradeProof } from "../src/lib/gradeReceipt.js";
 import { observeGradeProvenance } from "../src/lib/gradeProvenanceObservability.js";
@@ -2507,7 +2508,7 @@ export default async function handler(req, res) {
     // raw one. Unaffected for every other path (barcode, fresh Scan-tab
     // manual entry with no manualAuthority, Vision/resolveIdentity) — this
     // only engages when manualCorrectionRequest is present AND valid.
-    const effectiveTitle = barcodeIdentity?.title || (manualCorrectionRequest?.valid ? manualCorrectionRequest.workingIdentity.title : title);
+    let effectiveTitle = barcodeIdentity?.title || (manualCorrectionRequest?.valid ? manualCorrectionRequest.workingIdentity.title : title);
     const effectiveIssue = barcodeIdentity?.issue || (manualCorrectionRequest?.valid ? manualCorrectionRequest.workingIdentity.issue : issue);
     const effectiveYear = barcodeIdentity?.year || (manualCorrectionRequest?.valid ? manualCorrectionRequest.workingIdentity.year : year);
     const effectivePublisher = barcodeIdentity?.publisher || (manualCorrectionRequest?.valid ? manualCorrectionRequest.workingIdentity.publisher : rawPublisher);
@@ -2798,6 +2799,18 @@ export default async function handler(req, res) {
       // deliberately left UNPINNED here — see the conflict check below.
     }
     // ─────────────────────────────────────────────────────────────────
+
+    // P0 (2026-10-16, Old Man Logan #25) — OPERATOR-CONFIRMED TITLE AUTHORITY. The governing title is either the
+    // operator's validated manual correction in THIS request, or the owned row's DURABLE OPERATOR_CONFIRMED title
+    // (read above from the verified owned row — never a client-supplied flag). External enrichment (PriceCharting
+    // anchors, q141-a) may price this identity; it may never rename it. A stale/polluted client `title` on a
+    // refresh (e.g. one that already absorbed a wrong enrichment title) is replaced by the durable one here, so
+    // every comps query below searches the operator's identity.
+    const operatorTitleLock = resolveOperatorTitleLock({ manualRequest: manualCorrectionRequest, durableAttributes: durableGradingAttributesGK213C });
+    if (operatorTitleLock.locked && operatorTitleLock.source === 'durable-operator-confirmed' && effectiveTitle !== operatorTitleLock.title) {
+      console.log(`[operator-title-authority] request title "${effectiveTitle}" replaced by durable OPERATOR_CONFIRMED title "${operatorTitleLock.title}"`);
+      effectiveTitle = operatorTitleLock.title;
+    }
 
     // GK-213C — durable owned grading-authority fallback. Closes a real
     // gap the GK-213 final closure audit found: reIdentifyBook and
@@ -5987,6 +6000,27 @@ export default async function handler(req, res) {
     // untouched — whatever the pre-existing resolution chain (title-family
     // consensus, vision, etc.) already produced stays authoritative,
     // unchanged from before this commit.
+    // P0 (2026-10-16) — an anchor that names a different product than the operator-confirmed identity is rejected
+    // outright (price evidence for the WRONG book is not evidence); it is never projected onto the title.
+    if (operatorTitleLock.locked && priceCharting?.productName) {
+      const anchorVerdict = anchorConflictsWithOperatorTitle({
+        anchorProductName: priceCharting.productName,
+        anchorCanonicalTitle: projectCanonicalTitleFromAnchor(priceCharting.productName),
+        operatorTitle: operatorTitleLock.title,
+        confirmedIssue: confirmedIssue ?? issueNum,
+      });
+      if (anchorVerdict.conflict) {
+        console.log(`[operator-title-authority] PriceCharting anchor "${priceCharting.productName}" REJECTED — ${anchorVerdict.reason}; operator title "${operatorTitleLock.title}" preserved`);
+        out.operatorIdentityAnchorRejected = { anchor: priceCharting.productName, reason: anchorVerdict.reason, titleAuthority: operatorTitleLock.source };
+        out.pcProductId = null;
+        out.pcProductName = null;
+        out.pcEbayEpid = null;
+        out.pcLastUpdated = null;
+        out.pcLoosePrice = null;
+        out.pcGradedPrice = null;
+        priceCharting = null;
+      }
+    }
     if (priceCharting?.productName) {
       const canonicalTitle = projectCanonicalTitleFromAnchor(priceCharting.productName);
       // Q141-A2 — a bracketed descriptor block ("[Nick Dragotta Virgin
@@ -6000,7 +6034,7 @@ export default async function handler(req, res) {
         out.editionDescriptorCandidate = anchorBracketDescriptor;
         console.log(`[q141-a2] anchor bracket descriptor captured: "${anchorBracketDescriptor}" (anchor="${priceCharting.productName}")`);
       }
-      if (canonicalTitle && canonicalTitle !== confirmedTitle) {
+      if (!operatorTitleLock.locked && canonicalTitle && canonicalTitle !== confirmedTitle) {
         // GrailKey Commit T (T1, 2026-08-03) — Marvel Tales #14 class. A
         // corroborated identity (title-family clustering cleared a real
         // consensus bar — see isCorroboratedIdentitySource's own doc
@@ -13733,6 +13767,12 @@ export default async function handler(req, res) {
     console.log(`[perf] phase=response-assembly ms=${(t.response_sent != null && t.final_response != null) ? t.response_sent - t.final_response : null} tag=serial-internal`);
     // Ship #24a-2: single-writer boundary — contract assembled here, nothing
     // may write price/decision fields after this call.
+    // P0 (2026-10-16) — last line of defense: the response never carries a title other than the operator's.
+    if (operatorTitleLock.locked && out.title !== operatorTitleLock.title) {
+      console.log(`[operator-title-authority] response title "${out.title}" restored to operator title "${operatorTitleLock.title}"`);
+      out.title = operatorTitleLock.title;
+    }
+    if (operatorTitleLock.locked) out.operatorTitleAuthority = operatorTitleLock.source;
     res.status(200).json(finalizeResponse(out));
   } catch (err) {
     // Ship 6 debug — log full error and stack trace to Vercel logs.
