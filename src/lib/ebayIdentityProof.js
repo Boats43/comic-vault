@@ -57,3 +57,44 @@ export async function resolveEbayIdentityFromUserToken(userAccessToken) {
 
   return { eiasToken };
 }
+
+// resolveEbayAccountDetailsFromUserToken — P0 OAUTH SELLER IDENTITY PROOF.
+// Same read-only GetUser call as above, but also returns the eBay
+// UserID and Site so an operator can see WHICH account a stored
+// connection will list as. The stable EIASToken is returned too, ONLY so
+// the caller can compare it with the stored provider_user_id — the
+// verify endpoint never echoes it. Throws (never returns partial data)
+// on any failure; the error message carries eBay's short message only,
+// never the token.
+export async function resolveEbayAccountDetailsFromUserToken(userAccessToken) {
+  if (!userAccessToken || typeof userAccessToken !== 'string') {
+    throw new Error('[ebayIdentityProof] a User OAuth access token is required.');
+  }
+
+  const res = await fetch(EBAY_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/xml',
+      'X-EBAY-API-COMPATIBILITY-LEVEL': COMPAT_LEVEL,
+      'X-EBAY-API-CALL-NAME': 'GetUser',
+      'X-EBAY-API-SITEID': SITE_ID,
+      'X-EBAY-API-IAF-TOKEN': userAccessToken,
+    },
+    body: `<?xml version="1.0" encoding="utf-8"?>
+<GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+</GetUserRequest>`,
+  });
+
+  const text = await res.text();
+  const ack = extractTag(text, 'Ack');
+  const eiasToken = extractTag(text, 'EIASToken');
+  const userId = extractTag(text, 'UserID');
+  const site = extractTag(text, 'Site');
+
+  if (!ack || /Failure/i.test(ack) || !eiasToken || !userId) {
+    const msg = extractTag(text, 'ShortMessage') || extractTag(text, 'LongMessage') || 'GetUser failed or identity fields absent';
+    throw new Error(`eBay account verification failed (HTTP ${res.status}): ${msg}`);
+  }
+
+  return { userId, eiasToken, site: site || null };
+}
