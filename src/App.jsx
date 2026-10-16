@@ -37,7 +37,8 @@ import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeCo
 import { resolvePhotoRegradeIdentity } from "./lib/photoIdentityLock.js";
 import { resolveGoverningGrade,resolveGoverningGradingFormat, validateOperatorGrade, pickGradingAuthorityFields } from "./lib/gradeAuthority.js";
 import { governingTitleForMerge } from "./lib/operatorIdentityAuthority.js";
-import { reIdentifyControlState } from "./lib/reIdentifyControl.js";
+import { reIdentifyControlState, reIdentifyDisclosure } from "./lib/reIdentifyControl.js";
+import { fetchServerPhotoAsDataUrl } from "./lib/serverPhotoForReidentify.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
@@ -4745,9 +4746,7 @@ export function CollectionDetail({
   const reIdentifyControl = reIdentifyControlState(item, { hasHandler: Boolean(onReIdentify) });
   const handleReIdentify = async () => {
     if (!onReIdentify) return;
-    const confirmed = window.confirm(
-      "Re-scanning will update title, variant, grade, and pricing from the stored image. Continue?"
-    );
+    const confirmed = window.confirm(reIdentifyDisclosure(reIdentifyControl.photoSource));
     if (!confirmed) return;
     setReIdentifying(true);
     setReIdentifyError(null);
@@ -8077,7 +8076,7 @@ export function CollectionDetail({
                   Re-scanning…
                 </>
               ) : (
-                "🔍 Re-identify Book"
+                reIdentifyControl.label
               )}
             </button>
             {!reIdentifyControl.enabled && reIdentifyControl.reason && (
@@ -14605,10 +14604,14 @@ export default function App() {
   // grade) not just pricing. Used when stored image exists but identity is
   // wrong (e.g. Crow Lethe vs Crow Dead Time).
   const reIdentifyBook = useCallback(async (item) => {
-    if (!item.images?.[0]) {
-      throw new Error("No stored image available for re-identification");
+    // Photo source: raw bytes on this device, else the saved server copy through the EXISTING protected image route
+    // (src/lib/serverPhotoForReidentify.js). The fetched bytes feed the grading call only — never written to the card.
+    let b64 = item.images?.[0];
+    if (!b64) {
+      const served = await fetchServerPhotoAsDataUrl(item);
+      if (!served.ok) throw new Error(served.message);
+      b64 = served.dataUrl;
     }
-    const b64 = item.images[0];
 
     // GrailKey Directive V, Task 2 (GK-88, ownership perimeter) — mints
     // its own ownership using the SAME shared activeScanRef/
