@@ -37,6 +37,7 @@ import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeCo
 import { resolvePhotoRegradeIdentity } from "./lib/photoIdentityLock.js";
 import { resolveGoverningGrade,resolveGoverningGradingFormat, validateOperatorGrade, pickGradingAuthorityFields } from "./lib/gradeAuthority.js";
 import { governingTitleForMerge } from "./lib/operatorIdentityAuthority.js";
+import { reIdentifyControlState } from "./lib/reIdentifyControl.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
@@ -4741,6 +4742,7 @@ export function CollectionDetail({
     }
   };
 
+  const reIdentifyControl = reIdentifyControlState(item, { hasHandler: Boolean(onReIdentify) });
   const handleReIdentify = async () => {
     if (!onReIdentify) return;
     const confirmed = window.confirm(
@@ -8048,13 +8050,14 @@ export function CollectionDetail({
         )}
 
         {/* Ship #20a.6.19 — Re-identify button */}
-        {item.images?.[0] && onReIdentify && (
+        {reIdentifyControl.visible && (
           <>
             <button
               className="btn-secondary"
               onClick={handleReIdentify}
-              disabled={reIdentifying || refreshing}
-              style={{ marginTop: 8, width: "100%" }}
+              disabled={reIdentifying || refreshing || !reIdentifyControl.enabled}
+              title={reIdentifyControl.reason || undefined}
+              style={{ marginTop: 8, width: "100%", opacity: reIdentifyControl.enabled ? 1 : 0.55 }}
             >
               {reIdentifying ? (
                 <>
@@ -8077,6 +8080,11 @@ export function CollectionDetail({
                 "🔍 Re-identify Book"
               )}
             </button>
+            {!reIdentifyControl.enabled && reIdentifyControl.reason && (
+              <div className="muted small" style={{ marginTop: 6 }} data-testid="reidentify-disabled-reason">
+                {reIdentifyControl.reason}
+              </div>
+            )}
             {reIdentifyError && (
               <div className="error-text small" style={{ marginTop: 6 }}>
                 {reIdentifyError}
