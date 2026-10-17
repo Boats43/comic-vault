@@ -37,7 +37,7 @@
 // api/enrich.js's finalizeResponse already uses at enrich time.
 import { deriveLocks } from "../src/lib/responseContract.js";
 import { deriveActionAuthority } from "../src/lib/actionAuthority.js";
-import { toBuyerSafeListingFacts, buildGovernedListingTitle } from "../src/lib/buyerSafeListingCopy.js";
+import { toBuyerSafeListingFacts, buildGovernedListingTitle, rawConditionDisclosure } from "../src/lib/buyerSafeListingCopy.js";
 import { getMyCollectionItem, NotFoundError as CollectionNotFoundError } from "../src/modules/collection/index.js";
 import { toCents, assertQ41PriceBinding, assertListActionPriceBinding, PriceBindingError } from "../src/lib/listingPriceBinding.js";
 import { getAspectMetadata, getItemConditionPolicy, buildItemSpecificsFromMetadata, resolveDomesticShippingService } from "../src/lib/ebayListingMetadata.js";
@@ -250,7 +250,10 @@ const buildDescription = (rawItem, shippingDescription = 'USPS Ground Advantage'
   if (meta) lines.push(`<p><strong>${xmlEscape(meta)}</strong></p>`);
   if (f.variant) lines.push(`<p>Variant: ${xmlEscape(f.variant)}</p>`);
 
-  if (f.publicGrade) {
+  if (f.isRaw) {
+    // RAW copy: state it explicitly; never present an operator grade as a professional certification.
+    lines.push(`<p><strong>${xmlEscape(rawConditionDisclosure(f))}</strong></p>`);
+  } else if (f.publicGrade) {
     lines.push(`<p>Grade: <strong>${xmlEscape(f.publicGrade)}</strong></p>`);
   } else {
     lines.push(`<p>Condition: See photos for condition details.</p>`);

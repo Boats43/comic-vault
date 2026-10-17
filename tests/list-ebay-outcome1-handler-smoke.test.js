@@ -344,6 +344,73 @@ console.log('-- BUYER-FACING SANITATION: internal reasoning injected into the it
   console.log('  (test-artifact outcome_event rows deleted)\n');
 }
 
+console.log('-- GATE B RAW CONDITION COPY: the REAL handler\'s outbound AddFixedPriceItem body (raw 9.2, slab, missing grade, long/special title, forged variant) --\n');
+{
+  const RAW_DISCLOSURE = 'Raw copy. GrailKey/operator condition assessment approximately NM- 9.2. Not professionally graded or slabbed.';
+  const OML = { title: 'Old Man Logan', issue: '25', year: '2017', publisher: 'Marvel', variant: '1:25 Mike Deodato Teaser Variant' };
+  // Grade-authority keys are server-protected from ordinary collection writes (GK-260/261, correctly), so this fixture sets the
+  // governed attributes directly on the test's OWN transient canonical rows (created above, deleted in cleanup).
+  const setGoverned = (attrs) => client.query(`UPDATE data1_dev.collection_item SET attributes = $1::jsonb WHERE id = ANY($2) AND principal_id = $3`, [JSON.stringify(attrs), CREEPY_LINK_IDS, JIMMY]);
+  const runWith = async (label, governedAttrs, clientOverrides = {}) => {
+    await setGoverned(governedAttrs);
+    fetchCalls.length = 0; mockState.mediaCalls.length = 0; addFixedPriceItemBehavior = 'success'; lastAddFixedPriceItemBody = '';
+    const idempotencyKey = `list-ebay-gateb-raw-${Date.now()}-${label}`;
+    const res = mockRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body: baseItem({
+      gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID,
+      outcomeIdempotencyKey: idempotencyKey, ...clientOverrides }) }, res);
+    const body = lastAddFixedPriceItemBody;
+    await cleanup(client, idempotencyKey);
+    return { res, body };
+  };
+  const common = (label, { res, body }) => {
+    assertTrue(res.statusCode === 200 && body.includes('<AddFixedPriceItemRequest'), `[${label}] real handler reached the real AddFixedPriceItem construction (status ${res.statusCode})`);
+    assertTrue(body.includes('<StartPrice currencyID="USD">61.41</StartPrice>') && !body.includes('<ConditionID>') && !body.includes('<BestOfferDetails>'), `[${label}] price authority (61.41), no ConditionID, Best Offer OFF -- all unchanged by the copy fix`);
+    assertTrue(body.includes('<PictureURL>https://i.ebayimg.com/hosted/outcome1-smoke.jpg</PictureURL>') && body.includes('<Quantity>1</Quantity>'), `[${label}] photo-integrity result and quantity 1 unchanged`);
+  };
+
+  // 1. RAW 9.2 (operator-confirmed) -- the exact required identity and disclosure. Client forges a slab + a different variant.
+  {
+    const r = await runWith('raw92', { ...OML, gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: '9.2', operatorGradeNumeric: 9.2, operatorIsGraded: false },
+      { variant: 'FORGED CLIENT VARIANT', grade: 'CGC 9.8', isGraded: true, numericGrade: 9.8, claudeCheck: { suggestedListingTitle: 'AI_SUGGESTED_TITLE', confidence: 'HIGH', flags: [] } });
+    common('raw 9.2', r);
+    assertTrue(r.body.includes('<Title>Old Man Logan #25 1:25 Mike Deodato Teaser Variant Marvel 2017 Raw NM-</Title>'), '[raw 9.2] EXACT required title: "Old Man Logan #25 1:25 Mike Deodato Teaser Variant Marvel 2017 Raw NM-"');
+    assertTrue(r.body.includes(RAW_DISCLOSURE), '[raw 9.2] description carries the EXACT required raw disclosure');
+    assertTrue(!r.body.includes('Grade:') && !r.body.includes('CGC') && !r.body.includes('Slabbed Grade'), '[raw 9.2] no "Grade:" line, no CGC claim, even though the client forged isGraded/CGC 9.8');
+    assertTrue(!r.body.includes('FORGED CLIENT VARIANT') && !r.body.includes('AI_SUGGESTED_TITLE'), '[raw 9.2] a forged client variant / AI-suggested title is never substituted for the governed variant');
+  }
+  // 2. Same governed row but NO governed variant: the client's variant must not appear (no incorrect variant substitution).
+  {
+    const r = await runWith('novariant', { title: 'Old Man Logan', issue: '25', year: '2017', publisher: 'Marvel', gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: '9.2', operatorGradeNumeric: 9.2, operatorIsGraded: false }, { variant: '1:25 Mike Deodato Teaser Variant' });
+    common('no governed variant', r);
+    assertTrue(r.body.includes('<Title>Old Man Logan #25 Marvel 2017 Raw NM-</Title>') && !r.body.includes('Deodato'), '[no governed variant] the variant is NOT invented from the client request');
+  }
+  // 3. Professional slab: unchanged behavior.
+  {
+    const r = await runWith('slab', { title: 'Batman', issue: '1', year: '1940', publisher: 'DC', gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: 'CGC', operatorIsGraded: true, operatorGradeNumeric: 7.5 });
+    common('slab', r);
+    assertTrue(r.body.includes('<Title>Batman #1 CGC 7.5 DC 1940</Title>') && r.body.includes('Grade: <strong>CGC 7.5</strong>') && !r.body.includes('Raw copy') && !/>[^<]*\bRaw\b/.test(r.body.match(/<Title>[^<]*<\/Title>/)[0]), '[slab] professionally graded title + "Grade: CGC 7.5" preserved; no raw wording');
+  }
+  // 4. Missing grade authority: fixed factual sentence, no raw claim.
+  {
+    const r = await runWith('nograde', { ...CREEPY_GOVERNED, operatorGrade: '9.2' });
+    common('missing grade authority', r);
+    assertTrue(r.body.includes('Condition: See photos for condition details.') && !r.body.includes('Raw copy') && r.body.includes('<Title>Creepy #1 Warren Publishing 1964</Title>'), '[missing grade authority] an operator grade WITHOUT OPERATOR_CONFIRMED is not published: fixed sentence, no raw claim');
+  }
+  // 5. Long title + special characters: title <= 80 and still ends with "Raw NM-"; markup is escaped in XML and in the CDATA description.
+  {
+    const r = await runWith('longspecial', { title: 'AT&T <Super> "Comics" ' + 'X'.repeat(70), issue: '7', year: '2017', publisher: 'Marvel', variant: "1:25 O'Brien <B&W> Variant", gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: '9.2', operatorGradeNumeric: 9.2, operatorIsGraded: false });
+    common('long/special', r);
+    const t = (r.body.match(/<Title>([^<]*)<\/Title>/) || [])[1] || '';
+    const unesc = t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+    assertTrue(unesc.length <= 80 && unesc.endsWith(' Raw NM-') && !/<[A-Za-z]/.test(t), `[long/special] title <= 80 chars (${unesc.length}), ends with "Raw NM-", no raw markup in the XML title`);
+    assertTrue(!/<script|<Super>|<B&W>/.test(r.body) && r.body.includes(RAW_DISCLOSURE), '[long/special] no unescaped markup anywhere in the packet; disclosure intact');
+  }
+  // restore the governed rows exactly as the rest of the suite expects
+  await setGoverned(CREEPY_GOVERNED);
+  console.log('  (test artifact) governed Creepy rows restored\n');
+}
+
 console.log('-- BUYER-FACING SANITATION (bundle): per-book internal reasoning never reaches the real bundle packet --\n');
 {
   fetchCalls.length = 0; mockState.mediaCalls.length = 0;

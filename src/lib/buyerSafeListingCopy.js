@@ -58,10 +58,37 @@ export function governedPublicGrade(attrs) {
   return g;
 }
 
+// Descriptive condition label for a RAW (not professionally graded) copy, from the
+// standard 0.5-10 grade scale. Descriptive only -- never a certification claim.
+const RAW_CONDITION_LABELS = {
+  '10': 'GM', '9.9': 'MT', '9.8': 'NM/M', '9.6': 'NM+', '9.4': 'NM', '9.2': 'NM-', '9': 'VF/NM',
+  '8.5': 'VF+', '8': 'VF', '7.5': 'VF-', '7': 'FN/VF', '6.5': 'FN+', '6': 'FN', '5.5': 'FN-', '5': 'VG/FN',
+  '4.5': 'VG+', '4': 'VG', '3.5': 'VG-', '3': 'GD/VG', '2.5': 'GD+', '2': 'GD', '1.8': 'GD-', '1.5': 'FR/GD',
+  '1': 'FR', '0.5': 'PR',
+};
+export function rawConditionLabel(numeric) {
+  const n = Number(numeric);
+  return Number.isFinite(n) ? (RAW_CONDITION_LABELS[String(n)] || '') : '';
+}
+
+// Numeric grade of a governed raw copy: the stored operatorGradeNumeric, else the number in the
+// operator grade text ("VF 8.0" -> 8). null when neither exists.
+function rawNumericGrade(it) {
+  if (it.operatorGradeNumeric != null && Number.isFinite(Number(it.operatorGradeNumeric))) return Number(it.operatorGradeNumeric);
+  const m = str(it.operatorGrade).match(/(\d+(?:\.\d+)?)/);
+  return m ? Number(m[1]) : null;
+}
+
 export function toBuyerSafeListingFacts(governedItem) {
   const it = governedItem && typeof governedItem === 'object' ? governedItem : {};
   const publicGrade = governedPublicGrade(it);
+  // RAW = a governed operator grade on a copy that is NOT a professional slab.
+  const isRaw = publicGrade !== '' && !publicGrade.startsWith('CGC ') && it.operatorIsGraded !== true;
+  const rawNumeric = isRaw ? rawNumericGrade(it) : null;
   return Object.freeze({
+    isRaw,
+    rawConditionLabel: rawNumeric != null ? rawConditionLabel(rawNumeric) : '',
+    rawGradeText: rawNumeric != null ? rawNumeric.toFixed(1) : '',
     title: formatPublicTitle(it.title),
     issue: str(it.issue).replace(/^#\s*/, ''),
     year: str(it.year),
@@ -73,10 +100,27 @@ export function toBuyerSafeListingFacts(governedItem) {
   });
 }
 
+// Exact raw-condition disclosure for the description. Never claims professional certification.
+export function rawConditionDisclosure(facts) {
+  const f = facts || {};
+  if (f.isRaw !== true) return '';
+  if (f.rawConditionLabel && f.rawGradeText) {
+    return `Raw copy. GrailKey/operator condition assessment approximately ${f.rawConditionLabel} ${f.rawGradeText}. Not professionally graded or slabbed.`;
+  }
+  return `Raw copy. GrailKey/operator condition assessment: ${f.publicGrade}. Not professionally graded or slabbed.`;
+}
+
 // Deterministic eBay title from governed facts ONLY (<= 80 chars). No model
 // suggestion, no key-issue marketing phrase, no unverified grade.
 export function buildGovernedListingTitle(facts) {
   const f = facts || {};
+  if (f.isRaw === true) {
+    // RAW copy: identity first, then "Raw <condition label>" at the END, which truncation never cuts.
+    const suffix = `Raw${f.rawConditionLabel ? ` ${f.rawConditionLabel}` : ''}`;
+    const core = [f.title, f.issue ? `#${f.issue}` : '', variantForPublicTitle(f.variant), f.publisher, f.year].filter(Boolean).join(' ').trim();
+    const room = 80 - suffix.length - 1;
+    return `${core.length > room ? core.slice(0, room).trim() : core} ${suffix}`.trim();
+  }
   const parts = [
     f.title,
     f.issue ? `#${f.issue}` : '',
