@@ -49,10 +49,11 @@ import { parsePriceNumber } from "./lib/responseContract.js";
 import { isAuthenticated, clearSession, getSession, authFetch, apiFetch, getPrincipalScope } from "./lib/grailkeySession.js";
 import { getProtectedImageUrl, subscribeProtectedImages, installImageRecovery } from "./lib/protectedImages.js";
 import { scopedGet, scopedSet } from "./lib/principalStorage.js";
-import { createScanTimer, parseServerTiming, recordScanTiming, exportScanTimingsText, loadScanTimings, lastScanAt } from "./lib/scanLatency.js";
+import { createScanTimer, parseServerTiming, createScanFinishSink, copyScanTimings, lastScanAt } from "./lib/scanLatency.js";
 
 // Scan-latency instrumentation (measurement only): principal-scoped ring buffer of the last scans' timings.
 const scanTimingStorage = { get: scopedGet, set: scopedSet };
+const scanFinishSink = createScanFinishSink({ storage: scanTimingStorage });
 const scanNetworkSnapshot = () => {
   try {
     const c = typeof navigator !== "undefined" ? (navigator.connection || null) : null;
@@ -12452,7 +12453,7 @@ export default function App() {
       const scanTimer = createScanTimer({
         buildSha: CV_BUILD, scanId, buyerMode, save,
         idleMs: (() => { try { const p = lastScanAt(scanTimingStorage); return p ? Math.max(0, Date.now() - p) : null; } catch { return null; } })(),
-        onFinish: (rec) => { recordScanTiming(scanTimingStorage, rec); try { console.log("[scan-latency]", JSON.stringify(rec)); } catch { /* observability only */ } },
+        onFinish: scanFinishSink,
       });
       scanTimer.set({ network: scanNetworkSnapshot(), rawBytes: blob?.size });
       setError(null);
@@ -15506,13 +15507,12 @@ export default function App() {
                 onClick={async (e) => {
                   // Scan-latency instrumentation (measurement only): copies numbers-only timing records — no images, titles or tokens.
                   const btn = e.currentTarget;
-                  const text = exportScanTimingsText(scanTimingStorage, { build: CV_BUILD });
-                  try {
-                    await navigator.clipboard.writeText(text);
-                    btn.textContent = `copied ${loadScanTimings(scanTimingStorage).length}`;
-                  } catch {
-                    try { window.prompt("Copy scan timings", text); } catch { /* nothing more to do */ }
-                  }
+                  const status = await copyScanTimings({
+                    storage: scanTimingStorage, build: CV_BUILD,
+                    clipboard: typeof navigator !== "undefined" ? navigator.clipboard : null,
+                    prompt: typeof window !== "undefined" ? (a, b) => window.prompt(a, b) : null,
+                  });
+                  if (status.startsWith("copied:")) btn.textContent = `copied ${status.slice(7)}`;
                 }}
                 style={{ background: "none", border: "none", padding: 0, color: "#777", fontSize: 9, letterSpacing: 0.3, textDecoration: "underline", cursor: "pointer" }}
               >copy scan timings</button>

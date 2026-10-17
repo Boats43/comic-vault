@@ -204,3 +204,32 @@ export function exportScanTimingsText(storage, { build = null, now = Date.now() 
   const records = loadScanTimings(storage);
   return JSON.stringify({ kind: 'grailkey-scan-latency', v: SCAN_LATENCY_RECORD_VERSION, build, exportedAt: now, count: records.length, records }, null, 1);
 }
+
+// ───────────── App-side behaviours (extracted so failure injection can test the REAL code) ────────────────────────
+// The sink handed to createScanTimer({ onFinish }). Storage and logging are independent best-effort steps: a fault in
+// one never prevents the other and NEVER propagates (the timer additionally wraps onFinish itself).
+export function createScanFinishSink({ storage, log = (...a) => console.log(...a) } = {}) {
+  return (rec) => {
+    try { recordScanTiming(storage, rec); } catch { /* observability only */ }
+    try { log('[scan-latency]', JSON.stringify(rec)); } catch { /* observability only */ }
+  };
+}
+
+// The "copy scan timings" action. Returns a short status string for the button; never throws.
+//   'copied:<n>'  clipboard write succeeded
+//   'prompt'      clipboard unavailable/refused -> shown in a prompt dialog instead
+//   'failed'      neither worked (e.g. both throw) — nothing else happens
+export async function copyScanTimings({ storage, build = null, clipboard = null, prompt = null } = {}) {
+  let text;
+  try { text = exportScanTimingsText(storage, { build }); } catch { return 'failed'; }
+  try {
+    if (clipboard && typeof clipboard.writeText === 'function') {
+      await clipboard.writeText(text);
+      return `copied:${loadScanTimings(storage).length}`;
+    }
+  } catch { /* fall through to the prompt */ }
+  try {
+    if (typeof prompt === 'function') { prompt('Copy scan timings', text); return 'prompt'; }
+  } catch { /* nothing more to do */ }
+  return 'failed';
+}
