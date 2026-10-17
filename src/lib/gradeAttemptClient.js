@@ -177,7 +177,10 @@ export async function runGradeAttempt({ apiFetch, headers = {}, body, kind = KIN
     // (callers spread `data` into the catalogue item, which is synced to the server).
     let replayed = false;
     if (data && typeof data === 'object' && 'attemptReplay' in data) { const { attemptReplay, ...rest } = data; replayed = attemptReplay === true; data = rest; }
-    return { ok: res.ok, status: res.status, data, attemptId: acq.attemptId, digest, reused: acq.reused, replayed };
+    // Scan-latency instrumentation (measurement only): the server's Server-Timing / x-grade-branch headers, passed through
+    // as transport annotations. They are never merged into `data` and nothing reads them except src/lib/scanLatency.js.
+    const hdr = (n) => { try { return res.headers?.get?.(n) ?? null; } catch { return null; } };
+    return { ok: res.ok, status: res.status, data, attemptId: acq.attemptId, digest, reused: acq.reused, replayed, serverTiming: hdr('server-timing'), gradeBranch: hdr('x-grade-branch') };
   });
   if (body && typeof body.scanId === 'string' && out.data && typeof out.data === 'object') {
     return { ...out, data: { ...out.data, scanId: body.scanId } };

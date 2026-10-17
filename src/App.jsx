@@ -49,6 +49,16 @@ import { parsePriceNumber } from "./lib/responseContract.js";
 import { isAuthenticated, clearSession, getSession, authFetch, apiFetch, getPrincipalScope } from "./lib/grailkeySession.js";
 import { getProtectedImageUrl, subscribeProtectedImages, installImageRecovery } from "./lib/protectedImages.js";
 import { scopedGet, scopedSet } from "./lib/principalStorage.js";
+import { createScanTimer, parseServerTiming, recordScanTiming, exportScanTimingsText, loadScanTimings, lastScanAt } from "./lib/scanLatency.js";
+
+// Scan-latency instrumentation (measurement only): principal-scoped ring buffer of the last scans' timings.
+const scanTimingStorage = { get: scopedGet, set: scopedSet };
+const scanNetworkSnapshot = () => {
+  try {
+    const c = typeof navigator !== "undefined" ? (navigator.connection || null) : null;
+    return c ? { type: c.effectiveType || null, rttMs: c.rtt ?? null, downlinkMbps: c.downlink ?? null } : null;
+  } catch { return null; }
+};
 import { autoClaimProvableLegacy } from "./lib/legacyLocalClaim.js";
 import { fetchServerCollection, deleteServerCollectionItem, pushCollectionItem } from "./lib/collectionSync.js";
 import { persistCollectionItem, retryPendingCollectionItems } from "./lib/collectionPersistence.js";
@@ -12438,6 +12448,13 @@ export default function App() {
       const scanOwnership = { scanId, generation, kind: 'scan', itemId: null };
       activeScanRef.current = scanOwnership;
       const scanPrincipal = getPrincipalScope();
+      // Scan-latency instrumentation (measurement only, src/lib/scanLatency.js): observes, never gates or alters the scan.
+      const scanTimer = createScanTimer({
+        buildSha: CV_BUILD, scanId, buyerMode, save,
+        idleMs: (() => { try { const p = lastScanAt(scanTimingStorage); return p ? Math.max(0, Date.now() - p) : null; } catch { return null; } })(),
+        onFinish: (rec) => { recordScanTiming(scanTimingStorage, rec); try { console.log("[scan-latency]", JSON.stringify(rec)); } catch { /* observability only */ } },
+      });
+      scanTimer.set({ network: scanNetworkSnapshot(), rawBytes: blob?.size });
       setError(null);
       setResult(null);
       setEnriching(false);
@@ -12449,6 +12466,8 @@ export default function App() {
         // JPEG quality 0.85. Reuses the same canvas helper the catalogue
         // thumbnail path uses.
         const b64 = await makeThumbnail(rawB64, 1200, 0.85);
+        scanTimer.mark("encoded");
+        scanTimer.set({ payloadChars: b64.length });
         // Buyer mode: route grade through the watch-mode Sonnet pipeline
         // (pass-1 fast ID, pass-2 self-correct, pass-3 Opus escalate only
         // if still low confidence). ~5x faster on the common case where
@@ -12460,9 +12479,16 @@ export default function App() {
         // GK-281 — the grade request runs under a persisted ATTEMPT (src/lib/gradeAttemptClient.js): a lost response,
         // a navigation, or a repeat pick of the same photo resumes the SAME attempt and the server replays its stored
         // result — no second paid workflow. `res` keeps the shape the code below already reads (ok / status).
+        scanTimer.mark("grade_sent");
         const gradeOut = await runGradeAttempt({ apiFetch, headers: getVaultHeaders(), body: gradeBody, kind: GRADE_ATTEMPT_KINDS.SCAN });
+        scanTimer.mark("grade_received");
         const res = gradeOut;
         const data = gradeOut.data || {};
+        scanTimer.set({
+          gradeStatus: gradeOut.status, replayed: gradeOut.replayed === true, reused: gradeOut.reused === true,
+          category: data.assetType, identitySource: data.identitySource, gradeBranch: gradeOut.gradeBranch,
+          serverGrade: parseServerTiming(gradeOut.serverTiming),
+        });
 
         // Handle 401 unauthorized — session missing/invalid/expired.
         if (res.status === 401) {
@@ -12524,6 +12550,7 @@ export default function App() {
           if (save) setUnsupportedScan({ photoDataUrl: b64 });
           setError(save ? "We couldn't identify this as a comic or book." : "No comic detected. Try again.");
           setLoading(false);
+          scanTimer.finish("rejected");
           return;
         }
 
@@ -12612,7 +12639,9 @@ export default function App() {
           () => setResult({ ...data, issue: issueNum, image: b64 })
         );
         setLoading(false);
+        scanTimer.markPainted("identity"); // milestone 1: shutter -> authoritative identification visible
         const savedId = (save && !isDuplicate) ? await addToCatalogue({ ...data, issue: issueNum }, b64, scanPrincipal) : null;
+        scanTimer.mark("saved");
         if (savedId) markGradeAttemptConsumed(gradeOut.digest, gradeOut.attemptId); // GK-281: a saved attempt is finished; the next pick of this photo is a NEW attempt
         // GrailKey Directive V, Task 2 (GK-88) — the item now exists;
         // mutate the SAME ownership object already stored in
@@ -12663,12 +12692,15 @@ export default function App() {
           gradeProof: typeof data.gradeProof === "string" ? data.gradeProof : undefined,
         };
         if (!buyerMode) enrichBody.images = [b64];
+        scanTimer.mark("enrich_sent");
         apiFetch("/api/enrich", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getVaultHeaders() },
           body: JSON.stringify(enrichBody),
         })
           .then((r) => {
+            scanTimer.mark("enrich_received");
+            scanTimer.set({ enrichStatus: r.status });
             // Handle 401 unauthorized — session missing/invalid/expired.
             if (r.status === 401) {
               clearSession();
@@ -12678,7 +12710,10 @@ export default function App() {
             return r.ok ? r.json() : null;
           })
           .then((enrich) => {
-            if (!enrich) return;
+            if (!enrich) { scanTimer.finish("enrich_failed"); return; }
+            scanTimer.set({ serverEnrich: enrich.timings });
+            // milestone 2: shutter -> complete, final priced result merged and visible (kept SEPARATE from milestone 1)
+            scanTimer.markPainted("final", "complete");
             // Slice 7 — guard against a stale/superseded scan's enrich
             // response overwriting a later scan's preview
             // (src/lib/scanOwnership.js). SHADOW mode (the production
@@ -13086,12 +13121,14 @@ export default function App() {
           })
           .catch(() => {
             /* enrichment failure is non-fatal */
+            scanTimer.finish("enrich_failed");
           })
           .finally(() => setEnriching(false));
       } catch (err) {
         setError(err.message);
         setErrorNoRetryText(err?.nonRetryable === true ? err.message : null);
         setLoading(false);
+        scanTimer.finish("error");
       } finally {
         gradeBlobFlights.delete(gradeFlightKey); // GK-281: release the single-flight slot on every exit path
       }
@@ -15460,7 +15497,26 @@ export default function App() {
           <div>
             <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.5 }}>GrailKey</div>
             <div style={{ fontSize: 11, color: "#999", marginTop: 2, fontWeight: 400 }}>Know what it's worth. Get paid.</div>
-            <div data-cv-build={CV_BUILD} style={{ fontSize: 9, color: "#666", marginTop: 2, fontWeight: 400, letterSpacing: 0.3 }}>build {CV_BUILD}</div>
+            <div data-cv-build={CV_BUILD} style={{ fontSize: 9, color: "#666", marginTop: 2, fontWeight: 400, letterSpacing: 0.3 }}>
+              build {CV_BUILD}
+              {" · "}
+              <button
+                type="button"
+                data-cv-scan-timings
+                onClick={async (e) => {
+                  // Scan-latency instrumentation (measurement only): copies numbers-only timing records — no images, titles or tokens.
+                  const btn = e.currentTarget;
+                  const text = exportScanTimingsText(scanTimingStorage, { build: CV_BUILD });
+                  try {
+                    await navigator.clipboard.writeText(text);
+                    btn.textContent = `copied ${loadScanTimings(scanTimingStorage).length}`;
+                  } catch {
+                    try { window.prompt("Copy scan timings", text); } catch { /* nothing more to do */ }
+                  }
+                }}
+                style={{ background: "none", border: "none", padding: 0, color: "#777", fontSize: 9, letterSpacing: 0.3, textDecoration: "underline", cursor: "pointer" }}
+              >copy scan timings</button>
+            </div>
           </div>
           <button
             onClick={handleLogout}

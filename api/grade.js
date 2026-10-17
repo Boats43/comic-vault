@@ -138,6 +138,7 @@ const parseResponse = (text) => {
 import { detectBookSignals, classifyTitle } from '../src/lib/categoryClassifier.js';
 import { issueGradeReceipt, issueGradeProof } from '../src/lib/gradeReceipt.js';
 import { selectAcceptedPassMeta } from '../src/lib/watchProvenance.js';
+import { buildServerTiming } from '../src/lib/scanLatency.js';
 import { observeGradeProvenance, classifyWriteFailure, buildPredictionEvidenceMeta, resolvePredictionKind } from '../src/lib/gradeProvenanceObservability.js';
 import { recordModelPrediction, sha256Hex, findPredictionEventIdByResult } from '../src/modules/learning/index.js';
 import { randomUUID } from 'node:crypto';
@@ -867,6 +868,18 @@ export default async function handler(req, res) {
   };
   mark('handler_entry');
 
+  // SCAN-LATENCY INSTRUMENTATION (measurement only — src/lib/scanLatency.js). Emits the W3C Server-Timing header, an
+  // x-grade-branch header and ONE summary log line. It reads the `t` marks above and changes nothing else: no response
+  // body field, no control flow, no model call. Never throws (a failure here must not affect a scan).
+  const emitServerTiming = (branch, extra = {}) => {
+    try {
+      const timing = buildServerTiming(t, Date.now() - startTime, branch);
+      if (timing.header) res.setHeader('Server-Timing', timing.header);
+      if (timing.branch) res.setHeader('x-grade-branch', timing.branch);
+      console.log('[grade-timing] summary:', JSON.stringify({ branch: timing.branch, ...extra, stages: timing.stages }));
+    } catch { /* instrumentation must never affect a scan */ }
+  };
+
   let attempt = LEGACY_NO_ATTEMPT; // GK-281: replaced by the claimed handle when the request carries a valid attemptId
   try {
     const body = req.body || {};
@@ -1071,7 +1084,10 @@ export default async function handler(req, res) {
       applyConditionGuard(result, Array.isArray(images) ? images.length : (image ? 1 : 0), body.imageViews);
       if (noImage) result.noImage = true;
       // watchMeta is the call metadata of the pass whose output IS `result` (accepted pass), not of any other pass.
+      mark('finalize_start');
       const watchOut = await finalizeResult(result, { meta: watchMeta ?? null, inputHash, branch: 'WATCH', ...evidenceCtx });
+      mark('finalize_complete');
+      emitServerTiming('WATCH', { passes });
       res.setHeader("x-watch-passes", String(passes));
       res.setHeader("x-watch-timing", JSON.stringify(timings));
       res.status(200).json(echoScanId(watchOut, body.scanId));
@@ -1144,8 +1160,11 @@ export default async function handler(req, res) {
       if (noImage) result.noImage = true;
 
       console.log('[grade] eBay-first path succeeded');
+      mark('finalize_start');
       const ebayOut = await finalizeResult(result, { meta: gradeMeta, inputHash, identityFromModel: false, branch: 'HAIKU_EBAY_CONSENSUS', ...evidenceCtx });
+      mark('finalize_complete');
       mark('response_sent');
+      emitServerTiming('HAIKU_EBAY_CONSENSUS');
       res.status(200).json(echoScanId(ebayOut, body.scanId));
       return;
     }
@@ -1184,7 +1203,9 @@ export default async function handler(req, res) {
       if (body.voiceContext) {
         userPrompt += "\nSeller said: " + body.voiceContext + ". Use this context to improve accuracy.";
       }
+      mark('book_vision_start');
       const { parsed: bookScan, meta: bookMeta } = await callModel("claude-sonnet-4-5-20250929", imageContent, userPrompt);
+      mark('book_vision_complete');
       finalParsed = bookScan;
       finalMeta = bookMeta;
       // GK-249 (U6.0B) Section B2 — first-fire observability. No prior
@@ -1215,7 +1236,9 @@ export default async function handler(req, res) {
       if (body.voiceContext) {
         // Re-scan with voice context
         userPrompt = STANDARD_PROMPT + "\nSeller said: " + body.voiceContext + ". Use this context to improve accuracy.";
+        mark('context_vision_start');
         const { parsed: contextScan, meta: contextMeta } = await callModel("claude-sonnet-4-5-20250929", imageContent, userPrompt);
+        mark('context_vision_complete');
         finalParsed = contextScan;
         finalMeta = contextMeta;
       }
@@ -1228,8 +1251,11 @@ export default async function handler(req, res) {
     applyNewsstandFallback(finalParsed);
     finalParsed.identitySource = 'vision_fallback'; // mark as fallback
 
+    mark('finalize_start');
     const fallbackOut = await finalizeResult(finalParsed, { meta: finalMeta, inputHash, identityFromModel: true, branch: isBook ? 'SONNET_BOOK' : 'SONNET_VISION_FALLBACK', ...evidenceCtx }, initialScan);
+    mark('finalize_complete');
     mark('response_sent');
+    emitServerTiming(isBook ? 'SONNET_BOOK' : 'SONNET_VISION_FALLBACK', { isBook, modelCalls: 1 + (isBook ? 1 : 0) + (!isBook && body.voiceContext ? 1 : 0) });
     res.status(200).json(echoScanId(fallbackOut, body.scanId));
   } catch (err) {
     // GK-281 — record what actually happened to the attempt (never throws): unbilled -> retryable, otherwise UNCERTAIN.

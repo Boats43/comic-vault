@@ -128,3 +128,5 @@ Prior entry, retained for history: 201 PASS / 19 FAIL / 4 TIMEOUT / 224 total �
 ## Roster delta (2026-10-02, GK-248 real-fixture preservation)
 
 +1 file: `tests/gk248-real-fixture-integrity.test.js` (68/68; validates the committed real fixtures, no DB). Roster count 279 -> 280. Historical-roster status changes: NOT FRESHLY MEASURED.
+
+**Roster delta (2026-10-17, scan-latency instrumentation, local/uncommitted-to-origin; TICKET: UNASSIGNED):** +1 file — `tests/scan-latency-instrumentation.test.js` (60/60). Detail: `docs/TICKET-REGISTRY.md`, "SCAN SPEED — STEP D".
