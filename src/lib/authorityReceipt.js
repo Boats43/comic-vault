@@ -14,7 +14,7 @@
 //
 // This module is pure (node:crypto only). It does not decide anything; it only signs and verifies.
 
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, createHash, timingSafeEqual } from 'node:crypto';
 
 export const AUTHORITY_RECEIPT_VERSION = 1;
 
@@ -58,11 +58,28 @@ export function identityMatchesReceipt(receiptIdentity, rowFacts) {
  * Build the signed receipt for one enrich response. Returns null when it cannot be issued (no principal, no secret).
  * `response` is the finalized enrich response (contract already attached).
  */
-export function issueAuthorityReceipt({ principalId, response, now = Date.now() } = {}) {
+/**
+ * PHYSICAL-ASSET BINDING. A receipt proves what the SERVER derived for one identity; it must also prove WHICH physical object that
+ * derivation belongs to, or a receipt minted for asset A could be replayed onto asset B that shares the same catalogue identity.
+ * `binding` is resolved server-side by api/enrich.js from the authenticated principal's own collection_item_link (ownership-checked),
+ * never from a client claim: { collectionItemId, gkAssetId, evidenceVersion } -- any member null when it could not be established.
+ */
+export function computeEvidenceVersion(contentHashes) {
+  const hs = (Array.isArray(contentHashes) ? contentHashes : []).filter((h) => typeof h === 'string' && h).slice().sort();
+  if (hs.length === 0) return null;
+  return createHash('sha256').update(hs.join('|')).digest('hex').slice(0, 32);
+}
+
+export function issueAuthorityReceipt({ principalId, response, binding = null, now = Date.now() } = {}) {
   const key = secretKey();
   if (!key || !principalId || !response || typeof response !== 'object') return null;
   const payload = {
     issuedAt: now,
+    binding: {
+      collectionItemId: binding?.collectionItemId ?? null,
+      gkAssetId: binding?.gkAssetId ?? null,
+      evidenceVersion: binding?.evidenceVersion ?? null,
+    },
     identity: { title: response.title ?? null, issue: response.issue ?? null, year: response.year ?? null },
     values: {},
     rawCompsCount: Number.isFinite(response.rawComps?.count) ? response.rawComps.count : (Array.isArray(response.rawComps?.prices) ? response.rawComps.prices.length : 0),
@@ -100,9 +117,12 @@ export function verifyAuthorityReceipt(receipt, principalId) {
  *   * valid receipt  -> execution fields are OVERWRITTEN from the signed payload; receipt kept
  *   * anything else  -> execution fields AND the receipt slot are DISCARDED from the write (an existing row keeps its own)
  */
-export function governIncomingAuthority(attributes, principalId) {
+export function governIncomingAuthority(attributes, principalId, rowId = null) {
   const out = { ...(attributes || {}) };
-  const verdict = verifyAuthorityReceipt(out.authorityReceipt, principalId);
+  let verdict = verifyAuthorityReceipt(out.authorityReceipt, principalId);
+  // Row binding: a receipt issued for a specific Collection row is inert on any OTHER row (cross-row / cross-asset replay).
+  const boundRow = verdict.ok ? verdict.payload.binding?.collectionItemId : null;
+  if (verdict.ok && boundRow && rowId && boundRow !== rowId) verdict = { ok: false, reason: 'row-mismatch' };
   // The provenance label is server-owned: never accepted from a client.
   delete out.authorityProvenance;
   if (verdict.ok) {

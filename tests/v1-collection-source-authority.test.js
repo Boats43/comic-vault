@@ -48,7 +48,7 @@ const unauthorizedWrites = () => ebayCalls.filter((c) => c === 'AddFixedPriceIte
 
 const collectionHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'collection.js')).href)).default;
 const listHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
-const { issueAuthorityReceipt } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'authorityReceipt.js')).href).catch(() => ({ issueAuthorityReceipt: null }));
+const { issueAuthorityReceipt, computeEvidenceVersion } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'authorityReceipt.js')).href).catch(() => ({ issueAuthorityReceipt: null }));
 
 let passed = 0, failed = 0;
 const ok = (c, m) => { if (c) { passed++; console.log(`  ✓ ${m}`); } else { failed++; console.log(`  ✗ ${m}`); } };
@@ -162,7 +162,10 @@ await wipeOutcomes();
 console.log('\n-- legitimate flow: a server-signed receipt (what api/enrich.js issues) --\n');
 await resetRows();
 const honestResponse = { ...GOVERNED, ...FORGED, contract: { state: 'PRICED', listable: true, locks: [] } };
-const receipt = issueAuthorityReceipt ? issueAuthorityReceipt({ principalId: JIMMY, response: honestResponse }) : null;
+// What api/enrich.js does: bind the receipt to the principal's OWN canonical row + linked asset + current evidence version (real resolvers).
+const canonicalId = await assetsMod.getCanonicalCollectionItemIdForAsset({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID });
+const boundTo = { collectionItemId: canonicalId, gkAssetId: CREEPY_ASSET_ID, evidenceVersion: computeEvidenceVersion(await assetsMod.getAssetMediaContentHashes({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID })) };
+const receipt = issueAuthorityReceipt ? issueAuthorityReceipt({ principalId: JIMMY, response: honestResponse, binding: boundTo }) : null;
 ok(receipt && receipt.sig, 'the server issues a signed receipt for an enrich response');
 const w4 = await collectionWrite(CREEPY_LINK_IDS[0], { ...GOVERNED, authorityReceipt: receipt, ...FORGED, decision: { action: 'LIST_NOW', confidence: 'high', blockers: [], warnings: [] } });
 const s4 = (await getMyCollectionItem({ principalId: JIMMY, id: CREEPY_LINK_IDS[0] })).attributes;
@@ -170,6 +173,14 @@ ok(w4.statusCode === 200 && s4.authorityProvenance?.status === 'SERVER_RECEIPT' 
 const l4 = await tryList();
 ok(l4.statusCode === 200 && ebayCalls.includes('AddFixedPriceItem'), `a genuinely evidenced, receipt-backed book still reaches the (mocked) eBay publish (HTTP ${l4.statusCode} ${l4.body?.error || ''})`);
 await wipeOutcomes();
+
+// PHYSICAL-ASSET BINDING: the same signed receipt replayed onto a DIFFERENT Collection row of the same principal is discarded.
+if (CREEPY_LINK_IDS[1] !== canonicalId) {
+  await collectionWrite(CREEPY_LINK_IDS[1], { ...GOVERNED, authorityReceipt: receipt, ...FORGED });
+  const sReplay = (await getMyCollectionItem({ principalId: JIMMY, id: CREEPY_LINK_IDS[1] })).attributes;
+  ok(sReplay.decision === undefined && sReplay.authorityReceipt === undefined, 'a receipt bound to canonical row A replayed onto row B is discarded (row-mismatch): nothing persists');
+}
+ok(canonicalId === CREEPY_LINK_IDS[0], `the receipt's row binding names the canonical row the test writes (${canonicalId})`);
 
 // client edits loose values on top of a valid receipt: overwritten from the signed payload
 await collectionWrite(CREEPY_LINK_IDS[0], { ...GOVERNED, authorityReceipt: receipt, decision: { action: 'LIST_NOW', confidence: 'FORGED' }, soldCompDiagnostics: { rawCount: 99, verifiedCount: 99, newestDaysAgo: 0 } });

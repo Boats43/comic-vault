@@ -177,7 +177,7 @@ export async function getByPrincipalAndId(client, principalId, id) {
 // event-sourced ledger, and a same-principal self-overwrite carries no
 // cross-account risk.
 export async function upsertItem(client, { id, principalId, assetCategory, attributes: rawAttributes }) {
-  const { attributes, verified } = governIncomingAuthority(rawAttributes, principalId);
+  const { attributes, verified } = governIncomingAuthority(rawAttributes, principalId, id);
   const res = await client.query(
     `INSERT INTO data1_dev.collection_item (id, principal_id, asset_category, attributes)
      VALUES ($1, $2, $3, ${stripFullyProtectedGradingKeysSql('$4')})
@@ -202,7 +202,7 @@ export async function upsertItem(client, { id, principalId, assetCategory, attri
 // survive an incoming write that omits them (see that constant's own
 // comment) — everything else in `attributes` remains a true full replace.
 export async function updateItem(client, { id, principalId, assetCategory, attributes: rawAttributes }) {
-  const { attributes, verified } = governIncomingAuthority(rawAttributes, principalId);
+  const { attributes, verified } = governIncomingAuthority(rawAttributes, principalId, id);
   const res = await client.query(
     `UPDATE data1_dev.collection_item
         SET attributes = ${protectedAttributesMergeSql('attributes', '$4', '$5')},

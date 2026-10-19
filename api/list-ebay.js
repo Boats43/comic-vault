@@ -37,6 +37,7 @@
 // api/enrich.js's finalizeResponse already uses at enrich time.
 import { deriveLocks } from "../src/lib/responseContract.js";
 import { resolveListingAuthorityEvidence } from "../src/lib/listingAuthorityEvidence.js";
+import { computeEvidenceVersion } from "../src/lib/authorityReceipt.js";
 import { deriveActionAuthority } from "../src/lib/actionAuthority.js";
 import { toBuyerSafeListingFacts, buildGovernedListingTitle, rawConditionDisclosure } from "../src/lib/buyerSafeListingCopy.js";
 import { getMyCollectionItem, NotFoundError as CollectionNotFoundError } from "../src/modules/collection/index.js";
@@ -970,9 +971,11 @@ export default async function handler(req, res) {
     // text. Fail-closed BEFORE any eBay call if they cannot be resolved. Price is
     // NOT touched here (pricing authority is unchanged).
     let governedFacts;
+    let governedCanonicalId = null;
     try {
       const canonicalId = await getCanonicalCollectionItemIdForAsset({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId });
       if (!canonicalId) throw new CollectionNotFoundError('asset has no canonical catalogue row');
+      governedCanonicalId = canonicalId;
       const row = await getMyCollectionItem({ principalId: grailkeyPrincipalId, id: canonicalId });
       governedFacts = row?.attributes || null;
       if (!governedFacts || !governedFacts.title) throw new CollectionNotFoundError('canonical row has no title');
@@ -1014,8 +1017,19 @@ export default async function handler(req, res) {
     // diagnostics fail closed (NO_SOLD_EVIDENCE floor) instead of skipping the check. See
     // src/lib/listingAuthorityEvidence.js. A forged request decision / an omitted soldCompDiagnostics can no
     // longer reach READY.
+    // Current evidence version = hash of THIS asset's durable media content hashes, read server-side now. A lookup failure yields a
+    // sentinel that can match no signed version (fail closed).
+    const currentEvidenceVersion = async () => {
+      try { return computeEvidenceVersion(await getAssetMediaContentHashes({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId })); }
+      catch { return 'EVIDENCE_UNAVAILABLE'; }
+    };
     const { evidence: authEv, priorLockCodes: governedPriorLockCodes, sources: authSources } =
-      resolveListingAuthorityEvidence(item, governedFacts, { principalId: grailkeyPrincipalId });
+      resolveListingAuthorityEvidence(item, governedFacts, {
+        principalId: grailkeyPrincipalId,
+        gkAssetId: item.gkAssetId,
+        collectionItemId: governedCanonicalId,
+        evidenceVersion: await currentEvidenceVersion(),
+      });
     console.log('[ebay] authority evidence sources:', JSON.stringify(authSources));
     const syntheticOut = {
       decision: authEv.decision,

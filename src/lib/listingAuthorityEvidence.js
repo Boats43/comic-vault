@@ -44,7 +44,7 @@ const lockCodes = (contract) =>
  *
  * @param {object} requestItem  the (untrusted) request item
  * @param {object|null} durable the owned asset's canonical catalogue attributes (server-read), or null
- * @param {{principalId?:string}} opts the authenticated principal the receipt must be bound to
+ * @param {{principalId?:string, gkAssetId?:string, collectionItemId?:string|null, evidenceVersion?:string|null}} opts the authenticated principal, and (listing path) the canonical asset + current evidence version the receipt must be bound to
  * @returns {{ evidence: object, priorLockCodes: string[], sources: object }}
  */
 export function resolveListingAuthorityEvidence(requestItem, durable, opts = {}) {
@@ -52,9 +52,21 @@ export function resolveListingAuthorityEvidence(requestItem, durable, opts = {})
   const d = isObj(durable) ? durable : {};
   const sources = {};
   const verdict = verifyAuthorityReceipt(d.authorityReceipt, opts.principalId);
-  const bound = verdict.ok && identityMatchesReceipt(verdict.payload.identity, { title: d.title, issue: d.issue });
+  const identityOk = verdict.ok && identityMatchesReceipt(verdict.payload.identity, { title: d.title, issue: d.issue });
+  // PHYSICAL-ASSET BINDING (listing preflight revalidation): the receipt must name THIS canonical asset and the CURRENT evidence
+  // version. Unbound (derived before any asset existed / link unresolved), another asset's, or stale-evidence receipts carry no authority.
+  let bindingState = 'NOT_CHECKED';
+  if (verdict.ok && identityOk && opts.gkAssetId !== undefined) {
+    const bd = verdict.payload.binding || {};
+    if (!bd.gkAssetId) bindingState = 'UNBOUND';
+    else if (bd.gkAssetId !== opts.gkAssetId) bindingState = 'ASSET_MISMATCH';
+    else if (opts.collectionItemId && bd.collectionItemId && bd.collectionItemId !== opts.collectionItemId) bindingState = 'ASSET_MISMATCH';
+    else if ((bd.evidenceVersion ?? null) !== (opts.evidenceVersion ?? null)) bindingState = 'EVIDENCE_VERSION_STALE';
+    else bindingState = 'BOUND';
+  }
+  const bound = identityOk && (bindingState === 'NOT_CHECKED' || bindingState === 'BOUND');
   const receipt = bound ? verdict.payload : null;
-  sources.receipt = receipt ? 'VERIFIED' : (verdict.ok ? 'IDENTITY_MISMATCH' : `UNVERIFIED:${verdict.reason}`);
+  sources.receipt = receipt ? 'VERIFIED' : (verdict.ok ? (identityOk ? bindingState : 'IDENTITY_MISMATCH') : `UNVERIFIED:${verdict.reason}`);
   const rv = receipt ? receipt.values : {};
   const src = (name, value) => { sources[name] = receipt ? 'server-receipt' : 'absent-failed-closed'; return value; };
 
