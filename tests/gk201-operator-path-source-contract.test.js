@@ -64,7 +64,11 @@ console.log('--- src/components/GrailKeyOperatorPanel.jsx ---');
 {
   const src = read('src/components/GrailKeyOperatorPanel.jsx');
   assertTrue(!/list-ebay|delist-ebay|ebay\.com|fetch\([^)]*ebay/i.test(src), 'no eBay call anywhere in the operator panel');
-  assertTrue(!/mint|createPhysicalAsset/i.test(src), 'never mints an asset from the UI');
+  // 2026-10-19 (P3): was `!/mint|createPhysicalAsset/i` over the WHOLE file, which matches the panel's own explanatory comments ("mint/don't-mint").
+  // The contract is that the UI contains no mint CODE: no call to a mint/creation function and no import of the asset service. The only durable-creation
+  // path is the explicit operator POST to /api/capture-scan (server-side), asserted in grailkey-operator-panel-capture-wiring.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assertTrue(!/createPhysicalAsset|mintAsset\s*\(|\bmintGkAsset\w*\s*\(|from\s+['"][^'"]*modules\/assets/.test(code), 'never mints an asset from the UI (no mint call, no asset-service import in code)');
   assertTrue(!/method:\s*["'](PUT|PATCH|DELETE)["']/.test(src),
     'issues no PUT/PATCH/DELETE request — the only write is the POST to operator-action');
   assertTrue(!/decision_event["'\s]*[:=]/.test(src) && !/updateDecision|reviseDecision|editDecision/.test(src),

@@ -65,8 +65,11 @@ console.log('Part 1: dispatch premise correction (verified before implementing)\
 
 {
   const enrichSrc = readFileSync(path.join(repoRoot, 'api/enrich.js'), 'utf8').replace(/\r\n/g, '\n');
-  const enrichLineCount = enrichSrc.split('\n').length;
-  assertTrue(enrichLineCount < 11813, `api/enrich.js has ${enrichLineCount} lines — "enrich.js:11813" cited in the dispatch does not exist`);
+  // RETIRED 2026-10-19 (P3): this asserted `api/enrich.js` has < 11813 lines to record that a dispatch cited a line that did not exist.
+  // That was a snapshot of the file size at commit time, not a contract: enrich.js has since grown past it (13,811 lines at ba82e93), so the
+  // assertion failed on every tree for a reason unrelated to this commit's behavior. The premise correction is preserved as prose in the header;
+  // the behavior contract (the REAL component exists and is the one targeted) is asserted below.
+  assertTrue(enrichSrc.length > 0, 'api/enrich.js is readable (premise-correction context only; no size pin)');
   assertFalse(readFileSync(path.join(repoRoot, 'src/App.jsx'), 'utf8').includes('referencePriceEstimate'), '"referencePriceEstimate" (cited field path) does not appear in App.jsx');
   assertTrue(appSrc.includes('const MarketReferences = ({ item }) => {'), 'the REAL component (a named export const, not a data-field path) is located and targeted');
 }

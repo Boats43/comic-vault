@@ -121,7 +121,11 @@ console.log('\nClient -> /api/enrich handoff (assetType threading):');
   // gradeBlob) already threads assetType through to /api/enrich for an
   // accepted Book -- this was already correct before U6.0D; this test
   // only confirms U6.0D's new gate didn't disturb it.
-  assertTrue(src.includes("assetType: data.assetType || 'comic'"), 'gradeBlob\'s enrichBody still threads assetType through to /api/enrich unchanged');
+  // 2026-10-19 (P3): the old literal `assetType: data.assetType || 'comic'` was REMOVED on purpose by Universal U1 (no silent default category).
+  // The contract: gradeBlob's enrichBody threads the scan's assetType through to /api/enrich and never defaults it to 'comic'.
+  const body = src.slice(src.indexOf('const enrichBody = {'), src.indexOf('if (!buyerMode) enrichBody.images'));
+  assertTrue(/assetType:\s*data\.assetType\s*,/.test(body), 'gradeBlob\'s enrichBody threads data.assetType through to /api/enrich');
+  assertTrue(!/assetType:[^,\n]*\|\|\s*['"]comic['"]/.test(body), 'gradeBlob\'s enrichBody does NOT default assetType to comic (U1: no silent default)');
 }
 
 console.log(`\n=== RESULTS ===`);
