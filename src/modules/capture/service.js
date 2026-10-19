@@ -47,8 +47,17 @@ function requireFields(obj, fields) {
 // NO DEFAULT — a missing or unknown assetClass is refused, never minted as comic.
 const ALLOWED_ASSET_CLASSES = SUPPORTED_ASSET_CATEGORIES;
 
+const CAPTURE_STATUSES = new Set(['PHYSICAL_CLAIMED', 'SCREEN_SUSPECTED', 'UNCERTAIN', 'NOT_ASSESSED']);
+function buildMintProvenance({ ownershipAttestation, captureAuthenticity }) {
+  const status = CAPTURE_STATUSES.has(captureAuthenticity?.status) ? captureAuthenticity.status : 'NOT_ASSESSED';
+  return {
+    ownershipAttestation: ownershipAttestation ? { ...ownershipAttestation, attestedAt: new Date().toISOString() } : null,
+    captureAuthenticity: { status, basis: status === 'NOT_ASSESSED' ? 'not-assessed' : 'model-claim', verified: false },
+  };
+}
+
 async function captureFromScanOnce({
-  principalId, scanPayload, photos = [], idempotencyKey, assetClass, copyDisposition,
+  principalId, scanPayload, photos = [], idempotencyKey, assetClass, copyDisposition, ownershipAttestation,
 } = {}) {
   requireFields({ principalId, scanPayload, idempotencyKey }, ['principalId', 'scanPayload', 'idempotencyKey']);
   if (!isSupportedAssetCategory(assetClass)) {
@@ -214,6 +223,9 @@ async function captureFromScanOnce({
       source: 'capture-integration',
       correlationId: scanPayload.correlationId,
       idempotencyKey: `${idempotencyKey}:mint`,
+      // V1 P0-D — recorded as the operator's ASSERTION (with the server's receive time) and the scan's own
+      // authenticity CLAIM; `verified` is forced false — nothing here verifies possession or physicality.
+      provenance: buildMintProvenance({ ownershipAttestation, captureAuthenticity: scanPayload.captureAuthenticity }),
     });
     gkAssetId = mint.assetId;
     mintOutcome = mint.outcome;

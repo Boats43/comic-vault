@@ -2604,6 +2604,14 @@ export function ResultCard({ result, enriching }) {
       )}
 
       {result.reason && getDisplayConditionEvidence(result).reason && <div className="reason muted small">{getDisplayConditionEvidence(result).reason}</div>}
+      {/* V1 P0-D — a screen/reproduction capture is reference only; an uncertain one is provisional. Never "verified". */}
+      {(result.referenceOnly || result.gradeProvisional) && (
+        <div className="small" style={{ color: "#c9a227", marginTop: 4 }}>
+          {result.referenceOnly
+            ? "Reference image — this photo does not appear to be the physical copy, so condition and grade are not assessed."
+            : "Provisional — capture authenticity could not be established; treat the grade as an estimate."}
+        </div>
+      )}
     </div>
   );
 }
@@ -7312,7 +7320,10 @@ export function CollectionDetail({
                 ? (mcScore != null ? `Match quality: ${mcScore}/100` : "Similar match")
                 : isIdentityDisplayGated(item)
                   ? "⚠ Identity unresolved"
-                  : `⚠ Low match${mcScore != null ? ` ${mcScore}/100` : ""}`;
+                  // V1 CERTIFICATION — the chip's TIER comes from the pricing contract while the SCORE is the
+                  // separate title/issue/year text-match quality; when they disagree ("Low match 100/100") the
+                  // score is hidden rather than shown beside a contradicting tier.
+                  : `⚠ Low match${mcScore != null && (!mcTier || mcTier === level) ? ` ${mcScore}/100` : ""}`;
             return (
               <span style={{ ...pillStyle, background: bg, color: fg }}>
                 {label}
@@ -12346,6 +12357,11 @@ export default function App() {
       reason: data.reason || "",
       confidence: data.confidence || "",
       restoration: data.restoration || null,
+      // V1 P0-D — the scan's capture-authenticity CLAIM + provisional/reference-only markers (never "verified").
+      captureAuthenticity: data.captureAuthenticity || null,
+      gradeProvisional: data.gradeProvisional === true,
+      gradeProvisionalReason: data.gradeProvisionalReason || null,
+      referenceOnly: data.referenceOnly === true,
       defectPenalty: data.defectPenalty || null,
       cgcPenaltyFlags: data.cgcPenaltyFlags || null,
       editionWarning: data.editionWarning || null,

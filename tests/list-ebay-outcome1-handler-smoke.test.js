@@ -476,6 +476,21 @@ console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-
   // --- PRICE (D: REVIEW without Q41) ---
   r = await run(base({ q41Override: null }));
   assertTrue(r.statusCode === 403 && r.body?.error === 'ACTION_AUTHORITY_NOT_READY' && noEbayWrite(), 'standing REVIEW without a Q41 acknowledgement -> 403 ACTION_AUTHORITY_NOT_READY (unchanged)');
+  // --- V1 CERTIFICATION / GK-240: forged READY evidence + omitted soldCompDiagnostics, NO Q41 ack ---
+  // Before the fix the real authority functions returned READY for exactly this request shape, so the
+  // endpoint would have proceeded toward AddFixedPriceItem with no acknowledgement. It must now refuse.
+  r = await run(base({
+    q41Override: null,
+    decision: { action: 'LIST_NOW', confidence: 'high', blockers: [], warnings: [] },
+    pricingSource: 'active_ask_derived',
+    matchConfidence: { tier: 'HIGH', score: 100 },
+    rawComps: { count: 29 },
+    identityConfident: true,
+    // soldCompDiagnostics deliberately OMITTED; priorLockCodes empty
+  }));
+  assertTrue(r.statusCode === 403 && r.body?.error === 'ACTION_AUTHORITY_NOT_READY' && noEbayWrite() && mockState.mediaCalls.length === 0 && !fetchCalls.includes('UploadSiteHostedPictures'),
+    `forged LIST_NOW decision + omitted soldCompDiagnostics + no Q41 -> 403 ACTION_AUTHORITY_NOT_READY, zero eBay writes (got ${r.statusCode} ${r.body?.error})`);
+  assertTrue(Array.isArray(r.body?.actionAuthority?.reasonCodes) && r.body.actionAuthority.reasonCodes.includes('NO_SOLD_EVIDENCE'), 'the refusal names NO_SOLD_EVIDENCE (missing evidence failed closed, not skipped)');
   // --- PRICE: durable LIST action cannot be substituted ---
   const unpriced = await (await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href)).recordOperatorAction({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, actionCode: 'LIST', source: 'test-fixture', idempotencyKey: 'list-ebay-packet-safety-unpriced-list-v1' });
   r = await run(base({ operatorActionEventId: unpriced.operatorActionEventId }));

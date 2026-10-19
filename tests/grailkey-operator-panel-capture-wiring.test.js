@@ -30,6 +30,7 @@
 
 import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
+import { buildOwnershipAttestation } from '../src/lib/ownershipAttestation.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -135,6 +136,8 @@ function buildRequestBody(item, collectionItemId, idempotencyKey) {
     scanPayload,
     photos: [{ bytes: stripDataUrlPrefix(localPhoto), contentType: contentTypeFromDataUrl(localPhoto), captureRole: 'capture-photo' }],
     idempotencyKey,
+    assetClass: 'comic', // U1 — the panel sends the item's explicit category
+    ownershipAttestation: buildOwnershipAttestation('operator-panel'), // V1 P0-D
   };
 }
 

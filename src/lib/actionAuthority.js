@@ -291,8 +291,12 @@ export function deriveIdentityStanding(out) {
     (Array.isArray(out?.decision?.blockers) && out.decision.blockers.includes('identity-not-confident'));
   if (isUnresolved) return 'UNRESOLVED';
 
+  // V1 CERTIFICATION — an UNRESOLVED edition/country claim (a foreign-edition flag nothing corroborated;
+  // deriveEditionStanding never returns CONFIRMED from a model claim alone) is not a confirmed identity: it
+  // contests it, so the card cannot read CONFIRMED while the edition is an open question.
   const isConflicted =
     out?.identityProvisional === true ||
+    out?.editionStanding === 'UNRESOLVED' ||
     out?.listingHardLockReason === 'identity-unresolved';
   if (isConflicted) return 'CONFLICTED';
 

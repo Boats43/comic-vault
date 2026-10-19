@@ -11,6 +11,7 @@
 
 import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
+import { buildOwnershipAttestation } from '../src/lib/ownershipAttestation.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -84,7 +85,7 @@ const createdAssetIds = [];
 try {
   console.log('-- setup: mint one real test asset via the real capture-scan handler --\n');
   const collectionItemId = `${TAG}-item`;
-  const mintBody = { assetClass: 'comic',
+  const mintBody = { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic',
     scanPayload: {
       correlationId: randomUUID(),
       collectionItemId,

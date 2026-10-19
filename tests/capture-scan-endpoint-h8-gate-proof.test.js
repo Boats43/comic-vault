@@ -23,6 +23,7 @@
 
 import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
+import { buildOwnershipAttestation } from '../src/lib/ownershipAttestation.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -135,7 +136,7 @@ try {
     process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'production';
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { assetClass: 'comic', scanPayload: { collectionItemId: `${TAG}-prod-blocked`, correlationId: randomUUID() }, idempotencyKey: `${TAG}:prodblock` },
+      body: { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic', scanPayload: { collectionItemId: `${TAG}-prod-blocked`, correlationId: randomUUID() }, idempotencyKey: `${TAG}:prodblock` },
     };
     const res = mockRes();
     await captureScanRoute(req, res);
@@ -171,7 +172,7 @@ try {
     const photoBytes = Buffer.from('fake-jpeg-bytes-for-test-only', 'utf8');
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { assetClass: 'comic',
+      body: { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic',
         scanPayload: { collectionItemId: CID, correlationId: randomUUID(), book: { title: 'Brave and the Bold', issue: '141', year: '1978' } },
         photos: [{ bytes: photoBytes.toString('base64'), contentType: 'image/jpeg', captureRole: 'capture-photo' }],
         idempotencyKey: `${TAG}:cap1`,
@@ -223,7 +224,7 @@ try {
     const before = await countAssets();
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { assetClass: 'comic',
+      body: { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic',
         scanPayload: { collectionItemId: CID, correlationId: randomUUID(), book: { title: 'Brave and the Bold', issue: '141', year: '1978' } },
         idempotencyKey: `${TAG}:cap1`,
       },
@@ -252,7 +253,7 @@ try {
 
     const req1 = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { assetClass: 'comic', scanPayload: { collectionItemId: CID2, correlationId: CORR, book: { title: 'Original Title', issue: '1', year: '2000' } }, idempotencyKey: `${TAG}:conflict` },
+      body: { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic', scanPayload: { collectionItemId: CID2, correlationId: CORR, book: { title: 'Original Title', issue: '1', year: '2000' } }, idempotencyKey: `${TAG}:conflict` },
     };
     idempotencyKeysUsed.push(`${TAG}:conflict:mint`, `${TAG}:conflict:link`, `${TAG}:conflict:identity`);
     const res1 = mockRes();
@@ -266,7 +267,7 @@ try {
     // IdempotencyConflictError, mapped to 409.
     const req2 = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { assetClass: 'comic', scanPayload: { collectionItemId: `${TAG}-conflict-2`, correlationId: CORR, book: { title: 'Different Title', issue: '2', year: '1999' } }, idempotencyKey: `${TAG}:conflict` },
+      body: { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic', scanPayload: { collectionItemId: `${TAG}-conflict-2`, correlationId: CORR, book: { title: 'Different Title', issue: '2', year: '1999' } }, idempotencyKey: `${TAG}:conflict` },
     };
     const res2 = mockRes();
     await captureScanRoute(req2, res2);

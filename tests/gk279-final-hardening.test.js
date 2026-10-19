@@ -13,6 +13,7 @@
 
 import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
+import { buildOwnershipAttestation } from '../src/lib/ownershipAttestation.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -85,7 +86,7 @@ async function capture(pid, { collectionItemId, key, disposition, prior, photo =
   const res = mockRes();
   await captureRoute({
     method: 'POST', headers: hdr(pid),
-    body: { assetClass: 'comic',
+    body: { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic',
       scanPayload: { correlationId: key, collectionItemId, book: { title: BOOK.title }, ...(prior ? { priorCollectionItemId: prior } : {}) },
       photos: [{ bytes: Buffer.from(`${RUN}-${photo}-${key}`).toString('base64'), contentType: 'image/jpeg', captureRole: 'capture-photo' }],
       idempotencyKey: key, ...(disposition ? { copyDisposition: disposition } : {}),

@@ -95,7 +95,7 @@ async function assertPrincipalOwnsAsset(client, principalId, gkAssetId) {
 // ─────────────────────────────────────────────────────────────────────
 // createPhysicalAsset
 // ─────────────────────────────────────────────────────────────────────
-export async function createPhysicalAsset({ principalId, captureBasis, assetClass, source, idempotencyKey, correlationId } = {}) {
+export async function createPhysicalAsset({ principalId, captureBasis, assetClass, source, idempotencyKey, correlationId, provenance } = {}) {
   requireFields({ principalId, captureBasis }, ['principalId', 'captureBasis']);
   // U1 — NO DEFAULT CATEGORY. An unknown or missing class never becomes 'comic'.
   if (!isSupportedAssetCategory(assetClass)) {
@@ -156,7 +156,10 @@ export async function createPhysicalAsset({ principalId, captureBasis, assetClas
         await repo.writeDomainEvent(client, {
           eventType: 'asset.minted', actorPrincipalId: principalId, actorKind: 'user',
           subjectType: 'gk_asset', subjectId: mint.assetId,
-          payload: { outcome: mint.outcome, assetClass, source: source ?? null },
+          // V1 P0-D — operator-supplied provenance (ownership attestation + capture-authenticity claim),
+          // recorded verbatim as an assertion. Not part of the idempotency fingerprint: it describes HOW the
+          // operator asserted the act, not WHAT is being minted.
+          payload: { outcome: mint.outcome, assetClass, source: source ?? null, ...(provenance ? { provenance } : {}) },
           correlationId: effectiveCorrelationId,
         });
       }

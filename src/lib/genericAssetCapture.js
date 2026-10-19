@@ -35,6 +35,7 @@ import {
 } from "../db.js";
 import { authFetch, getPrincipalScope } from "./grailkeySession.js";
 import { persistCollectionItem } from "./collectionPersistence.js";
+import { buildOwnershipAttestation } from "./ownershipAttestation.js";
 
 // Mirrors GrailKeyOperatorPanel.jsx's own isDefinitiveResponseStatus
 // contract exactly (src/lib/operatorActionIdempotency.js) — duplicated
@@ -67,13 +68,15 @@ function newDraftId() {
 // a draft can exist, and therefore the latest safe point to persist it,
 // per A1's "before any network call" requirement (nothing here makes a
 // network call at all).
-export async function createGenericCaptureDraft({ photoDataUrl, name = "", description = "", acquisitionCost = null }) {
+export async function createGenericCaptureDraft({ photoDataUrl, name = "", description = "", acquisitionCost = null, ownershipAttested = false }) {
   const draft = {
     id: newDraftId(),
     photoDataUrl,
     name,
     description,
     acquisitionCost,
+    // V1 P0-D — the operator's explicit attestation; false until they check the box.
+    ownershipAttested: ownershipAttested === true,
     createdAt: Date.now(),
     status: "draft", // 'draft' | 'submitting'
   };
@@ -201,6 +204,9 @@ export async function submitGenericCapture(draft) {
         }],
         idempotencyKey: draft.id,
         assetClass: "generic",
+        // V1 P0-D — the operator's explicit attestation (checked in the UI and stored on the draft so a
+        // crash-resumed retry carries the same assertion). Absent => the server refuses; nothing is minted.
+        ...(draft.ownershipAttested === true ? { ownershipAttestation: buildOwnershipAttestation("generic-capture") } : {}),
       }),
     });
   } catch {

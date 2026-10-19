@@ -18,6 +18,7 @@
 // state only.
 
 import { useEffect, useRef, useState } from "react";
+import { OWNERSHIP_ATTESTATION_STATEMENT } from "../lib/ownershipAttestation.js";
 import {
   createGenericCaptureDraft, updateGenericCaptureDraft, listGenericCaptureDrafts,
   discardGenericCaptureDraft, submitGenericCapture,
@@ -36,6 +37,8 @@ export default function GenericAssetCapture({ onClose, onCaptured, initialPhotoD
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [ambiguous, setAmbiguous] = useState(false);
+  // V1 P0-D — explicit ownership attestation; never pre-checked.
+  const [ownershipAttested, setOwnershipAttested] = useState(false);
   const fileInputRef = useRef(null);
 
   // A1 — resume any draft left behind by a reload/crash mid-capture,
@@ -106,9 +109,14 @@ export default function GenericAssetCapture({ onClose, onCaptured, initialPhotoD
     setSubmitting(true);
     setError(null);
     setAmbiguous(false);
-    const finalDraft = { ...draft, name: name.trim(), description, acquisitionCost: parseAcquisitionCost(acquisitionCost) };
+    if (!ownershipAttested) {
+      setSubmitting(false);
+      setError("Confirm that you physically possess this item before saving it as an owned asset.");
+      return;
+    }
+    const finalDraft = { ...draft, name: name.trim(), description, acquisitionCost: parseAcquisitionCost(acquisitionCost), ownershipAttested: true };
     await updateGenericCaptureDraft(draft.id, {
-      name: finalDraft.name, description: finalDraft.description, acquisitionCost: finalDraft.acquisitionCost,
+      name: finalDraft.name, description: finalDraft.description, acquisitionCost: finalDraft.acquisitionCost, ownershipAttested: true,
     });
     const result = await submitGenericCapture(finalDraft);
     setSubmitting(false);
@@ -183,6 +191,11 @@ export default function GenericAssetCapture({ onClose, onCaptured, initialPhotoD
           inputMode="decimal"
           style={inputStyle}
         />
+
+        <label style={{ display: "flex", gap: 8, alignItems: "flex-start", color: "#bbb", fontSize: 12, marginTop: 12, cursor: "pointer" }}>
+          <input type="checkbox" checked={ownershipAttested} onChange={(e) => setOwnershipAttested(e.target.checked)} style={{ marginTop: 2 }} />
+          <span>{OWNERSHIP_ATTESTATION_STATEMENT}</span>
+        </label>
 
         {error && <div style={{ color: "#e05656", fontSize: 12, marginTop: 8 }}>{error}</div>}
         {ambiguous && <div style={{ color: "#c9a227", fontSize: 12, marginTop: 8 }}>Could not confirm the result — outcome unknown. Tap Submit again to safely retry; it will not create a duplicate.</div>}

@@ -24,8 +24,10 @@
 import { verifyToken, InvalidTokenError } from '../modules/auth/index.js';
 import { captureFromScan, PhysicalCopyDecisionRequiredError, ValidationFailedError, ConflictError, NotFoundError, AuthorizationFailedError, IdempotencyConflictError } from '../modules/capture/index.js';
 import { checkRateLimit } from '../../api/rate-limit.js';
+import { isSupportedAssetCategory } from './assetCategories.js';
 import { respondPhysicalCopyError } from './physicalCopyErrors.js';
 import { CATEGORY_REQUIRED_CODE, OUTDATED_CLIENT_MESSAGE, markClientContractRefusal } from './clientContract.js';
+import { normalizeOwnershipAttestation, OWNERSHIP_ATTESTATION_REQUIRED_CODE, CAPTURE_REFERENCE_ONLY_CODE } from './ownershipAttestation.js';
 
 function extractBearerToken(req) {
   const header = req.headers?.authorization || req.headers?.Authorization;
@@ -66,8 +68,27 @@ export async function handleCaptureScan(req, res) {
     return res.status(400).json({ error: CATEGORY_REQUIRED_CODE, code: CATEGORY_REQUIRED_CODE, message: OUTDATED_CLIENT_MESSAGE });
   }
 
+  // V1 CERTIFICATION / P0-D — durable owned-asset creation requires the operator's EXPLICIT ownership
+  // attestation (fixed, versioned statement; a bare flag does not qualify). Refused before any work.
+  const ownershipAttestation = normalizeOwnershipAttestation(req.body?.ownershipAttestation);
+  // (An unsupported category is refused by the service with its own validation message, in its own order.)
+  if (!ownershipAttestation && isSupportedAssetCategory(assetClass)) {
+    return res.status(400).json({
+      error: OWNERSHIP_ATTESTATION_REQUIRED_CODE, code: OWNERSHIP_ATTESTATION_REQUIRED_CODE,
+      message: 'Saving an owned physical asset requires you to confirm that you physically possess the item and that the photo shows the item itself.',
+    });
+  }
+  // A capture the scan itself flagged as a suspected screen/reproduction is reference imagery, not
+  // qualifying physical evidence. (This is a flag from the scan, never proof about ownership or possession.)
+  if (scanPayload?.captureAuthenticity?.status === 'SCREEN_SUSPECTED') {
+    return res.status(400).json({
+      error: CAPTURE_REFERENCE_ONLY_CODE, code: CAPTURE_REFERENCE_ONLY_CODE,
+      message: 'This photo was flagged as a possible screen or reproduction, so it can be kept for reference but not saved as an owned physical asset. Take a photo of the item itself to save it.',
+    });
+  }
+
   try {
-    const result = await captureFromScan({ principalId, scanPayload, photos, idempotencyKey, assetClass, copyDisposition });
+    const result = await captureFromScan({ principalId, scanPayload, photos, idempotencyKey, assetClass, copyDisposition, ownershipAttestation });
     return res.status(200).json(result);
   } catch (e) {
     // GK-279 — 409 decision-required (nothing minted) or 503 candidate-check-unavailable (fail-closed).

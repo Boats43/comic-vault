@@ -10,6 +10,7 @@
 
 import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
+import { buildOwnershipAttestation } from '../src/lib/ownershipAttestation.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -67,7 +68,7 @@ async function newItem(principalId, id, attrs) {
 async function capture(principalId, { collectionItemId, key, disposition, title = 'x', photo = 'a', extra = {} }) {
   const req = {
     method: 'POST', headers: { authorization: `Bearer ${tokenFor(principalId)}`, 'x-forwarded-for': `10.${Math.floor(Math.random()*250)}.${Math.floor(Math.random()*250)}.${Math.floor(Math.random()*250)}` },
-    body: { assetClass: 'comic',
+    body: { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic',
       scanPayload: { correlationId: key, collectionItemId, book: { title }, ...extra },
       photos: [{ bytes: Buffer.from(`${TAG}-${photo}-${key}`).toString('base64'), contentType: 'image/jpeg', captureRole: 'capture-photo' }],
       idempotencyKey: key,

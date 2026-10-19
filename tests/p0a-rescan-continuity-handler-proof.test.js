@@ -22,6 +22,7 @@
 
 import './helpers/spendGuardTestSetup.js';
 import { readFileSync } from 'node:fs';
+import { buildOwnershipAttestation } from '../src/lib/ownershipAttestation.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -111,7 +112,7 @@ try {
   {
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { assetClass: 'comic', scanPayload: { collectionItemId: OLD_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap1` },
+      body: { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic', scanPayload: { collectionItemId: OLD_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap1` },
     };
     idempotencyKeysUsed.push(`${TAG}:cap1:mint`, `${TAG}:cap1:link`, `${TAG}:cap1:identity`);
     const res = mockRes();
@@ -129,7 +130,7 @@ try {
   {
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { assetClass: 'comic', scanPayload: { collectionItemId: NEW_ID, priorCollectionItemId: OLD_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap2` },
+      body: { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic', scanPayload: { collectionItemId: NEW_ID, priorCollectionItemId: OLD_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap2` },
     };
     idempotencyKeysUsed.push(`${TAG}:cap2:link`, `${TAG}:cap2:identity`);
     const res = mockRes();
@@ -172,7 +173,7 @@ try {
     await createCollectionItem({ principalId: JIMMY, id: NEW_ID_2, assetCategory: 'comic', attributes: { title: 'P0-A Handler Test Comic' } });
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { assetClass: 'comic', scanPayload: { collectionItemId: NEW_ID_2, priorCollectionItemId: NEW_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap3` },
+      body: { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic', scanPayload: { collectionItemId: NEW_ID_2, priorCollectionItemId: NEW_ID, correlationId: randomUUID() }, idempotencyKey: `${TAG}:cap3` },
     };
     idempotencyKeysUsed.push(`${TAG}:cap3:link`, `${TAG}:cap3:identity`);
     const res = mockRes();
@@ -202,7 +203,7 @@ try {
   {
     const req = {
       method: 'POST', headers: { authorization: `Bearer ${token}` },
-      body: { assetClass: 'comic', scanPayload: { collectionItemId: `${TAG}-classic-bogus`, priorCollectionItemId: `${TAG}-never-existed`, correlationId: randomUUID() }, idempotencyKey: `${TAG}:capbogus` },
+      body: { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic', scanPayload: { collectionItemId: `${TAG}-classic-bogus`, priorCollectionItemId: `${TAG}-never-existed`, correlationId: randomUUID() }, idempotencyKey: `${TAG}:capbogus` },
     };
     const res = mockRes();
     await handleCaptureScan(req, res);

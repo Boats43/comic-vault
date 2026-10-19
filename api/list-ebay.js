@@ -36,6 +36,7 @@
 // client echoes in the request, using the SAME pure functions
 // api/enrich.js's finalizeResponse already uses at enrich time.
 import { deriveLocks } from "../src/lib/responseContract.js";
+import { resolveListingAuthorityEvidence } from "../src/lib/listingAuthorityEvidence.js";
 import { deriveActionAuthority } from "../src/lib/actionAuthority.js";
 import { toBuyerSafeListingFacts, buildGovernedListingTitle, rawConditionDisclosure } from "../src/lib/buyerSafeListingCopy.js";
 import { getMyCollectionItem, NotFoundError as CollectionNotFoundError } from "../src/modules/collection/index.js";
@@ -1008,11 +1009,19 @@ export default async function handler(req, res) {
     // re-derivation for pricingSource/decision/matchConfidence/comp-count
     // /refusal/manual-review/grade-exceeds-map/claude-gate/tier0 — not
     // yet for the two fields flagged above, which remains open (logged).
+    // V1 CERTIFICATION / GK-240 — critical authority evidence is resolved from the OWNED ASSET'S DURABLE
+    // canonical row first (the request can only fill what the durable row lacks), and MISSING sold-evidence
+    // diagnostics fail closed (NO_SOLD_EVIDENCE floor) instead of skipping the check. See
+    // src/lib/listingAuthorityEvidence.js. A forged request decision / an omitted soldCompDiagnostics can no
+    // longer reach READY.
+    const { evidence: authEv, priorLockCodes: governedPriorLockCodes, sources: authSources } =
+      resolveListingAuthorityEvidence(item, governedFacts);
+    console.log('[ebay] authority evidence sources:', JSON.stringify(authSources));
     const syntheticOut = {
-      decision: item.decision || null,
-      pricingSource: item.pricingSource || null,
-      matchConfidence: item.matchConfidence || null,
-      rawComps: item.rawComps || null,
+      decision: authEv.decision,
+      pricingSource: authEv.pricingSource,
+      matchConfidence: authEv.matchConfidence,
+      rawComps: authEv.rawComps,
       // GrailKey Directive AB (GK-101) — out.rawComps is a narrowed
       // reconstruction (api/enrich.js, average/lowest/highest/count/prices
       // only — see that file's Ship v0-B comment) that never carried
@@ -1021,7 +1030,7 @@ export default async function handler(req, res) {
       // fields for the same reason) — variantApplicability is threaded
       // through the same way, as its own top-level synthetic field, not
       // nested under rawComps.
-      variantApplicability: item.variantApplicability || null,
+      variantApplicability: authEv.variantApplicability,
       // GrailKey Directive AH (GK-111) — same raw-evidence-field trust
       // boundary as variantApplicability itself (GK-103's own documented,
       // deliberately-unfixed gap: the server trusts client-SENT evidence,
@@ -1029,13 +1038,13 @@ export default async function handler(req, res) {
       // Reason-code precision only: gating already happens via
       // variantApplicability==='UNVERIFIED' above regardless of this
       // field's value, identically to the enrich-time path.
-      variantApplicabilitySoldFallback: item.variantApplicabilitySoldFallback === true,
+      variantApplicabilitySoldFallback: authEv.variantApplicabilitySoldFallback,
       // item.soldComps arrives as a bare COUNT (App.jsx sends
       // item.soldComps.length, not the array itself) — deriveLocks'
       // low-tier-thin-pool check only reads .length, so a same-length
       // placeholder array reproduces that check exactly without needing
       // the full sold-comp payload over the wire.
-      soldComps: new Array(typeof item.soldComps === 'number' ? item.soldComps : 0).fill({}),
+      soldComps: new Array(authEv.soldCompCount).fill({}),
       // GK-238 (2026-09-21, Authority Truthfulness Hotfix) — same raw-
       // evidence-field trust boundary as every other line here. Only the
       // three scalar fields deriveMarketStanding actually reads (never the
@@ -1045,20 +1054,18 @@ export default async function handler(req, res) {
       // set) means deriveMarketStanding's presence-gated checks are simply
       // not evaluated, identical to its enrich-time behavior before this
       // fix — never a fabricated demotion from missing data.
-      soldCompDiagnostics: item.soldCompDiagnostics ? {
-        rawCount: typeof item.soldCompDiagnostics.rawCount === 'number' ? item.soldCompDiagnostics.rawCount : null,
-        verifiedCount: typeof item.soldCompDiagnostics.verifiedCount === 'number' ? item.soldCompDiagnostics.verifiedCount : null,
-        newestDaysAgo: typeof item.soldCompDiagnostics.newestDaysAgo === 'number' ? item.soldCompDiagnostics.newestDaysAgo : null,
-      } : null,
-      identityConfident: item.identityConfident,
-      refusedToPrice: item.refusedToPrice === true,
-      manualReviewRequired: item.manualReviewRequired === true,
-      gradeExceedsMap: item.gradeExceedsMap === true,
-      claudeCheckBlocker: item.claudeCheckBlocker || null,
-      tier0Locked: item.tier0Locked === true,
+      // V1 CERTIFICATION (supersedes the "absence never fabricates a demotion" note above for THIS
+      // endpoint): absent diagnostics now fail closed inside resolveListingAuthorityEvidence.
+      soldCompDiagnostics: authEv.soldCompDiagnostics,
+      identityConfident: authEv.identityConfident,
+      refusedToPrice: authEv.refusedToPrice,
+      manualReviewRequired: authEv.manualReviewRequired,
+      gradeExceedsMap: authEv.gradeExceedsMap,
+      claudeCheckBlocker: authEv.claudeCheckBlocker,
+      tier0Locked: authEv.tier0Locked,
     };
     const freshLocks = deriveLocks(syntheticOut);
-    const priorLockCodes = Array.isArray(item.priorLockCodes) ? item.priorLockCodes : [];
+    const priorLockCodes = governedPriorLockCodes;
     const authority = deriveActionAuthority(syntheticOut, freshLocks, syntheticOut.decision);
     const serverReady = authority.state === 'READY' && priorLockCodes.length === 0;
 

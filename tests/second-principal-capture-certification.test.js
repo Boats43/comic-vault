@@ -22,6 +22,7 @@
 import './helpers/spendGuardTestSetup.js';
 import 'fake-indexeddb/auto';
 import { readFileSync } from 'node:fs';
+import { buildOwnershipAttestation } from '../src/lib/ownershipAttestation.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -122,7 +123,7 @@ const stripPrefix = (d) => d.slice(d.indexOf(',') + 1);
 async function captureOwned(title, issue, year) {
   const id = `${TAG}-${randomUUID().slice(0, 8)}`;
   createdItemIds.push(id);
-  const entry = { id, timestamp: Date.now(), title, issue, year, images: [PNG] };
+  const entry = { id, timestamp: Date.now(), assetCategory: 'comic', title, issue, year, images: [PNG] };
   await db.putComic(entry);
   const synced = await persistence.persistCollectionItem(entry);
   const key = randomUUID();
@@ -133,6 +134,8 @@ async function captureOwned(title, issue, year) {
       scanPayload: { correlationId: key, collectionItemId: id, book: { title, issue, year }, outcome: { decisionAction: null, pricingSource: null, price: null, gradeMultiplier: null } },
       photos: [{ bytes: stripPrefix(PNG), contentType: 'image/png', captureRole: 'capture-photo' }],
       idempotencyKey: key,
+      assetClass: 'comic',
+      ownershipAttestation: buildOwnershipAttestation('test'),
     }),
   });
   const body = await res.json();
@@ -211,7 +214,7 @@ try {
 
   console.log('\nFINDING PROBE (informational, not a pass/fail assertion) — Generic capture ordering:');
   login(P_SECOND);
-  const gd = await generic.createGenericCaptureDraft({ photoDataUrl: PNG, name: `${TAG} generic`, description: '', acquisitionCost: null });
+  const gd = await generic.createGenericCaptureDraft({ ownershipAttested: true, photoDataUrl: PNG, name: `${TAG} generic`, description: '', acquisitionCost: null });
   createdItemIds.push(gd.id);
   const gres = await generic.submitGenericCapture(gd);
   console.log(`    submitGenericCapture -> ${gres.ok ? 'OK (ordering defect no longer present)' : 'REJECTED: ' + String(gres.error || JSON.stringify(gres)).slice(0, 150)}`);

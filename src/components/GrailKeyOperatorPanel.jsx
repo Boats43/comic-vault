@@ -43,6 +43,7 @@ import {
 // GK-226 — see src/lib/captureOutcomeMapping.js for the full root-cause
 // narrative (Old Man Logan #25's durable $0.00 valuation_event).
 import { buildCaptureOutcomePrice } from "../lib/captureOutcomeMapping.js";
+import { buildOwnershipAttestation, OWNERSHIP_ATTESTATION_STATEMENT } from "../lib/ownershipAttestation.js";
 // GK-227 — post-capture physical media append.
 import { REQUIRED_CAPTURE_VIEWS, ALL_CAPTURE_VIEWS, computeCaptureViewChecklist } from "../lib/physicalMediaChecklist.js";
 
@@ -151,6 +152,8 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
   // db/data0/0004_data1_foundation.sql + 0009's own content_type
   // addition), so this is the only honest source for it.
   const [h8Proof, setH8Proof] = useState("idle");
+  // V1 P0-D — the operator's explicit ownership attestation. Never pre-checked, never remembered across items.
+  const [ownershipAttested, setOwnershipAttested] = useState(false);
   // GK-227 — 'idle' | uploading role string | { role, error }. Which
   // explicit role a pending file-picker selection targets, and any
   // per-attempt error. Never a generic "photo added" success state here
@@ -192,6 +195,14 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
   // changes any of it.
   async function captureAsOwnedAsset(disposition) {
     if (captureState === "capturing" || !collectionItemId || !item) return;
+    if (item.captureAuthenticity?.status === "SCREEN_SUSPECTED") {
+      setCaptureState({ error: "This photo was flagged as a possible screen or reproduction — it is reference only. Take a photo of the item itself to save it as an owned asset." });
+      return;
+    }
+    if (!ownershipAttested) {
+      setCaptureState({ error: "Confirm that you physically possess this item before saving it as an owned asset." });
+      return;
+    }
     const localPhoto = (item.images && item.images[0]) || item.image || null;
     if (!localPhoto || typeof localPhoto !== "string" || !localPhoto.startsWith("data:")) {
       setCaptureState({ error: "No local photo on this device for this item — capture requires this device's own photo, not a synced reference image." });
@@ -213,6 +224,8 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
       const scanPayload = {
         correlationId: idempotencyKey,
         collectionItemId,
+        // V1 P0-D — the scan's own authenticity CLAIM, recorded as provenance (never proof of anything).
+        captureAuthenticity: item.captureAuthenticity || null,
         book: {
           title: item.title || null,
           issue: item.issue || null,
@@ -233,6 +246,7 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
           photos: [{ bytes: stripDataUrlPrefix(localPhoto), contentType: contentTypeFromDataUrl(localPhoto), captureRole: "capture-photo" }],
           idempotencyKey,
           assetClass, // U1 — explicit, from the item's own category
+          ownershipAttestation: buildOwnershipAttestation("operator-panel"),
           ...(disposition ? { copyDisposition: disposition } : {}),
         }),
         signal: controller.signal,
@@ -337,9 +351,19 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
         <div style={{ color: "#888", fontSize: 12, marginBottom: 8 }}>
           No durable GrailKey physical-asset record exists for this catalogue item.
         </div>
+        {item?.captureAuthenticity?.status === "SCREEN_SUSPECTED" ? (
+          <div style={{ color: "#c9a227", fontSize: 12, marginBottom: 8 }}>
+            Reference image — this photo was flagged as a possible screen or reproduction, so it can't be saved as an owned asset. Take a photo of the item itself.
+          </div>
+        ) : (
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", color: "#bbb", fontSize: 12, marginBottom: 8, cursor: "pointer" }}>
+            <input type="checkbox" checked={ownershipAttested} onChange={(e) => setOwnershipAttested(e.target.checked)} style={{ marginTop: 2 }} />
+            <span>{OWNERSHIP_ATTESTATION_STATEMENT}</span>
+          </label>
+        )}
         <button
           onClick={() => captureAsOwnedAsset()}
-          disabled={captureState === "capturing"}
+          disabled={captureState === "capturing" || !ownershipAttested || item?.captureAuthenticity?.status === "SCREEN_SUSPECTED"}
           style={{
             width: "100%", padding: "10px 0", borderRadius: 6,
             border: "1px solid rgba(212,175,55,0.4)",

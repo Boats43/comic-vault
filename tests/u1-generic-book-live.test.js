@@ -22,6 +22,7 @@
 import './helpers/spendGuardTestSetup.js';
 import 'fake-indexeddb/auto';
 import { readFileSync } from 'node:fs';
+import { buildOwnershipAttestation } from '../src/lib/ownershipAttestation.js';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -173,7 +174,7 @@ async function captureOwned(who, { category, title, issue = null, year = null })
   const cap = await post('/api/capture-scan', {
     scanPayload: { correlationId: key, collectionItemId: id, book: { title, issue, year }, outcome: { decisionAction: null, pricingSource: null, price: null, gradeMultiplier: null } },
     photos: [{ bytes: stripPrefix(PNG), contentType: 'image/png', captureRole: 'capture-photo' }],
-    idempotencyKey: key, assetClass: category,
+    idempotencyKey: key, assetClass: category, ownershipAttestation: buildOwnershipAttestation('test'),
   }, who);
   return { id, key, synced, cap };
 }
@@ -192,7 +193,7 @@ try {
   const wrong = await post('/api/capture-scan', {
     scanPayload: { correlationId: randomUUID(), collectionItemId: book.id, book: { title: 'x' } },
     photos: [{ bytes: stripPrefix(PNG), contentType: 'image/png', captureRole: 'capture-photo' }],
-    idempotencyKey: randomUUID(), assetClass: 'comic',
+    idempotencyKey: randomUUID(), assetClass: 'comic', ownershipAttestation: buildOwnershipAttestation('test'),
   }, PA);
   // an already-linked item attaches; but a FRESH mint for a book-category row as comic is refused:
   const freshBookItem = `${TAG}-fb-${randomUUID().slice(0, 6)}`; createdIds.push(freshBookItem);
@@ -200,7 +201,7 @@ try {
   const mismatch = await post('/api/capture-scan', {
     scanPayload: { correlationId: randomUUID(), collectionItemId: freshBookItem, book: { title: 'Another Book' } },
     photos: [{ bytes: stripPrefix(PNG), contentType: 'image/png', captureRole: 'capture-photo' }],
-    idempotencyKey: randomUUID(), assetClass: 'comic',
+    idempotencyKey: randomUUID(), assetClass: 'comic', ownershipAttestation: buildOwnershipAttestation('test'),
   }, PA);
   ok(mismatch.status === 400 && /categories must match/.test(JSON.stringify(mismatch.body)), 'a book-category row can NOT be minted as a comic (400, categories must match)');
   ok((await assetOf(freshBookItem)) === null, 'and no asset was minted for it');
@@ -209,7 +210,7 @@ try {
   console.log('\n2. COMIC / BOOK / GENERIC continuity through an owned refresh');
   const comic = await captureOwned(PA, { category: 'comic', title: 'Amazing Fantasy', issue: '15', year: '1962' });
   ok(comic.cap.status === 200 && (await assetOf(comic.id))?.asset_class === 'comic', 'comic mints as comic');
-  const gen = await generic.createGenericCaptureDraft({ photoDataUrl: PNG, name: 'Brass compass', description: 'old', acquisitionCost: 12 });
+  const gen = await generic.createGenericCaptureDraft({ ownershipAttested: true, photoDataUrl: PNG, name: 'Brass compass', description: 'old', acquisitionCost: 12 });
   createdIds.push(gen.id);
   const refreshOf = async (id, extra = {}) => post('/api/enrich', { collectionItemId: id, ownedRefresh: true, skipVision: true, skipImageSearch: true, title: 'x', ...extra }, PA);
   const rBook = await refreshOf(book.id, { title: 'The Rationalists' });
@@ -260,7 +261,7 @@ try {
   const anthropicUrls = providerCalls.filter((c) => c.host.includes('anthropic.com')).map((c) => new URL(c.url).pathname);
   const classifications = anthropicUrls.filter((p) => p === '/v1/messages').length;
   ok(classifications === 1, `exactly ONE paid classification (model) call was made for the scan (${classifications}; anthropic paths: ${anthropicUrls.join(', ')})`);
-  const scanDraft = await generic.createGenericCaptureDraft({ photoDataUrl: PNG, name: '', description: '', acquisitionCost: null }); // the operator explicitly chose SAVE AS GENERIC (no name)
+  const scanDraft = await generic.createGenericCaptureDraft({ ownershipAttested: true, photoDataUrl: PNG, name: '', description: '', acquisitionCost: null }); // the operator explicitly chose SAVE AS GENERIC (no name)
   createdIds.push(scanDraft.id);
   const providerBefore = providerCalls.length; routedPaths = [];
   const unitsBefore = (await spend.reserveSpend({ principalId: PA, endpoint: 'chat' })).principalUsed;
@@ -341,7 +342,7 @@ try {
   ok((await legacy.autoClaimProvableLegacy([])).claimed === 0 && (await db.getAllComics()).length === 0, 'B cannot import the ambiguous legacy row');
   routedPaths = [];
   ok((await persistence.retryPendingCollectionItems([{ id: 'cv_legacy_ambiguous', _syncStatus: 'pending' }, ...(await db.getAllComics())])).length === 0 && routedPaths.length === 0, 'B cannot retry any pending/legacy A data (no request made)');
-  const bDraft = await generic.createGenericCaptureDraft({ photoDataUrl: PNG, name: 'B sneaker', description: '', acquisitionCost: null });
+  const bDraft = await generic.createGenericCaptureDraft({ ownershipAttested: true, photoDataUrl: PNG, name: 'B sneaker', description: '', acquisitionCost: null });
   createdIds.push(bDraft.id);
   const bSaved = await generic.submitGenericCapture(bDraft);
   ok(bSaved.ok === true, 'B captures their OWN Generic');
@@ -358,7 +359,7 @@ try {
   ok(aSeesB.status === 404, 'A cannot read B\'s asset');
 
   console.log('\n8. an account switch DURING an async Generic save fails closed');
-  const midDraft = await generic.createGenericCaptureDraft({ photoDataUrl: PNG, name: 'mid-flight', description: '', acquisitionCost: null });
+  const midDraft = await generic.createGenericCaptureDraft({ ownershipAttested: true, photoDataUrl: PNG, name: 'mid-flight', description: '', acquisitionCost: null });
   createdIds.push(midDraft.id);
   afterRoute = async (p) => { if (p === '/api/capture-scan') { logout(); login(PB); afterRoute = null; } };
   const mid = await generic.submitGenericCapture(midDraft);
@@ -377,7 +378,7 @@ try {
 
   console.log('\n9. H8 rejects the mint AFTER the Collection row exists -> a later retry completes the SAME projection');
   login(PA);
-  const h8Draft = await generic.createGenericCaptureDraft({ photoDataUrl: PNG, name: 'H8 retry object', description: '', acquisitionCost: null });
+  const h8Draft = await generic.createGenericCaptureDraft({ ownershipAttested: true, photoDataUrl: PNG, name: 'H8 retry object', description: '', acquisitionCost: null });
   createdIds.push(h8Draft.id);
   h8Blocked = true;
   const blocked = await generic.submitGenericCapture(h8Draft);

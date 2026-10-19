@@ -9943,9 +9943,13 @@ export default async function handler(req, res) {
         displayCount = soldCount + activeCount;
       }
 
+      // V1 CERTIFICATION — LABEL TRUTHFULNESS: 'verified' is reserved for pools that passed verification.
+      // An ask-derived price comes from ACTIVE listings that were never sold-verified (soldCompDiagnostics.
+      // verifiedCount 0, verifiedByAI false) — say what it is.
+      const compNoun = out.pricingSource === 'active_ask_derived' ? 'active asks (not sold-verified)' : 'verified comps';
       let priceNoteBase = gradeLabel
-        ? `${gradeLabel} · ${displayCount} verified comps`
-        : `${displayCount} verified comps`;
+        ? `${gradeLabel} · ${displayCount} ${compNoun}`
+        : `${displayCount} ${compNoun}`;
 
       // Variant fallback warning — user should verify variant premium manually
       if (priceBandsRaw.variantAdjusted) {
@@ -12127,7 +12131,10 @@ export default async function handler(req, res) {
       console.log(`[claude-check] ${criticalConflicts.length} CRITICAL conflicts detected — AI call fired`);
     } else if (!isRefresh && criticalConflicts.length === 0) {
       // Ship #28b + Q44-B: Zero CRITICAL conflicts = deterministic pricing, skip AI
-      claudeCheck = { verified: true, skipReason: 'no_critical_conflicts' };
+      // V1 CERTIFICATION — VERIFICATION TRUTHFULNESS: a skipped check is not a passed check. verified is
+      // null (neither true nor false: every existing `=== false` blocker test is unaffected) and the
+      // four-state status says what actually happened.
+      claudeCheck = { verified: null, status: 'SKIPPED', skipReason: 'no_critical_conflicts' };
       const infoCount = (out.conflicts || []).filter(c => c.severity === 'INFO').length;
       console.log(`[claude-check] zero CRITICAL conflicts${infoCount > 0 ? ` (${infoCount} INFO)` : ''} — skip AI call (deterministic)`);
     } else {
@@ -12136,6 +12143,16 @@ export default async function handler(req, res) {
       console.log('[claude-check] refresh with no cached result — skip AI call');
     }
     mark('claude_check_complete');
+    // V1 CERTIFICATION — normalize to the four-state status VERIFIED | SKIPPED | UNKNOWN | FAILED for every
+    // source (fresh AI result, cached result from an older scan, skip). A legacy cached
+    // { verified: true, skipReason } was a skip that claimed verification — reclassified, never trusted.
+    if (claudeCheck && typeof claudeCheck === 'object') {
+      if (claudeCheck.skipReason && claudeCheck.verified !== false) {
+        claudeCheck = { ...claudeCheck, verified: null, status: 'SKIPPED' };
+      } else if (!claudeCheck.status) {
+        claudeCheck = { ...claudeCheck, status: claudeCheck.verified === true ? 'VERIFIED' : claudeCheck.verified === false ? 'FAILED' : 'UNKNOWN' };
+      }
+    }
     if (claudeCheck) {
       out.claudeCheck = claudeCheck;
       out.verified = claudeCheck.verified;
