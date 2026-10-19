@@ -2,6 +2,8 @@
 
 Base: Production `ba82e93` (= origin/main). Branch `v1-certification-rc`. NOT pushed, NOT deployed.
 
+> **STATUS CORRECTED 2026-10-19 — HOLD. Full-suite certification is NOT established.** The original text below is preserved unchanged; see "CORRECTION 2026-10-19" at the end of this document.
+
 ## Scorecard (what was actually tested)
 | | Area | Verdict | Evidence / scope |
 |---|---|---|---|
@@ -23,6 +25,8 @@ Base: Production `ba82e93` (= origin/main). Branch `v1-certification-rc`. NOT pu
 5. UI: "Low match 100/100" contradiction (score hidden when tiers disagree); reference-only/provisional notice.
 
 ## Pre-existing failures (identical on pristine ba82e93, not regressions)
+> *[Correction 2026-10-19: this claim came from a small targeted subset and was NOT shown for the full suite. It is retained as originally written. See the end of this document.]*
+
 gk227-asset-media-append-handler-smoke (4/28), grailkey-operator-panel-capture-wiring (4/4, fixture collision with retained Development rows), p0a-rescan-continuity-handler-proof (5), gk168-edition-facet (18), gk159-commit4-terminal-floor-handler-smoke (8), gk277 (1, global-count race).
 
 ## Banked, not fixed
@@ -33,3 +37,45 @@ gk227-asset-media-append-handler-smoke (4/28), grailkey-operator-panel-capture-w
 
 ## Old Man Logan #25 (marketplace)
 A2 resolved on Production code: title is `Old Man Logan Deodato #25 1:25 Marvel 2017 Raw NM-` (the earlier bare-"9.2" title was computed on stale local code). A3: `authoritativeRecommendation` ($4.18) is a stale enrich-time copy of out.price kept by `||` merge precedence; nothing in listing/price code reads it. A1 (confirmedTitle "Wolverine: Old Man Logan Giant-Size" vs the comic) and identity confirmations, persisted $19.99 price, Q41/LIST approval, seller identity (`/api/ebay-connection?verify=1`), duplicate state and eBay policies require the operator.
+
+---
+## CORRECTION 2026-10-19 — the "pre-existing failures" statement did not establish full-suite behavior
+
+**Process finding: a result observed in a selected test subset was represented as a property of the complete certification suite.**
+
+### What the original statement said
+That six groups (gk227-asset-media-append-handler-smoke, grailkey-operator-panel-capture-wiring, p0a-rescan-continuity-handler-proof, gk168-edition-facet,
+gk159-commit4-terminal-floor-handler-smoke, gk277) "fail identically on pristine ba82e93, not regressions". That came from a 34-file targeted subset. It did not run, and could not
+establish, the behavior of the complete suite on either tree.
+
+### What the first full sweep of RC `56b2448` recorded (2026-10-19, sequential runner, incremental log `rc.jsonl`, preserved read-only)
+| Outcome | Files |
+|---|---|
+| Planned sweep | 469 test files |
+| PASS | 181 |
+| FAIL | 37 |
+| TIMEOUT (90 s) | 8 |
+| ENV_ERROR (process never started: Windows 0xC0000142 under memory pressure) | 243 — NOT failures and NOT coverage |
+Of the six documented groups: **3 FAIL** (gk227-asset-media-append-handler-smoke, gk159-commit4-terminal-floor-handler-smoke, gk168-edition-facet), **2 ENV_ERROR**
+(grailkey-operator-panel-capture-wiring, p0a-rescan-continuity-handler-proof), **1 PASS** (gk277).
+**34 of the 37 failed files are outside the six documented groups.**
+
+### Evidence grading of the 37 failures (C1/C2 review)
+| Level | Basis | Files |
+|---|---|---|
+| PROVEN | E3 source-equivalence: the asserted source condition is identical in baseline and RC | grailkey-commit-f, grailkey-commit-v1, gk201-operator-path-source-contract, gk252-book-client-acceptance (4) |
+| PROVEN | E1: identical failure signature executed on pristine ba82e93 | artist-registry-sync, asset-graph-operator-actions-live-proof (2) |
+| STRONG | E2: identical signature on Lane B (ba82e93-based, no RC code) | b1rc-ebay-xml-contract, beta1a-0022-live-apply-gate (2) |
+| STRONG (environment, not a code defect) | E4/E4b: required environment variable not set in the test process | gk179-environment-guard-latency, gk179-environment-guard-wiring-smoke, gk179-environment-marker-migration-contract, gk194-stored-function-resolution-scratch (4) |
+| WEAK | E1b: pristine baseline failed with the same exit code only (signature not compared) | batch1-fixes, comp-filter-hygiene, gk157-158-handler-smoke (3) |
+| WEAK | E5: the test references no RC-changed file (absence of evidence of dependence) | d4-identifier-fabric-live-concurrency, d4-identifier-fabric-live-retry-closure, d4-identifier-fabric-live-retry-deterministic, d5a-market-observation-migration-contract, decision-engine (5) |
+| UNRESOLVED | three documented-group failures not independently verified on pristine baseline | gk227-asset-media-append-handler-smoke, gk159-commit4-terminal-floor-handler-smoke, gk168-edition-facet (3) |
+| UNRESOLVED | no baseline run, no source proof | eux-edition-verify-panel, gk152-handler-smoke, gk184-evidence-observed-at-unit, gk184-handler-smoke, gk213a-identity-authority, gk227-0029-migration-contract, gk229-content-unverified-handler-smoke, gk270-canonical-collection-projection, gk270-relink-tool, gk271-enrich-handler-smoke, gk272-classic-comics-refused-conflict-smoke, gk276-enrich-canary-handler-smoke, gk280a-amendment (13) |
+| (documented elsewhere) | no bearer token, so 401 (code-health notes B3) | grailkey-directive-aj-http-handler (1) |
+Environment-dependent failures are kept distinct from pre-existing code defects; **it is not claimed that all previously grouped files are conclusively pre-existing.**
+
+### Disposition
+- **Certification status: HOLD. Full-suite certification is not established.**
+- RC `56b2448` additionally has a demonstrated /api/collection authority bypass (fixed on branch `v1-source-authority`).
+- The 243 ENV_ERROR RC files are deferred (the superseded RC will not be certified); they remain ENV_ERROR in the record.
+- Historical sweep results are preserved unchanged (`rc.jsonl`, `rc.jsonl.preserved-20261019`).
