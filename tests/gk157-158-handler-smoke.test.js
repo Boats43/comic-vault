@@ -157,7 +157,7 @@ async function part1Gk157HandlerControl() {
   const handler = handlerModule.default;
   const req = {
     method: 'POST', headers: { authorization: `Bearer ${__gk269TestToken}` },
-    body: {
+    body: { assetType: 'comic',
       title: 'g i joe', issue: '5', grade: 'unknown', confidence: 'low',
       isGraded: false, numericGrade: null, year: null, publisher: null,
       variant: 'exclusive limited signed virgin', keyIssue: null,
@@ -228,7 +228,7 @@ async function part2Gk158HandlerControl() {
   const handler = handlerModule.default;
   const req = {
     method: 'POST', headers: { authorization: `Bearer ${__gk269TestToken}` },
-    body: {
+    body: { assetType: 'comic',
       title: 'Dark Nights: Death Metal', issue: '1', grade: 'NM 9.4', confidence: 'high',
       isGraded: false, numericGrade: null, year: null, publisher: null,
       variant: null, keyIssue: null, reason: 'Dark Nights Death Metal virgin variant',

@@ -61,7 +61,7 @@ async function call(envVars, bodyOver = {}) {
   const res = { status: (c) => ({ json: (d) => { status = c; body = d; return { statusCode: c, body: d }; } }), setHeader: () => {} };
   let threw = null;
   try {
-    await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body: { title: 'Smoke Test Comic', issue: '5', year: '1990', publisher: 'Marvel', grade: 'VF 8.0', isGraded: false, numericGrade: 8, skipVision: true, skipImageSearch: true, ...bodyOver } }, res);
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body: { assetType: 'comic', title: 'Smoke Test Comic', issue: '5', year: '1990', publisher: 'Marvel', grade: 'VF 8.0', isGraded: false, numericGrade: 8, skipVision: true, skipImageSearch: true, ...bodyOver } }, res);
   } catch (e) { threw = e; }
   return { status, body, threw };
 }

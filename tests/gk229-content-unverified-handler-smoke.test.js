@@ -125,7 +125,7 @@ async function runOne({ label, title, issue, grade, year, publisher }) {
   const handler = handlerModule.default;
   const req = {
     method: 'POST', headers: { authorization: `Bearer ${__gk269TestToken}` },
-    body: {
+    body: { assetType: 'comic',
       title, issue, grade, confidence: 'high',
       isGraded: false, numericGrade: null, year, publisher,
       variant: null, keyIssue: null, reason: `${title} #${issue}`,

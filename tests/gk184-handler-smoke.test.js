@@ -164,7 +164,7 @@ async function main() {
   const req = {
     method: 'POST',
     headers: { authorization: `Bearer ${__gk269TestToken}` },
-    body: {
+    body: { assetType: 'comic',
       title: 'Amazing Spider-Man',
       issue: '1',
       grade: 'VF/NM 9.0',

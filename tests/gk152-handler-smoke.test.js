@@ -153,7 +153,7 @@ async function main() {
   const handler = handlerModule.default;
   const req = {
     method: 'POST', headers: { authorization: `Bearer ${__gk269TestToken}` },
-    body: {
+    body: { assetType: 'comic',
       // Vision's REAL, wholly-wrong read for this scan — a completely
       // different title with zero token overlap, per the actual trace.
       title: 'Dark Nights: Death Metal', issue: '1', grade: 'NM 9.4', confidence: 'high',

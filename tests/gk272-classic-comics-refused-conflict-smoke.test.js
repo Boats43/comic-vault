@@ -85,7 +85,7 @@ try {
   await handler({
     method: 'POST',
     headers: { authorization: `Bearer ${TOKEN}` },
-    body: {
+    body: { assetType: 'comic',
       title: 'classic comics', issue: '13', grade: 'FR 1.0', confidence: 'medium',
       isGraded: false, numericGrade: null, year: null, publisher: null,
       variant: null, foreignEdition: false, keyIssue: null,

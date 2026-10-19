@@ -272,7 +272,7 @@ async function runScan({ label, reason, manualAuthority = null, printingClass = 
     body.manualAuthority = manualAuthority;
     body.printingClass = printingClass;
   }
-  const req = { method: 'POST', headers: { authorization: `Bearer ${__gk269TestToken}` }, body };
+  const req = { method: 'POST', headers: { authorization: `Bearer ${__gk269TestToken}` }, body: { assetType: 'comic', ...body } };
   let capturedStatus = null;
   let capturedBody = null;
   const res = {

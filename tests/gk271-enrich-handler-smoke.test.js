@@ -85,7 +85,7 @@ const run = async (variant, foreignEdition = false) => {
   const req = {
     method: 'POST',
     headers: { authorization: `Bearer ${TOKEN}` },
-    body: {
+    body: { assetType: 'comic',
       title: 'Classic Comics', issue: '13', grade: 'FR 1.0', confidence: 'medium',
       isGraded: false, numericGrade: null, year: '1943', publisher: 'Gilberton',
       variant, foreignEdition, keyIssue: null,

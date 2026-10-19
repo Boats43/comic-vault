@@ -1,3 +1,6 @@
+import './helpers/spendGuardTestSetup.js';
+if (!process.env.GRAILKEY_SESSION_SECRET) process.env.GRAILKEY_SESSION_SECRET = (await import('node:crypto')).randomBytes(32).toString('base64url');
+const __tok = (await import('../src/modules/auth/token.js')).issueToken({ principalId: 'gk269-test-principal' }).token;
 // tests/grailkey-directive-aj-http-handler.test.js
 //
 // GrailKey Directive 2026-08-15-AJ — Proof 3: HTTP-level fixtures.
@@ -118,7 +121,7 @@ const callEnrich = async (body, fetchMock) => {
   const realFetch = global.fetch;
   global.fetch = fetchMock;
   try {
-    const req = { method: 'POST', body, headers: {} };
+    const req = { method: 'POST', body: { assetType: 'comic', ...body }, headers: { authorization: 'Bearer ' + __tok } };
     const res = makeMockRes();
     await handler(req, res);
     return res._captured;

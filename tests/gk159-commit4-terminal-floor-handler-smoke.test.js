@@ -141,7 +141,7 @@ async function main() {
   const handler = handlerModule.default;
   const req = {
     method: 'POST', headers: { authorization: `Bearer ${__gk269TestToken}` },
-    body: {
+    body: { assetType: 'comic',
       title: 'Absolute Wonder Woman', issue: '99', grade: 'unknown', confidence: 'medium',
       isGraded: false, numericGrade: null, year: '2026', publisher: 'DC Comics',
       variant: null, keyIssue: null, reason: 'Absolute Wonder Woman virgin variant',
