@@ -490,7 +490,7 @@ console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-
   }));
   assertTrue(r.statusCode === 403 && r.body?.error === 'ACTION_AUTHORITY_NOT_READY' && noEbayWrite() && mockState.mediaCalls.length === 0 && !fetchCalls.includes('UploadSiteHostedPictures'),
     `forged LIST_NOW decision + omitted soldCompDiagnostics + no Q41 -> 403 ACTION_AUTHORITY_NOT_READY, zero eBay writes (got ${r.statusCode} ${r.body?.error})`);
-  assertTrue(Array.isArray(r.body?.actionAuthority?.reasonCodes) && r.body.actionAuthority.reasonCodes.includes('NO_SOLD_EVIDENCE'), 'the refusal names NO_SOLD_EVIDENCE (missing evidence failed closed, not skipped)');
+  assertTrue(Array.isArray(r.body?.actionAuthority?.reasonCodes) && (r.body.actionAuthority.reasonCodes.includes('NO_SOLD_EVIDENCE') || r.body.actionAuthority.reasonCodes.includes('NO_MARKET_EVIDENCE')) && r.body.authorityReceipt === 'UNVERIFIED:absent', 'the refusal names the missing evidence AND says no verifying server receipt backed it (failed closed, not skipped)');
   // --- PRICE: durable LIST action cannot be substituted ---
   const unpriced = await (await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href)).recordOperatorAction({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, actionCode: 'LIST', source: 'test-fixture', idempotencyKey: 'list-ebay-packet-safety-unpriced-list-v1' });
   r = await run(base({ operatorActionEventId: unpriced.operatorActionEventId }));

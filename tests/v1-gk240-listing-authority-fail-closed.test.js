@@ -6,6 +6,9 @@
 import { deriveLocks } from '../src/lib/responseContract.js';
 import { deriveActionAuthority } from '../src/lib/actionAuthority.js';
 import { resolveListingAuthorityEvidence } from '../src/lib/listingAuthorityEvidence.js';
+import { issueAuthorityReceipt } from '../src/lib/authorityReceipt.js';
+process.env.GRAILKEY_SESSION_SECRET = process.env.GRAILKEY_SESSION_SECRET || 'x'.repeat(40);
+const PRINCIPAL = '0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d';
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓', m); } else { fail++; console.log('  ✗', m); } };
@@ -38,39 +41,51 @@ const legacy = authorityOf({ ...request, soldCompDiagnostics: null });
 ok(legacy.state === 'READY', 'PRE-FIX SHAPE reproduces: forged decision + omitted diagnostics => READY (the confirmed fail-open)');
 
 // (2) governed resolver, no durable row at all
-let r = resolveListingAuthorityEvidence(request, null);
+let r = resolveListingAuthorityEvidence(request, null, { principalId: PRINCIPAL });
 ok(r.sources.soldCompDiagnostics === 'absent-failed-closed', 'missing diagnostics anywhere => failed closed (never skipped)');
 let a = authorityOf(r.evidence);
-ok(a.state === 'REVIEW' && a.reasonCodes.includes('NO_SOLD_EVIDENCE'), 'forged decision + omitted diagnostics => REVIEW / NO_SOLD_EVIDENCE');
+ok(a.state === 'REVIEW', 'forged decision + omitted diagnostics, no stored row => REVIEW (not READY)');
 
-// (3) durable evidence wins over a forged request
-const durable = {
-  decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: ['no-sold-candidates'] },
-  pricingSource: 'active_ask_derived',
-  soldCompDiagnostics: { rawCount: 0, verifiedCount: 0, newestDaysAgo: null },
-  contract: { locks: [{ code: 'market-standing-no-sold-evidence' }] },
-};
-r = resolveListingAuthorityEvidence({ ...request, soldCompDiagnostics: { rawCount: 12, verifiedCount: 9, newestDaysAgo: 3 }, priorLockCodes: [] }, durable);
-ok(r.sources.decision === 'durable' && r.evidence.decision.action === 'RESEARCH', 'durable decision overrides a forged request decision');
-ok(r.sources.soldCompDiagnostics === 'durable' && r.evidence.soldCompDiagnostics.rawCount === 0, 'durable sold diagnostics override forged request diagnostics');
-ok(r.priorLockCodes.includes('market-standing-no-sold-evidence'), "durable contract lock codes are folded into priorLockCodes (a client cannot drop them)");
+// (3) V1 P0 source authority: the stored row is CLIENT-WRITABLE, so loose stored values are NOT evidence; only a
+// server-issued receipt that verifies for this principal is.
+const row = { title: 'Street Fighter', issue: '1' };
+const forgedRow = { ...row, decision: forgedDecision, pricingSource: 'verified_sold_recency', matchConfidence: { tier: 'HIGH', score: 100 }, rawComps: { count: 29 }, identityConfident: true, soldCompDiagnostics: { rawCount: 12, verifiedCount: 9, newestDaysAgo: 3 }, contract: { locks: [] } };
+r = resolveListingAuthorityEvidence(request, forgedRow, { principalId: PRINCIPAL });
 a = authorityOf(r.evidence);
-ok(a.state !== 'READY', 'durable-governed evidence is not READY');
+ok(r.sources.receipt === 'UNVERIFIED:absent' && a.state !== 'READY', 'a stored row with forged loose authority values and NO receipt is not READY');
+
+const honestResponse = { title: 'Street Fighter', issue: '1', year: '1993', decision: { action: 'LIST_NOW', confidence: 'high', blockers: [], warnings: [] },
+  pricingSource: 'verified_sold_recency', matchConfidence: { tier: 'HIGH', score: 100 }, rawComps: { count: 12 }, identityConfident: true,
+  soldCompDiagnostics: { rawCount: 8, verifiedCount: 6, newestDaysAgo: 9 }, contract: { locks: [] } };
+const goodReceipt = issueAuthorityReceipt({ principalId: PRINCIPAL, response: honestResponse });
+r = resolveListingAuthorityEvidence({ ...request, soldCompDiagnostics: { rawCount: 99, verifiedCount: 99, newestDaysAgo: 0 } }, { ...row, authorityReceipt: goodReceipt }, { principalId: PRINCIPAL });
+ok(r.sources.receipt === 'VERIFIED' && r.sources.soldCompDiagnostics === 'server-receipt' && r.evidence.soldCompDiagnostics.rawCount === 8, 'a verifying receipt supplies the evidence; a forged request value cannot override it');
+
+const lockedResponse = { ...honestResponse, decision: { action: 'RESEARCH', confidence: 'low', blockers: [], warnings: ['no-sold-candidates'] }, soldCompDiagnostics: { rawCount: 0, verifiedCount: 0, newestDaysAgo: null }, contract: { locks: [{ code: 'market-standing-no-sold-evidence' }] } };
+r = resolveListingAuthorityEvidence({ ...request, priorLockCodes: [] }, { ...row, authorityReceipt: issueAuthorityReceipt({ principalId: PRINCIPAL, response: lockedResponse }) }, { principalId: PRINCIPAL });
+ok(r.priorLockCodes.includes('market-standing-no-sold-evidence'), "the receipt's contract lock codes are folded into priorLockCodes (a client cannot drop them)");
+a = authorityOf(r.evidence);
+ok(a.state !== 'READY', 'receipt-backed RESEARCH evidence is not READY');
 
 // (4) honest, fully-evidenced book is not over-blocked
-const honest = {
-  decision: { action: 'LIST_NOW', confidence: 'high', blockers: [], warnings: [] },
-  pricingSource: 'verified_sold_recency', matchConfidence: { tier: 'HIGH', score: 100 },
-  rawComps: { count: 12 }, identityConfident: true,
-  soldCompDiagnostics: { rawCount: 8, verifiedCount: 6, newestDaysAgo: 9 },
-};
-r = resolveListingAuthorityEvidence(honest, { ...honest, contract: { locks: [] } });
+r = resolveListingAuthorityEvidence(honestResponse, { ...row, authorityReceipt: goodReceipt }, { principalId: PRINCIPAL });
 a = authorityOf(r.evidence);
-ok(a.state === 'READY' && r.priorLockCodes.length === 0, 'a genuinely evidenced sold-verified book still reaches READY (no over-blocking)');
+ok(a.state === 'READY' && r.priorLockCodes.length === 0, 'a genuinely evidenced, receipt-backed sold-verified book still reaches READY (no over-blocking)');
 
-// restrictive flags: a client can add a restriction, never remove a durable one
-r = resolveListingAuthorityEvidence({ manualReviewRequired: false, refusedToPrice: false }, { manualReviewRequired: true, soldCompDiagnostics: honest.soldCompDiagnostics });
-ok(r.evidence.manualReviewRequired === true, 'a durable manual-review restriction cannot be cleared by the request');
+// receipt bound to the principal and to the book
+r = resolveListingAuthorityEvidence(honestResponse, { ...row, authorityReceipt: goodReceipt }, { principalId: '00000000-0000-4000-8000-000000000009' });
+ok(r.sources.receipt === 'UNVERIFIED:principal-mismatch' && authorityOf(r.evidence).state !== 'READY', "another principal cannot use this receipt");
+r = resolveListingAuthorityEvidence(honestResponse, { title: 'Amazing Spider-Man', issue: '300', authorityReceipt: goodReceipt }, { principalId: PRINCIPAL });
+ok(r.sources.receipt === 'IDENTITY_MISMATCH' && authorityOf(r.evidence).state !== 'READY', 'a receipt for a different book cannot authorize this one');
 
-console.log(`\n${pass} passed, ${fail} failed\n`);
+// restrictive flags: a client can add a restriction, never remove one
+r = resolveListingAuthorityEvidence({ manualReviewRequired: true }, { ...row, authorityReceipt: goodReceipt }, { principalId: PRINCIPAL });
+ok(r.evidence.manualReviewRequired === true, 'a request-added manual-review restriction is honored');
+const mrReceipt = issueAuthorityReceipt({ principalId: PRINCIPAL, response: { ...honestResponse, manualReviewRequired: true } });
+r = resolveListingAuthorityEvidence({ manualReviewRequired: false }, { ...row, authorityReceipt: mrReceipt }, { principalId: PRINCIPAL });
+ok(r.evidence.manualReviewRequired === true, 'a manual-review restriction in the signed receipt cannot be cleared by the request');
+
+console.log(`
+${pass} passed, ${fail} failed
+`);
 process.exit(fail ? 1 : 0);

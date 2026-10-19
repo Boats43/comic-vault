@@ -4,6 +4,8 @@
 // schema-qualified (data1_dev.<table>) — GK-178 discipline, no
 // `SET search_path` reliance anywhere in this module.
 
+import { governIncomingAuthority, EXECUTION_AUTHORITY_KEYS } from '../../lib/authorityReceipt.js';
+
 export async function assertPrincipalExists(client, principalId) {
   const res = await client.query('SELECT 1 FROM data1_dev.gk_principal WHERE id = $1', [principalId]);
   return res.rowCount > 0;
@@ -97,7 +99,7 @@ function stripFullyProtectedGradingKeysSql(incomingParam) {
 // never caller-supplied text — PROTECTED_AUTHORITY_KEYS/
 // FULLY_PROTECTED_GRADING_KEYS are fixed literal lists, not user input, so
 // building the key lists into the query text here carries no injection risk.
-function protectedAttributesMergeSql(existingAttrsExpr, incomingParam) {
+function protectedAttributesMergeSql(existingAttrsExpr, incomingParam, receiptVerifiedParam = null) {
   // GK-261: every key in PROTECTED_AUTHORITY_KEYS is now fully protected
   // (ALL_FULLY_PROTECTED_KEYS is a superset). Result = incoming minus every
   // protected key, plus the EXISTING row's protected entries copied exactly
@@ -108,6 +110,7 @@ function protectedAttributesMergeSql(existingAttrsExpr, incomingParam) {
   // GK-278B: an identity facet that is OPERATOR_CONFIRMED in the existing row keeps its existing VALUE
   // too (survives overwrite, explicit null and omission). Only a new validated manual correction
   // (applyIdentityAuthorityPatch) can change it. Facets without that authority stay ordinary client state.
+  const executionKeysArray = `ARRAY[${[...EXECUTION_AUTHORITY_KEYS, 'authorityReceipt', 'authorityProvenance'].map((k) => `'${k}'`).join(', ')}]::text[]`;
   const identityValueKeys = `ARRAY[${IDENTITY_LOCKABLE_VALUE_KEYS.map((k) => `'${k}'`).join(', ')}]::text[]`;
   return `(
     (COALESCE(${incomingParam}::jsonb, '{}'::jsonb) - ${keysArray})
@@ -116,6 +119,13 @@ function protectedAttributesMergeSql(existingAttrsExpr, incomingParam) {
         FROM jsonb_each(COALESCE(${existingAttrsExpr}, '{}'::jsonb)) AS e
        WHERE e.key = ANY(${keysArray})
     )
+    ${receiptVerifiedParam ? `|| (
+      -- V1 P0 source authority: a write WITHOUT a verifying server receipt changes none of the execution-deciding
+      -- fields (the incoming copies were discarded in governIncomingAuthority); the existing row's values stand.
+      SELECT COALESCE(jsonb_object_agg(g.key, g.value), '{}'::jsonb)
+        FROM jsonb_each(COALESCE(${existingAttrsExpr}, '{}'::jsonb)) AS g
+       WHERE ${receiptVerifiedParam}::boolean = false AND g.key = ANY(${executionKeysArray})
+    )` : ''}
     || (
       SELECT COALESCE(jsonb_object_agg(f.key, ${existingAttrsExpr}->f.key), '{}'::jsonb)
         FROM unnest(${identityValueKeys}) AS f(key)
@@ -166,16 +176,17 @@ export async function getByPrincipalAndId(client, principalId, id) {
 // class-wide GK-163 law); this is a plain CRUD resource, not an
 // event-sourced ledger, and a same-principal self-overwrite carries no
 // cross-account risk.
-export async function upsertItem(client, { id, principalId, assetCategory, attributes }) {
+export async function upsertItem(client, { id, principalId, assetCategory, attributes: rawAttributes }) {
+  const { attributes, verified } = governIncomingAuthority(rawAttributes, principalId);
   const res = await client.query(
     `INSERT INTO data1_dev.collection_item (id, principal_id, asset_category, attributes)
      VALUES ($1, $2, $3, ${stripFullyProtectedGradingKeysSql('$4')})
      ON CONFLICT (principal_id, id) DO UPDATE
-       SET attributes = ${protectedAttributesMergeSql('collection_item.attributes', 'EXCLUDED.attributes')},
+       SET attributes = ${protectedAttributesMergeSql('collection_item.attributes', 'EXCLUDED.attributes', '$5')},
            updated_at = now()
        WHERE collection_item.asset_category = EXCLUDED.asset_category
      RETURNING id, asset_category, attributes, created_at, updated_at`,
-    [id, principalId, assetCategory, JSON.stringify(attributes)]
+    [id, principalId, assetCategory, JSON.stringify(attributes), verified]
   );
   // U1 — the category is immutable: an existing row is only updated when the incoming
   // category EQUALS the stored one (the ON CONFLICT ... WHERE above), so a mismatch
@@ -190,15 +201,16 @@ export async function upsertItem(client, { id, principalId, assetCategory, attri
 // carves out one narrow, explicit exception: PROTECTED_AUTHORITY_KEYS
 // survive an incoming write that omits them (see that constant's own
 // comment) — everything else in `attributes` remains a true full replace.
-export async function updateItem(client, { id, principalId, assetCategory, attributes }) {
+export async function updateItem(client, { id, principalId, assetCategory, attributes: rawAttributes }) {
+  const { attributes, verified } = governIncomingAuthority(rawAttributes, principalId);
   const res = await client.query(
     `UPDATE data1_dev.collection_item
-        SET attributes = ${protectedAttributesMergeSql('attributes', '$4')},
+        SET attributes = ${protectedAttributesMergeSql('attributes', '$4', '$5')},
             updated_at = now()
       WHERE principal_id = $1 AND id = $2
         AND ($3::text IS NULL OR asset_category = $3::text)
       RETURNING id, asset_category, attributes, created_at, updated_at`,
-    [principalId, id, assetCategory ?? null, JSON.stringify(attributes)]
+    [principalId, id, assetCategory ?? null, JSON.stringify(attributes), verified]
   );
   return res.rowCount > 0 ? toRow(res.rows[0]) : null;
 }

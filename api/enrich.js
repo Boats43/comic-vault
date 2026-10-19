@@ -71,6 +71,7 @@ import { selectFirstEligibleVisual, extractFirstEligibleYearCandidate, reconcile
 // call before res.json() on every substantive exit; nothing writes
 // price/decision fields after it.
 import { finalizeResponse } from "../src/lib/responseContract.js";
+import { issueAuthorityReceipt } from "../src/lib/authorityReceipt.js";
 import {
   verifyStory,
   detectKeyValue,
@@ -2305,6 +2306,15 @@ export default async function handler(req, res) {
     return res.status(auth.status).json({ error: auth.error });
   }
 
+  // V1 P0 SOURCE AUTHORITY — every response that leaves this handler carries a server-signed receipt of the
+  // execution-deciding values it derived (decision, pricingSource, soldCompDiagnostics, contract, ...). The client
+  // cannot mint one; /api/collection and /api/list-ebay trust these fields ONLY through a receipt that verifies.
+  const finalizeWithReceipt = (o) => {
+    const fin = finalizeResponse(o);
+    fin.authorityReceipt = issueAuthorityReceipt({ principalId: auth.principalId, response: fin });
+    return fin;
+  };
+
   // A4 RATE LIMIT: 30 scans / 10 min per principal+IP
   const rateCheck = checkRateLimit(req, { principalId: auth.principalId });
   res.setHeader('x-ratelimit-remaining', String(rateCheck.remaining));
@@ -2781,7 +2791,7 @@ export default async function handler(req, res) {
         };
         if (out.variantNote === undefined) out.variantNote = null;
         if (out.variantApplicability === undefined) out.variantApplicability = null;
-        return res.status(200).json(finalizeResponse(out)); // STOP — fail closed, no identity/comps/pricing work at all
+        return res.status(200).json(finalizeWithReceipt(out)); // STOP — fail closed, no identity/comps/pricing work at all
       }
 
       if (ownedRefresh === true) {
@@ -7129,7 +7139,7 @@ export default async function handler(req, res) {
       }
       // Ship #24a-2: refusedOut retired as a separate SHAPE — same fields
       // flow, plus the canonical contract block.
-      return res.status(200).json(finalizeResponse(refusedOut));
+      return res.status(200).json(finalizeWithReceipt(refusedOut));
       } // end else (below-floor: unpromoted, early-return path)
     } // end if (identityRefused)
 
@@ -7200,7 +7210,7 @@ export default async function handler(req, res) {
         });
         if (out.variantNote === undefined) out.variantNote = confirmedVariant || null;
         if (out.variantApplicability === undefined) out.variantApplicability = null;
-        return res.status(200).json(finalizeResponse(out)); // STOP — conflict held, no comps, no pricing
+        return res.status(200).json(finalizeWithReceipt(out)); // STOP — conflict held, no comps, no pricing
       } else {
         out.categoryAuthoritySource = 'durable-collection-item';
       }
@@ -7291,7 +7301,7 @@ export default async function handler(req, res) {
       if (out.variantApplicability === undefined) {
         out.variantApplicability = null;
       }
-      return res.status(200).json(finalizeResponse(out)); // STOP — no comps, no pricing, return early
+      return res.status(200).json(finalizeWithReceipt(out)); // STOP — no comps, no pricing, return early
     }
 
     // Book-level comps cache — skip 5-9s eBay fetch on refresh.
@@ -9265,7 +9275,7 @@ export default async function handler(req, res) {
         out.variantApplicability = null;
       }
       // Ship #24a-2: contract state=LOCKED via DO_NOT_LIST hard lock
-      return res.json(finalizeResponse(out)); // STOP — no pricing, return early
+      return res.json(finalizeWithReceipt(out)); // STOP — no pricing, return early
     }
 
     // Q94 — Publisher backfill from ACTIVE-comp title consensus (second path).
@@ -13814,7 +13824,7 @@ export default async function handler(req, res) {
       out.title = operatorTitleLock.title;
     }
     if (operatorTitleLock.locked) out.operatorTitleAuthority = operatorTitleLock.source;
-    res.status(200).json(finalizeResponse(out));
+    res.status(200).json(finalizeWithReceipt(out));
   } catch (err) {
     // Ship 6 debug — log full error and stack trace to Vercel logs.
     // Without this, 500s appear in production with no diagnostic info.

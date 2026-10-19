@@ -1015,7 +1015,7 @@ export default async function handler(req, res) {
     // src/lib/listingAuthorityEvidence.js. A forged request decision / an omitted soldCompDiagnostics can no
     // longer reach READY.
     const { evidence: authEv, priorLockCodes: governedPriorLockCodes, sources: authSources } =
-      resolveListingAuthorityEvidence(item, governedFacts);
+      resolveListingAuthorityEvidence(item, governedFacts, { principalId: grailkeyPrincipalId });
     console.log('[ebay] authority evidence sources:', JSON.stringify(authSources));
     const syntheticOut = {
       decision: authEv.decision,
@@ -1084,6 +1084,8 @@ export default async function handler(req, res) {
           error: 'ACTION_AUTHORITY_NOT_READY',
           message: 'Transaction authority is not READY — insufficient identity/market standing to list without acknowledgment.',
           actionAuthority: authority,
+          // V1 P0 — why the server could not rely on the stored evidence: VERIFIED | IDENTITY_MISMATCH | UNVERIFIED:<reason>
+          authorityReceipt: authSources.receipt,
         });
         return;
       }

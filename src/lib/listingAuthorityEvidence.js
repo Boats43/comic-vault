@@ -17,6 +17,8 @@
 // per-request forgery path and the omit-to-skip path; it does not make Collection attributes
 // server-computed.
 
+import { verifyAuthorityReceipt, identityMatchesReceipt } from './authorityReceipt.js';
+
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 const scalarCount = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -34,64 +36,55 @@ const lockCodes = (contract) =>
   Array.isArray(contract?.locks) ? contract.locks.map((l) => l && l.code).filter(Boolean) : [];
 
 /**
+ * V1 P0 SOURCE AUTHORITY (supersedes the "durable wins" rule above for the execution-deciding fields):
+ * the stored Collection row is CLIENT-WRITABLE, so its loose `decision` / `soldCompDiagnostics` / `pricingSource` /
+ * `contract` are NOT evidence. Evidence comes from the row's `authorityReceipt` -- a value api/enrich.js signed -- and
+ * only when it verifies for THIS principal and its identity matches the row's. With no verifying receipt the result is
+ * the fail-closed NO_SOLD_EVIDENCE floor (never READY). The request can only ADD restrictions.
+ *
  * @param {object} requestItem  the (untrusted) request item
  * @param {object|null} durable the owned asset's canonical catalogue attributes (server-read), or null
+ * @param {{principalId?:string}} opts the authenticated principal the receipt must be bound to
  * @returns {{ evidence: object, priorLockCodes: string[], sources: object }}
  */
-export function resolveListingAuthorityEvidence(requestItem, durable) {
+export function resolveListingAuthorityEvidence(requestItem, durable, opts = {}) {
   const req = requestItem || {};
   const d = isObj(durable) ? durable : {};
   const sources = {};
-  const pick = (name, durableValue, requestValue) => {
-    if (durableValue !== undefined && durableValue !== null) { sources[name] = 'durable'; return durableValue; }
-    if (requestValue !== undefined && requestValue !== null) { sources[name] = 'request'; return requestValue; }
-    sources[name] = 'absent';
-    return null;
-  };
+  const verdict = verifyAuthorityReceipt(d.authorityReceipt, opts.principalId);
+  const bound = verdict.ok && identityMatchesReceipt(verdict.payload.identity, { title: d.title, issue: d.issue });
+  const receipt = bound ? verdict.payload : null;
+  sources.receipt = receipt ? 'VERIFIED' : (verdict.ok ? 'IDENTITY_MISMATCH' : `UNVERIFIED:${verdict.reason}`);
+  const rv = receipt ? receipt.values : {};
+  const src = (name, value) => { sources[name] = receipt ? 'server-receipt' : 'absent-failed-closed'; return value; };
 
-  const decision = pick('decision', d.decision, req.decision);
-  const pricingSource = pick('pricingSource', d.pricingSource, req.pricingSource);
-  const matchConfidence = pick('matchConfidence', d.matchConfidence, req.matchConfidence);
-  const rawComps = pick('rawComps', d.rawComps, req.rawComps);
-  const variantApplicability = pick('variantApplicability', d.variantApplicability, req.variantApplicability);
+  const flag = (k) => (receipt && rv[k] === true) || req[k] === true; // a client may add a restriction, never remove one
 
-  const durableDx = pickDiagnostics(d.soldCompDiagnostics);
-  const requestDx = pickDiagnostics(req.soldCompDiagnostics);
   let soldCompDiagnostics;
-  if (durableDx) { sources.soldCompDiagnostics = 'durable'; soldCompDiagnostics = durableDx; }
-  else if (requestDx) { sources.soldCompDiagnostics = 'request'; soldCompDiagnostics = requestDx; }
-  else {
-    // FAIL CLOSED: no diagnostics anywhere => the NO_SOLD_EVIDENCE floor applies.
-    sources.soldCompDiagnostics = 'absent-failed-closed';
-    soldCompDiagnostics = { rawCount: 0, verifiedCount: 0, newestDaysAgo: null };
-  }
-
-  const durableSold = Array.isArray(d.soldComps) ? d.soldComps.length : null;
-  const soldCompCount = durableSold !== null ? durableSold : (typeof req.soldComps === 'number' ? req.soldComps : 0);
-
-  // Restrictive flags: either side asserting the restriction is enough (a client may add a restriction,
-  // never remove one the durable record carries).
-  const flag = (k) => d[k] === true || req[k] === true;
+  if (receipt && rv.soldCompDiagnostics) { sources.soldCompDiagnostics = 'server-receipt'; soldCompDiagnostics = pickDiagnostics(rv.soldCompDiagnostics); }
+  else { sources.soldCompDiagnostics = 'absent-failed-closed'; soldCompDiagnostics = { rawCount: 0, verifiedCount: 0, newestDaysAgo: null }; }
 
   const evidence = {
-    decision,
-    pricingSource,
-    matchConfidence,
-    rawComps,
-    variantApplicability,
+    decision: src('decision', receipt ? (rv.decision ?? null) : null),
+    pricingSource: src('pricingSource', receipt ? (rv.pricingSource ?? null) : null),
+    matchConfidence: src('matchConfidence', receipt ? (rv.matchConfidence ?? null) : null),
+    rawComps: src('rawComps', receipt ? { count: receipt.rawCompsCount ?? 0 } : null),
+    variantApplicability: receipt ? (rv.variantApplicability ?? null) : null,
     variantApplicabilitySoldFallback: flag('variantApplicabilitySoldFallback'),
-    soldCompCount,
+    soldCompCount: receipt ? (receipt.soldCompCount ?? 0) : 0,
     soldCompDiagnostics,
-    identityConfident: d.identityConfident !== undefined && d.identityConfident !== null ? d.identityConfident : req.identityConfident,
+    identityConfident: receipt ? rv.identityConfident : undefined, // no receipt => no verified market evidence (REVIEW / NO_MARKET_EVIDENCE), not a fabricated identity verdict
     refusedToPrice: flag('refusedToPrice'),
     manualReviewRequired: flag('manualReviewRequired'),
     gradeExceedsMap: flag('gradeExceedsMap'),
-    claudeCheckBlocker: d.claudeCheckBlocker || req.claudeCheckBlocker || null,
+    claudeCheckBlocker: (receipt && rv.claudeCheckBlocker) || req.claudeCheckBlocker || null,
     tier0Locked: flag('tier0Locked'),
   };
 
   const reqPrior = Array.isArray(req.priorLockCodes) ? req.priorLockCodes : [];
-  const priorLockCodes = [...new Set([...reqPrior, ...lockCodes(d.contract)])];
-
+  const receiptLocks = receipt ? lockCodes(rv.contract) : [];
+  // With no verifying receipt the stored (client-writable) contract is untrusted, and so is its ABSENCE of locks;
+  // the fail-closed evidence above already prevents READY.
+  const priorLockCodes = [...new Set([...reqPrior, ...receiptLocks])];
   return { evidence, priorLockCodes, sources };
 }
