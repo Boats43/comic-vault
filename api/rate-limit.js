@@ -62,8 +62,11 @@ export function checkRateLimit(req, { principalId } = {}) {
   };
 }
 
-// Periodic cleanup of stale entries (runs every 5 minutes)
-setInterval(() => {
+// Periodic cleanup of stale entries (runs every 5 minutes).
+// unref(): this is housekeeping for an in-memory Map, not work worth keeping a process alive for. A module-level ref'd interval made every
+// process that merely IMPORTED a handler (tests, scripts) unable to exit after finishing -- the root cause of three test files that completed
+// every assertion and then hit the runner timeout (buyer-decision-handler-smoke, buyer-decision-cross-device-proof, grailkey-commit-m-pc-query-fallback).
+const __rateLimitCleanupTimer = setInterval(() => {
   const now = Date.now();
   const windowStart = now - WINDOW_MS;
   for (const [clientId, timestamps] of requests.entries()) {
@@ -75,3 +78,4 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000);
+__rateLimitCleanupTimer.unref?.();
