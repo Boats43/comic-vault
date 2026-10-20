@@ -34,6 +34,7 @@
 
 import { readFileSync } from 'node:fs';
 import { Client } from 'pg';
+import { finishRace, closeRaceClients } from './helpers/lockRaceTeardown.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -132,14 +133,12 @@ try {
   console.log('  T1 result:', r1.ok ? 'statement succeeded' : `${r1.error} (code=${r1.code})`);
   console.log('  T2 result:', r2.ok ? 'statement succeeded' : `${r2.error} (code=${r2.code})`);
 
-  const finish = async (client, ok) => {
-    if (!ok) { try { await client.query('ROLLBACK'); } catch { } return false; }
-    try { await client.query('COMMIT'); return true; } catch { return false; }
-  };
-  const c1Committed = await finish(c1, r1.ok);
-  const c2Committed = await finish(c2, r2.ok);
+  // TEARDOWN (2026-10-20): both statements are issued CONCURRENTLY (tests/helpers/lockRaceTeardown.js). The previous sequential `await finish(c1); await finish(c2)` self-deadlocked
+  // whenever T1 was the BLOCKED side: c1's ROLLBACK queued behind its own in-flight UPDATE while the lock holder's COMMIT waited behind it. A watchdog guarantees termination.
+  const { committed: [c1Committed, c2Committed], watchdogFired: watchdogFired1 } = await finishRace(c1, r1.ok, c2, r2.ok);
+  assertTrue(watchdogFired1 === false, 'Scenario 1: teardown settled on its own (no watchdog intervention) -- both lock-holder directions terminate');
   console.log('  T1 committed:', c1Committed, '  T2 committed:', c2Committed);
-  await c1.end(); await c2.end();
+  await closeRaceClients(c1, c2);
 
   const finalRows1 = await setup.query('SELECT id, superseded_by FROM asset_identity_assignment WHERE id IN ($1,$2)', [rowX, rowY]);
   console.log('  Final rows:', JSON.stringify(finalRows1.rows));

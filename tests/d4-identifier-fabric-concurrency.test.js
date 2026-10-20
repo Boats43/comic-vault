@@ -13,6 +13,7 @@
 
 import { readFileSync } from 'node:fs';
 import { Client } from 'pg';
+import { finishRace, closeRaceClients } from './helpers/lockRaceTeardown.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
@@ -102,26 +103,24 @@ try {
     console.log('  T1 result:', r1.ok ? 'statement succeeded' : `${r1.error} (code=${r1.code})`);
     console.log('  T2 result:', r2.ok ? 'statement succeeded' : `${r2.error} (code=${r2.code})`);
 
-    const finish = async (client, ok) => {
-      if (!ok) { try { await client.query('ROLLBACK'); } catch { } return false; }
-      try { await client.query('COMMIT'); return true; } catch { return false; }
-    };
-    const c1Committed = await finish(c1, r1.ok);
-    const c2Committed = await finish(c2, r2.ok);
+    // TEARDOWN (2026-10-20): both statements are issued CONCURRENTLY (tests/helpers/lockRaceTeardown.js). The previous sequential `await finish(c1); await finish(c2)` self-deadlocked
+    // whenever T1 was the BLOCKED side (observed once as a 140 s hang of this very file): c1's ROLLBACK queued behind its own in-flight UPDATE while the holder's COMMIT waited behind it.
+    const { committed: [c1Committed, c2Committed], watchdogFired } = await finishRace(c1, r1.ok, c2, r2.ok);
     console.log('  T1 committed:', c1Committed, '  T2 committed:', c2Committed);
-    await c1.end(); await c2.end();
+    await closeRaceClients(c1, c2);
 
     const finalRows = await setup.query('SELECT id, superseded_by FROM asset_identifier_assertion WHERE id IN ($1,$2)', [a, b]);
     console.log('  Final rows:', JSON.stringify(finalRows.rows));
     const bothCommitted = c1Committed && c2Committed;
     const cycleFormed = finalRows.rows.every(r => r.superseded_by !== null);
-    return { bothCommitted, cycleFormed, r1, r2 };
+    return { bothCommitted, cycleFormed, r1, r2, watchdogFired };
   }
 
   const pair = await insertPair();
   const result = await runRace('T1: A->B concurrent with T2: B->A, against the REAL 0013 trigger', pair);
 
   console.log('\n  RESULT (FACT): bothCommitted =', result.bothCommitted, ' cycleFormed =', result.cycleFormed);
+  assertTrue(result.watchdogFired === false, 'teardown settled on its own (no watchdog intervention) -- both lock-holder directions terminate');
   assertTrue(result.bothCommitted === false, 'required invariant: both transactions committed = false');
   assertTrue(result.cycleFormed === false, 'required invariant: cycle formed = false');
   const outcome = result.r1.code === '40P01' || result.r2.code === '40P01' ? 'PostgreSQL deadlock (40P01)'

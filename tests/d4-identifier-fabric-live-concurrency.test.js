@@ -23,6 +23,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { Client } from 'pg';
+import { finishRace, closeRaceClients } from './helpers/lockRaceTeardown.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -110,19 +111,19 @@ async function rawRace({ a, b }, timeoutMs = 8000) {
   console.log('  T1 result:', r1.ok ? 'succeeded' : `${r1.error} (code=${r1.code})`);
   console.log('  T2 result:', r2.ok ? 'succeeded' : `${r2.error} (code=${r2.code})`);
 
-  const finish = async (client, ok) => {
-    if (!ok) { try { await client.query('ROLLBACK'); } catch { } return false; }
-    try { await client.query('COMMIT'); return true; } catch { return false; }
-  };
-  const c1c = await finish(c1, r1.ok), c2c = await finish(c2, r2.ok);
-  await c1.end(); await c2.end();
+  // TEARDOWN (2026-10-20): both statements are issued CONCURRENTLY (tests/helpers/lockRaceTeardown.js). The previous sequential `await finish(c1); await finish(c2)` self-deadlocked
+  // whenever T1 was the BLOCKED side: c1's ROLLBACK queued behind its own in-flight UPDATE while the lock holder's COMMIT waited behind it. A watchdog guarantees termination.
+  const { committed, watchdogFired } = await finishRace(c1, r1.ok, c2, r2.ok);
+  const [c1c, c2c] = committed;
+  await closeRaceClients(c1, c2);
   const finalRows = await setup.query('SELECT id, superseded_by FROM asset_identifier_assertion WHERE id IN ($1,$2)', [a, b]);
   console.log('  Final rows:', JSON.stringify(finalRows.rows));
-  return { bothCommitted: c1c && c2c, cycleFormed: finalRows.rows.every(r => r.superseded_by !== null), r1, r2 };
+  return { bothCommitted: c1c && c2c, cycleFormed: finalRows.rows.every(r => r.superseded_by !== null), r1, r2, watchdogFired };
 }
 
 const pair9 = await mintAssertionPair();
 const b9result = await rawRace(pair9);
+assertTrue(b9result.watchdogFired === false, 'B9: teardown settled on its own (no watchdog intervention) -- both lock-holder directions terminate');
 assertTrue(b9result.bothCommitted === false, 'B9: bothCommitted = false (required invariant, real data1_dev)');
 assertTrue(b9result.cycleFormed === false, 'B9: cycleFormed = false (required invariant, real data1_dev)');
 console.log('  B9 mechanism observed:', (b9result.r1.code === '40P01' || b9result.r2.code === '40P01') ? 'PostgreSQL deadlock (40P01)' : 'plain block/timeout');
