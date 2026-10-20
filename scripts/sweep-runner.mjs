@@ -104,6 +104,39 @@ if (mode === 'finalize') {
   process.exit(0);
 }
 
+// DURABLE LEDGER PATH GUARD (added 2026-10-20). A ledger that lives under the system temporary directory can be cleaned with its session (the 596f868 ledger had to be recovered from a
+// scratchpad), so a run that WRITES a ledger refuses a temp location unless --allow-temp is passed explicitly. The caller's path is never rewritten or redirected: the run is refused
+// (exit 4) before anything is created. Paths are resolved through the nearest existing ancestor's real path (symlinks, junctions, 8.3 short names, '..' segments) and compared
+// case-insensitively on Windows. If the real path cannot be established the run is refused (fail closed). Read-only modes (plan, reruns, summary, finalize) are not guarded.
+const realish = (p) => {
+  let cur = path.resolve(p); const rest = [];
+  while (!existsSync(cur)) { const parent = path.dirname(cur); if (parent === cur) break; rest.unshift(path.basename(cur)); cur = parent; }
+  return path.join(fs0.realpathSync.native(cur), ...rest);
+};
+const insideDir = (root, p) => {
+  const norm = (s) => (process.platform === 'win32' ? s.toLowerCase() : s);
+  const rel = path.relative(norm(root), norm(p));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+const tempRoots = () => {
+  const cands = [os.tmpdir(), process.env.TMPDIR, process.env.TEMP, process.env.TMP, ...(process.platform === 'win32' ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'Temp')] : ['/tmp', '/var/tmp'])].filter(Boolean);
+  const out = [];
+  for (const c of cands) { try { out.push(realish(c)); } catch { /* a candidate that cannot be resolved cannot contain the ledger */ } }
+  return out;
+};
+if (!process.argv.includes('--allow-temp')) {
+  let verdict = null;
+  try {
+    const real = realish(out);
+    const hit = tempRoots().find((r) => insideDir(r, real));
+    if (hit) verdict = `ledger path resolves under the system temporary directory (${hit}): ${real}`;
+  } catch (e) { verdict = `cannot establish the real path of the ledger (${e.code || e.message}); refusing (fail closed)`; }
+  if (verdict) {
+    console.error(`sweep-runner: REFUSED. ${verdict}\nA temporary ledger is not durable evidence. Choose a ledger path outside the temp directory, or pass --allow-temp to accept a throwaway ledger (instrumentation tests do). Nothing was created or run.`);
+    process.exit(4);
+  }
+}
+
 const RERUN_TIMEOUTS = process.argv.includes('--rerun-timeouts');
 const RERUN = RERUN_TIMEOUTS || process.argv.includes('--rerun');   // --rerun: explicit --files list, tagged rerun, original outcome kept
 const done = new Set(state().rows.filter((r) => ['PASS', 'FAIL', 'TIMEOUT', 'SKIP'].includes(r.status)).map((r) => r.file));

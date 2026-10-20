@@ -21,7 +21,7 @@ writeFileSync(join(tree, 'tests', 'c-hang.test.js'), 'setTimeout(() => {}, 60000
 writeFileSync(join(tree, 'tests', 'd-pass.test.js'), "console.log('x');\n");
 const out = join(tree, 'ledger.jsonl');
 try {
-  const r = spawnSync(process.execPath, [runner, 'run', tree, out, '2500', '128'], { encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [runner, 'run', tree, out, '2500', '128', '--allow-temp'], { encoding: 'utf8' });
   const summary = JSON.parse(r.stdout.trim().split('\n').pop());
   ok(summary.total === 4 && summary.PASS === 2 && summary.FAIL === 1 && summary.TIMEOUT === 1 && summary.NOT_RUN === 0, `statuses unchanged: ${JSON.stringify({ PASS: summary.PASS, FAIL: summary.FAIL, TIMEOUT: summary.TIMEOUT })}`);
   const L = readFileSync(out, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
@@ -38,7 +38,7 @@ try {
   ok(byFile['c-hang.test.js'].wallMs >= 2400 && byFile['c-hang.test.js'].wallMs < 6000, `the timeout ceiling is unchanged (2500 ms ceiling, observed ${byFile['c-hang.test.js'].wallMs} ms)`);
   const s2 = spawnSync(process.execPath, [runner, 'summary', tree, out], { encoding: 'utf8' });
   ok(JSON.parse(s2.stdout).TIMEOUT === 1, 'the summary reader still accepts the instrumented stream');
-  const r2 = spawnSync(process.execPath, [runner, 'run', tree, out, '2500', '128'], { encoding: 'utf8' });
+  const r2 = spawnSync(process.execPath, [runner, 'run', tree, out, '2500', '128', '--allow-temp'], { encoding: 'utf8' });
   ok(JSON.parse(r2.stdout.trim().split('\n').pop()).total === 4 && readFileSync(out, 'utf8').split('\n').filter((l) => l && JSON.parse(l).t === 'end').length === 4, 'resume semantics unchanged: a second run re-executes nothing already completed');
   const gate = readFileSync(join(root, 'scripts', 'sweep-gate.ps1'), 'utf8');
   ok(/\$MinFreeMB\s*=\s*3000/.test(gate) && /\$MaxCommitPct\s*=\s*70/.test(gate), 'the gate keeps its 3000 MB free-memory floor and 70% commit ceiling');

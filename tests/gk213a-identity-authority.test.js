@@ -167,15 +167,25 @@ console.log('\nSection 5: duplicate-confirm — real shipped source, executed as
 {
   const appSource = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const anchorMarker = 'const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;';
-  const idx = appSource.indexOf(anchorMarker);
-  assertTrue(idx !== -1, 'duplicate-confirm merge block found in live App.jsx (source anchor intact)');
-
-  // Grab from the anchor through the closing `};` of the `updated` object
-  // literal — a fixed-size slice is fragile against unrelated edits
-  // elsewhere in the file, so anchor on the literal's own start/end tokens.
-  const objStart = appSource.indexOf('const updated = { ...cur,', idx);
-  const objEnd = appSource.indexOf('};', appSource.indexOf('applyProvisionalIdentity(enrich, cur),', objStart)) + 2;
-  assertTrue(objStart !== -1 && objEnd > objStart, 'duplicate-confirm updated-object literal bounds located');
+  // The anchor line is shared by several merge sites in App.jsx (3 occurrences today), so "first occurrence" selects the wrong site and slices thousands of characters
+  // of unrelated code (the original SyntaxError). Select the ONE occurrence that is immediately followed by the duplicate-confirm `updated` literal AND whose literal is
+  // followed by the duplicate-confirm post-enrich comment. Zero or several candidates fail loudly instead of guessing.
+  const candidates = [];
+  for (let from = appSource.indexOf(anchorMarker); from !== -1; from = appSource.indexOf(anchorMarker, from + 1)) {
+    const os = appSource.indexOf('const updated = { ...cur,', from);
+    if (os === -1 || os - from > 400) continue;
+    const ap = appSource.indexOf('applyProvisionalIdentity(enrich, cur),', os);
+    if (ap === -1) continue;
+    const oe = appSource.indexOf('};', ap) + 2;
+    if (!appSource.slice(oe, oe + 600).includes("duplicate-confirm's own post-enrich")) continue;
+    candidates.push({ idx: from, objStart: os, objEnd: oe });
+  }
+  assertTrue(candidates.length >= 1, `duplicate-confirm merge block found in live App.jsx (source anchor intact; ${candidates.length} identical merge site(s) found; the behavior assertions below run on EVERY one)`);
+  for (const [siteN, cand] of candidates.entries()) {
+  const { idx, objStart, objEnd } = cand;
+  const site = ` [site ${siteN + 1}/${candidates.length}]`;
+  assertTrue(objStart !== -1 && objEnd > objStart, 'duplicate-confirm updated-object literal bounds located' + site);
+  assertTrue(objEnd - idx < 6000, `the extracted block is a single merge site (${objEnd - idx} chars), not a slice across unrelated code${site}`);
 
   const block = appSource.slice(idx, objEnd);
   const fn = new Function(
@@ -190,11 +200,12 @@ console.log('\nSection 5: duplicate-confirm — real shipped source, executed as
     title: 'A Totally Different Book', identityConfident: true, assetTypeConfident: true,
   };
   const updated = fn(conflictingEnrich, cur, mergeConfirmedIdentity, applyProvisionalIdentity);
-  assertEq(updated.title, 'The Rationalists', 'duplicate-confirm (real shipped code): OPERATOR_CONFIRMED title survives a conflicting enrich response');
+  assertEq(updated.title, 'The Rationalists', 'duplicate-confirm (real shipped code): OPERATOR_CONFIRMED title survives a conflicting enrich response' + site);
 
   const unlockedCur = { title: 'Old Title', identityAuthority: {} };
   const updatedUnlocked = fn(conflictingEnrich, unlockedCur, mergeConfirmedIdentity, applyProvisionalIdentity);
-  assertEq(updatedUnlocked.title, conflictingEnrich.title, 'duplicate-confirm (real shipped code): unlocked item now DOES adopt a corrected title (closes the pre-existing site-parity gap — title was previously frozen forever on this path)');
+  assertEq(updatedUnlocked.title, conflictingEnrich.title, 'duplicate-confirm (real shipped code): unlocked item now DOES adopt a corrected title (closes the pre-existing site-parity gap — title was previously frozen forever on this path)' + site);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════

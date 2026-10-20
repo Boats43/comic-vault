@@ -29,7 +29,7 @@ try {
   const pred = join(tree, 'PREDICTION.txt');
   writeFileSync(pred, 'PRE-SWEEP PREDICTION\nEXPECTED TOTALS: 2 PASS / 1 FAIL / 0 TIMEOUT / 0 ENV_ERROR / 0 INTERRUPTED / 0 NOT_RUN = 3\n');
   await new Promise((r) => setTimeout(r, 30));
-  const run = spawnSync(process.execPath, [runner, 'run', tree, ledger, '20000', '128'], { encoding: 'utf8' });
+  const run = spawnSync(process.execPath, [runner, 'run', tree, ledger, '20000', '128', '--allow-temp'], { encoding: 'utf8' });
   ok(JSON.parse(run.stdout.trim().split('\n').pop()).total === 3, 'throwaway sweep completed (3 files)');
   // a later evidence-only commit makes HEAD differ from the tested sha
   writeFileSync(join(tree, 'NOTE.md'), 'evidence-only\n'); g('add', 'NOTE.md'); g('commit', '-q', '-m', 'evidence only');
