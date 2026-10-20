@@ -1,0 +1,56 @@
+{
+ "complete": true,
+ "actual": {
+  "total": 479,
+  "PASS": 428,
+  "FAIL": 51,
+  "TIMEOUT": 0,
+  "SKIP": 0,
+  "ENV_ERROR": 0,
+  "INTERRUPTED": 0,
+  "NOT_RUN": 0
+ },
+ "prediction": {
+  "file": "PREDICTION-596f868.txt",
+  "sha256": "cbe196b1154d0fbd00a17981da4c8775da60fedd8210bcbee631b31c3654c7a3",
+  "mtimeUtc": "2026-10-20T04:11:41.930Z",
+  "mtimePrecedesFirstRun": true
+ },
+ "reconciliation": {
+  "PASS": {
+   "predicted": 428,
+   "actual": 428,
+   "match": true
+  },
+  "FAIL": {
+   "predicted": 51,
+   "actual": 51,
+   "match": true
+  },
+  "TIMEOUT": {
+   "predicted": 0,
+   "actual": 0,
+   "match": true
+  },
+  "ENV_ERROR": {
+   "predicted": 0,
+   "actual": 0,
+   "match": true
+  },
+  "INTERRUPTED": {
+   "predicted": 0,
+   "actual": 0,
+   "match": true
+  },
+  "NOT_RUN": {
+   "predicted": 0,
+   "actual": 0,
+   "match": true
+  },
+  "total": {
+   "predicted": 479,
+   "actual": 479,
+   "match": true
+  }
+ }
+}

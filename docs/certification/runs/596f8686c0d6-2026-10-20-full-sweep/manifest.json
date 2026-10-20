@@ -1,0 +1,1923 @@
+{
+ "testedSha": "596f8686c0d6fe985246657b94e3019107128204",
+ "fileCount": 479,
+ "matchesLedgerRoster": true,
+ "files": [
+  {
+   "file": "anthropicPricing.test.js",
+   "gitBlob": "d52519a837f7bacb62c282e75991b2eb2236200b"
+  },
+  {
+   "file": "artist-registry-sync.test.js",
+   "gitBlob": "85fe8343d982c52a527fbe29b5ede2d20115cd4f"
+  },
+  {
+   "file": "asset-graph-operator-actions-live-proof.test.js",
+   "gitBlob": "0d161137f3aceca45ce3e82659b80cc9373b5ba3"
+  },
+  {
+   "file": "assets-module-boundary.test.js",
+   "gitBlob": "9bf632b7050b83eca64af632133cbb48ced352f0"
+  },
+  {
+   "file": "auth-module-boundary.test.js",
+   "gitBlob": "718cc3137606cc1cbb235c030e6ddce4201ccdf3"
+  },
+  {
+   "file": "autoFix.test.js",
+   "gitBlob": "49e23e73fd2b6579ba30a626b78f7dca71fc9d60"
+  },
+  {
+   "file": "b1-0040-migration-contract.test.js",
+   "gitBlob": "a342fd884dd6c671701623249955d2efa0541cd5"
+  },
+  {
+   "file": "b1-final-reconciliation-pure.test.js",
+   "gitBlob": "d97d2f09dd7782f5f042063a6008f647ad1d00c9"
+  },
+  {
+   "file": "b1-operator-authority-live.test.js",
+   "gitBlob": "44d13137d260cfafb261396200e2386c94181f27"
+  },
+  {
+   "file": "b1-operator-authority-pure.test.js",
+   "gitBlob": "8a075203163ba5d40bbdf4da7693c0445d85522b"
+  },
+  {
+   "file": "b1rc-ebay-xml-contract.test.js",
+   "gitBlob": "1fe29071b96adcea74f57101f275d5c46b28bebe"
+  },
+  {
+   "file": "b1rc-operator-reconcile-endpoint.test.js",
+   "gitBlob": "b37f6d4325a27b3a17a508c9640a56da2681ccde"
+  },
+  {
+   "file": "b1rc-policy-exhaustive.test.js",
+   "gitBlob": "fee451f88fd29983070a8a23cc56dc3f7bef476c"
+  },
+  {
+   "file": "b1rc-schema-compat.test.js",
+   "gitBlob": "cf9efaf87de9d7f3ce9cf55c3b0b1ab67905ff77"
+  },
+  {
+   "file": "batch1-fixes.test.js",
+   "gitBlob": "44469448b1c438b436ce6c60d98c3a0f9abcc822"
+  },
+  {
+   "file": "batch2-fixes.test.js",
+   "gitBlob": "0a1894fdb930d941742dcf00adcce36f0f9c18d5"
+  },
+  {
+   "file": "batman59-gate.test.js",
+   "gitBlob": "5e695b7605e57476260b88f55584b7eee293d0fb"
+  },
+  {
+   "file": "beta1a-0022-live-apply-gate.test.js",
+   "gitBlob": "35704b6a3b44c86052c901699a5c8a9d6d5e6db2"
+  },
+  {
+   "file": "beta1a-0022-migration-contract.test.js",
+   "gitBlob": "76d4e46066cda094e2428f4f659d3328fd436467"
+  },
+  {
+   "file": "beta1a-clerk-identity-adapter.test.js",
+   "gitBlob": "235e3dc8b4e3ba4c206260761a2dcc3d88ff8c38"
+  },
+  {
+   "file": "beta1a1-access-gate.test.js",
+   "gitBlob": "0edddd53a08f4fdce9ee9a99d0b05e428cb44a9d"
+  },
+  {
+   "file": "book-detection.test.js",
+   "gitBlob": "1257e65997ff7f705601bf125d67bf568e0f5b61"
+  },
+  {
+   "file": "buyer-decision-cross-device-proof.test.js",
+   "gitBlob": "bfa4582a144a968809e1897b03ec04b896d10be7"
+  },
+  {
+   "file": "buyer-decision-handler-smoke.test.js",
+   "gitBlob": "cbd274372a1e2e266c172c951e72b4aa8abcd704"
+  },
+  {
+   "file": "buyer-decision-ledger-migration-contract.test.js",
+   "gitBlob": "f301d74d8eb204d4593cbc203c756aea5f916d5f"
+  },
+  {
+   "file": "buyer-decision-service-live-proof.test.js",
+   "gitBlob": "3932b1fc7d89bea562a822a03d0a98101fc4dd25"
+  },
+  {
+   "file": "buyer-safe-listing-copy.test.js",
+   "gitBlob": "3525a4c1da4748a4f91477332a19292e4f5a8e11"
+  },
+  {
+   "file": "cacheKeys-comicvine-year.test.js",
+   "gitBlob": "2eb3857238ebfb00d1eea5e936daa7521d316196"
+  },
+  {
+   "file": "cacheKeys-fingerprint.test.js",
+   "gitBlob": "5ffe726aedef45b1e1d46928403253746cbe1353"
+  },
+  {
+   "file": "capture-module-boundary.test.js",
+   "gitBlob": "b61260dff2a6b990dcbd243f6aa6bf30640f8684"
+  },
+  {
+   "file": "capture-scan-endpoint-h8-gate-proof.test.js",
+   "gitBlob": "06a6c1358412d591cc62ae1c30d330f5d47b4767"
+  },
+  {
+   "file": "claude-gate-severity.test.js",
+   "gitBlob": "f509777472c70bd81458f3e065e0ec1ae9442bb8"
+  },
+  {
+   "file": "codehealth-2026-10-03.test.js",
+   "gitBlob": "50a78a685e812be93875860caa4892957ae5cdc4"
+  },
+  {
+   "file": "collection-endpoint-live-proof.test.js",
+   "gitBlob": "fe54aaeb392339da861b3c3e799c2f1d19cbb3c4"
+  },
+  {
+   "file": "collection-module-boundary.test.js",
+   "gitBlob": "fe86ec8dad8ecd38cf663a2c17572b1dc4ef8cc2"
+  },
+  {
+   "file": "collection-sync-closeout-live-proof.test.js",
+   "gitBlob": "b8501382d0c1500e9a49e157f4a7cdc7d51f48f0"
+  },
+  {
+   "file": "comp-filter-hygiene.test.js",
+   "gitBlob": "032332af1272987556d59a8c28168f9fe78ea313"
+  },
+  {
+   "file": "comp-key-extraction.test.js",
+   "gitBlob": "d4e1385933b062e5ba7eab8c233f448e75d00aed"
+  },
+  {
+   "file": "cost-counter-denominator-isolation.test.js",
+   "gitBlob": "36c5f798567282057b8c2ee14f2194195c8ccf5e"
+  },
+  {
+   "file": "creator-from-comps.test.js",
+   "gitBlob": "b9ea3403d102b1444ea3803fcaee7cb392adbaf1"
+  },
+  {
+   "file": "current-operator-action-selection-unit.test.js",
+   "gitBlob": "811d8ffd2c6724a62d191c2cb5a053b0ae79ccc9"
+  },
+  {
+   "file": "cv-scoring.test.js",
+   "gitBlob": "003086332e6464f71ad66eecd8f7dca5cf6c043c"
+  },
+  {
+   "file": "d-outcome1-economics-migration-contract.test.js",
+   "gitBlob": "816b5f96c4bd2dc3a5d302d439e0f529e4e3813c"
+  },
+  {
+   "file": "d3-1-candidate-safe-mint-basis.test.js",
+   "gitBlob": "7c945a03b32f306efd189869441e892c93dc6240"
+  },
+  {
+   "file": "d3-1-mint-basis-live-roundtrip.test.js",
+   "gitBlob": "4d8a20e27dbc9df7c99aafc9d9dbcc57d11983a6"
+  },
+  {
+   "file": "d3-2-application-wiring-live-proof.test.js",
+   "gitBlob": "7a27eb80c8f25f860e12a867110cf74835657176"
+  },
+  {
+   "file": "d3-2-true-event-time-live-roundtrip.test.js",
+   "gitBlob": "e934acab160140026124290fbd73184365bf2435"
+  },
+  {
+   "file": "d3-3-comp-snapshot-immutability.test.js",
+   "gitBlob": "3f63d95c12795e8148f0b574914c194ca6348217"
+  },
+  {
+   "file": "d3-3-phase-b-live-contract-proof.test.js",
+   "gitBlob": "44d9792f666162500f6cb7a1032f785e2f6ad9f3"
+  },
+  {
+   "file": "d3-3-wal-measurement.test.js",
+   "gitBlob": "d9e56aa386b3bdd3405fe644366f238912e7ccf6"
+  },
+  {
+   "file": "d4-identifier-fabric-concurrency.test.js",
+   "gitBlob": "50925cfb9a1231e99959b5ceda97875c757ce166"
+  },
+  {
+   "file": "d4-identifier-fabric-live-concurrency.test.js",
+   "gitBlob": "dc768e5bd842559f792518d57d659416462ee276"
+  },
+  {
+   "file": "d4-identifier-fabric-live-proof.test.js",
+   "gitBlob": "23a9ff0abcd0ca30440facd373e065e2a564d114"
+  },
+  {
+   "file": "d4-identifier-fabric-live-retry-closure.test.js",
+   "gitBlob": "9069bc6b4d84a8433ac859d6c10f0ca1c3868409"
+  },
+  {
+   "file": "d4-identifier-fabric-live-retry-deterministic.test.js",
+   "gitBlob": "2772bb8dbfe9c307f3b32f51e7bc9e9f711eb4de"
+  },
+  {
+   "file": "d4-identifier-fabric-migration-contract.test.js",
+   "gitBlob": "240a83e2d02ca98ea710c5770c0119849ec5e5b7"
+  },
+  {
+   "file": "d4-identifier-fabric-retry-unit.test.js",
+   "gitBlob": "2e8c477e4d16a2887f5aa1b6a7313c0152590460"
+  },
+  {
+   "file": "d5a-market-observation-hash-serializer.test.js",
+   "gitBlob": "dd3107fa8622487c437af58ba7134b23e41eaa10"
+  },
+  {
+   "file": "d5a-market-observation-migration-contract.test.js",
+   "gitBlob": "4fed946641f1649fa0bedc50258e443fe655c409"
+  },
+  {
+   "file": "d5b-0015-hash-serializer.test.js",
+   "gitBlob": "f0cde3943669a674eace5aa70035271a1056e528"
+  },
+  {
+   "file": "d5b-0015-migration-contract.test.js",
+   "gitBlob": "2bd902895f9d72266495166a38964bad5b6f3ae7"
+  },
+  {
+   "file": "d5b-live-apply-gate-a1-rehearsal.test.js",
+   "gitBlob": "fb5a488becccd16a215637ee0fe579734b1af4e1"
+  },
+  {
+   "file": "d5b-live-apply-gate-a2-concurrency.test.js",
+   "gitBlob": "efae1a84bd20eb4bacad4a4fa22ac1234ee3a4be"
+  },
+  {
+   "file": "d5c-market-population-hash-serializer.test.js",
+   "gitBlob": "5355888674131cbc860c18011eb91fd07d383c87"
+  },
+  {
+   "file": "d5c-market-population-migration-contract.test.js",
+   "gitBlob": "161086eb2bf62ee1090cee9e90749f14dd76980f"
+  },
+  {
+   "file": "d5d-runtime-bridge-unit.test.js",
+   "gitBlob": "8c63068f40d56bfa933ef515d6c6f58d05af0c60"
+  },
+  {
+   "file": "d5d-valuation-writer.test.js",
+   "gitBlob": "37c91814367b6efb5544d4b55afb04c05b707b23"
+  },
+  {
+   "file": "d5d-w2-eligibility.test.js",
+   "gitBlob": "1f1c5ac07e1c5cd2e812a480b58352052c03f5c6"
+  },
+  {
+   "file": "data-0e-pilot-review-tier-numbering-fixtures.test.js",
+   "gitBlob": "ef9ba02369d18d546ef489ddc716568e2a58fcff"
+  },
+  {
+   "file": "decision-engine.test.js",
+   "gitBlob": "6dcff416003e0b8921d63bc92e7468d50e4e203c"
+  },
+  {
+   "file": "demandSignals.test.js",
+   "gitBlob": "48de6b672a59545a2bceb9abf2c906da5ba6522b"
+  },
+  {
+   "file": "dispatch-42-comicvine-kill.test.js",
+   "gitBlob": "aef1bd89e43e2882a6b9bf74840958f8a7fd4def"
+  },
+  {
+   "file": "duplicate-entry-browser-smoke.test.js",
+   "gitBlob": "5dcf0737142e6b4c0cf2ad72273eda07fdc631a6"
+  },
+  {
+   "file": "duplicate-entry-closeout.test.js",
+   "gitBlob": "ed790ce7ba2eaddc969a84265809c2bde914228b"
+  },
+  {
+   "file": "ebay-fulfillment-finances-ingestion.test.js",
+   "gitBlob": "1f04aca6790669af65199fa5a513431230f39cb5"
+  },
+  {
+   "file": "ebay-media-api-location-safety.test.js",
+   "gitBlob": "f24bb0079e248578ccdf522ed6c9cf1d6189b769"
+  },
+  {
+   "file": "ebay-outcome-reconciler-evidence.test.js",
+   "gitBlob": "280de11725de9eaf59efd31e298b82b57bd3ba96"
+  },
+  {
+   "file": "ebay-outcome-reconciler-live-proof.test.js",
+   "gitBlob": "f03cb9d0cf1934b7644493e09a082f4ae3b4fbde"
+  },
+  {
+   "file": "ebay-user-oauth-unit.test.js",
+   "gitBlob": "5a7b068bf4afe45adb3bf874346c1a275d1246fb"
+  },
+  {
+   "file": "edition-warning.test.js",
+   "gitBlob": "34beb1478dce58a8c1d891790d7729401f93a4af"
+  },
+  {
+   "file": "enrich-verification-cost-observability.test.js",
+   "gitBlob": "d9044e0e21647b3b69adc0ca7d42ce25a309c4b2"
+  },
+  {
+   "file": "era-multipliers.test.js",
+   "gitBlob": "0d7d954c2efb0538b21114a8bdfe0c58f0c61435"
+  },
+  {
+   "file": "eux-edition-verify-panel.test.js",
+   "gitBlob": "265bb44a524a489bb9d5a5d5c9549c8df45df041"
+  },
+  {
+   "file": "failure.test.js",
+   "gitBlob": "525e59aa3ae6777fab251ef1f57dcb56f185bd17"
+  },
+  {
+   "file": "family-clustering.test.js",
+   "gitBlob": "5da572d409b59c477e688114ae1a057fcd07bbbf"
+  },
+  {
+   "file": "gateb-raw-condition-copy.test.js",
+   "gitBlob": "b2c3f2592b3dbab19a13d3a7ffb0c84e9699f9c6"
+  },
+  {
+   "file": "gk-p0-marketplace-operator-gate.test.js",
+   "gitBlob": "b91e40cec14c89971b1ae393b2f8d31506a20e41"
+  },
+  {
+   "file": "gk147-l3-authority-floor-rename.test.js",
+   "gitBlob": "717f74fab47d40cee4e0bece00ca2eed6b109adf"
+  },
+  {
+   "file": "gk152-comps-issue-rescue.test.js",
+   "gitBlob": "c7d228d73f7df862a089c25008d69decd164a0c7"
+  },
+  {
+   "file": "gk152-handler-smoke.test.js",
+   "gitBlob": "297bc66d4a3fe6b94e6dc8bd378a4a8057d32b5a"
+  },
+  {
+   "file": "gk152-market-standing-issue-contested.test.js",
+   "gitBlob": "58bf0bfb715e47e6a532e8c266d425d67663bb46"
+  },
+  {
+   "file": "gk153-156-gijoe-handler-smoke.test.js",
+   "gitBlob": "6118aaa452d3eda2e93a6958f150723d6e3a56b9"
+  },
+  {
+   "file": "gk153-gijoe-compound-whitelist.test.js",
+   "gitBlob": "f62cd1e02bd403fa354debe851265813faf6e916"
+  },
+  {
+   "file": "gk154-year-anchor-gate.test.js",
+   "gitBlob": "bb6d0bf6f83b3f198ed6df519184417508e5cb4d"
+  },
+  {
+   "file": "gk155-variant-dedup.test.js",
+   "gitBlob": "c602919685c0b648cdd8c7736ba0a9d4bea13db9"
+  },
+  {
+   "file": "gk156-poolyearhint-eralock-rawtitle.test.js",
+   "gitBlob": "d212951909d7712e2cac6a3f79cc1f2f641c69cc"
+  },
+  {
+   "file": "gk157-158-handler-smoke.test.js",
+   "gitBlob": "1f8703fbb1423b4e1ffe46acd9ec98c120f2e735"
+  },
+  {
+   "file": "gk157-elected-title-canonicalization.test.js",
+   "gitBlob": "b679838601d701644e5c5718492dffa41d32751e"
+  },
+  {
+   "file": "gk158-provisional-issue-match.test.js",
+   "gitBlob": "9e6985e6bfb878c8e565e1b5388d7de9272005fe"
+  },
+  {
+   "file": "gk159-commit4-terminal-floor-handler-smoke.test.js",
+   "gitBlob": "0c20c8a6174ab3b6eff6f9d643b22b2ddc6abbd9"
+  },
+  {
+   "file": "gk159-commit4-terminal-floor.test.js",
+   "gitBlob": "e34747aefb1d56738811b4d61a7e911ced00f6d6"
+  },
+  {
+   "file": "gk167-media-storage-routing.test.js",
+   "gitBlob": "4423f12f1d294407777d8e4d8f3d15ceec6b3f74"
+  },
+  {
+   "file": "gk168-edition-facet.test.js",
+   "gitBlob": "35c9a1184f47db0e36ca279b92d3560143aa8e8c"
+  },
+  {
+   "file": "gk178-pooled-session-state.test.js",
+   "gitBlob": "057e406fefdc2a6815ea655ee43f510530e4e57b"
+  },
+  {
+   "file": "gk179-environment-guard-latency.test.js",
+   "gitBlob": "82921e677006cef06ad0fb28303141badcded241"
+  },
+  {
+   "file": "gk179-environment-guard-negative-proof.test.js",
+   "gitBlob": "679c9af558e9ff7c2d10a2e2cabc357990ce7926"
+  },
+  {
+   "file": "gk179-environment-guard-wiring-smoke.test.js",
+   "gitBlob": "6e9e2eba4953093ea605f1f6615a63ddd99aa0fd"
+  },
+  {
+   "file": "gk179-environment-marker-migration-contract.test.js",
+   "gitBlob": "9e9e4f6b351e7a62ce9cc9fcd47b6986efac8648"
+  },
+  {
+   "file": "gk184-cache-provenance-integration.test.js",
+   "gitBlob": "059ff5fee1ebcce279ae4d74ccbabe699681a3cc"
+  },
+  {
+   "file": "gk184-comps-ladder-timestamp.test.js",
+   "gitBlob": "6870d3235c49d3a20052c3628de99810f7a3d1d4"
+  },
+  {
+   "file": "gk184-evidence-observed-at-unit.test.js",
+   "gitBlob": "872816c4a3d51b643ec22cf6cb8b41e47e25e320"
+  },
+  {
+   "file": "gk184-handler-smoke.test.js",
+   "gitBlob": "10e43d72029351876e2e8e4975bdfc05cc5f80a0"
+  },
+  {
+   "file": "gk194-stored-function-resolution-scratch.test.js",
+   "gitBlob": "e9291d872b2760c80c34ba771dffc0cef27b708b"
+  },
+  {
+   "file": "gk201-auth-primitives-unit.test.js",
+   "gitBlob": "f4fda1e9567135bb69939a03f44b1268ca21f17b"
+  },
+  {
+   "file": "gk201-grailkey-session-unit.test.js",
+   "gitBlob": "f2860d688cf7e067a2776b0f3fcf97a475ee526b"
+  },
+  {
+   "file": "gk201-operator-action-idempotency-lifecycle.test.js",
+   "gitBlob": "d439c470b879b95736cd106e29d1eb86d89ab557"
+  },
+  {
+   "file": "gk201-operator-path-source-contract.test.js",
+   "gitBlob": "6d1561f883e0ea2fcedc3de16d97c573c648963b"
+  },
+  {
+   "file": "gk201-principal-scope-idempotency.test.js",
+   "gitBlob": "dd0462606f8359800dafc49c116dbf8bdb321db1"
+  },
+  {
+   "file": "gk213a-identity-authority.test.js",
+   "gitBlob": "1c27bdd4140f41de1af387af33f98fed2dd39797"
+  },
+  {
+   "file": "gk213b-authority-persistence-survival.test.js",
+   "gitBlob": "39c57b48041ac47dbbf42579352fd78ef6f3a5f5"
+  },
+  {
+   "file": "gk213b-grade-authority.test.js",
+   "gitBlob": "e902426f324b3db506b20ba7de1c07c905994129"
+  },
+  {
+   "file": "gk213c-durable-grading-authority.test.js",
+   "gitBlob": "a25312bc7af648580501e13ea8fca0616d36fce8"
+  },
+  {
+   "file": "gk226-capture-outcome-price.test.js",
+   "gitBlob": "99e48588c3a23c055b415b6576473510397dcc87"
+  },
+  {
+   "file": "gk227-0029-migration-contract.test.js",
+   "gitBlob": "eab00ce8c479e0d67ca7b46fd60e92ba3c2b21d3"
+  },
+  {
+   "file": "gk227-asset-media-append-handler-smoke.test.js",
+   "gitBlob": "3b080e1a0b8d8fa8486e0e9ed838ea8f9fa1b00a"
+  },
+  {
+   "file": "gk227-physical-media-checklist-unit.test.js",
+   "gitBlob": "02d977e7b2406207d15654dc7cfcca172b5d1d84"
+  },
+  {
+   "file": "gk229-content-unverified-handler-smoke.test.js",
+   "gitBlob": "8ff9b0c088b86c8013fc9b2845418a843a149095"
+  },
+  {
+   "file": "gk231-fixture-bank-indexeddb.test.js",
+   "gitBlob": "0a1dd163ffaddb07347b6e6e7897c1bac741cb85"
+  },
+  {
+   "file": "gk234-collection-delete-resurrection.test.js",
+   "gitBlob": "483e4a945dd7cdd338b760ed0e0008813398f7ab"
+  },
+  {
+   "file": "gk236-bank-fixture-reachability.test.js",
+   "gitBlob": "eeb85d127b1696e63e146b7a37a48a360371d4a2"
+  },
+  {
+   "file": "gk237-active-diagnostics-retention.test.js",
+   "gitBlob": "2bcb87c182712b6b0b1bfd7759f62408ad7d5577"
+  },
+  {
+   "file": "gk238-authority-truthfulness-hotfix.test.js",
+   "gitBlob": "acd97a8209075e4718b6df88841dd3a5597ad289"
+  },
+  {
+   "file": "gk241-0030-migration-contract.test.js",
+   "gitBlob": "8ca2a820b4b2e1835923c18637ef5111f8747f5e"
+  },
+  {
+   "file": "gk241-buyer-marketstanding-vocabulary.test.js",
+   "gitBlob": "e90138ea8483c8a1db7f91c81670bfd5a49f8307"
+  },
+  {
+   "file": "gk241-migration-static-parity.test.js",
+   "gitBlob": "765d1bce5f356cd11f0f8203af7be16b8d454439"
+  },
+  {
+   "file": "gk241-pending-decision-recovery.test.js",
+   "gitBlob": "e4960c5f8264937ebc4d8448aaab216f6b108632"
+  },
+  {
+   "file": "gk248-real-fixture-integrity.test.js",
+   "gitBlob": "0c9771cd1a0d6533d61e902f7c02aa4bd1fcef06"
+  },
+  {
+   "file": "gk249-book-refused-render-safety.test.js",
+   "gitBlob": "79346561b388b27f20963e56adcb6c384c96fb36"
+  },
+  {
+   "file": "gk250-book-enrich-handler-smoke.test.js",
+   "gitBlob": "4767dd8b3258749a44b1fa3ddccbd7d9601be9b6"
+  },
+  {
+   "file": "gk250-refused-q41-dominance.test.js",
+   "gitBlob": "c8c623ed152acd89fd6c145d47060fcb04202b07"
+  },
+  {
+   "file": "gk251-book-real-pipeline-render-proof.test.js",
+   "gitBlob": "993d07ebb86fbf331e8d92db8d44a0d3464f40e6"
+  },
+  {
+   "file": "gk252-book-client-acceptance.test.js",
+   "gitBlob": "0eb922d1249880c8f5b40a0d5ba24819dd4f2144"
+  },
+  {
+   "file": "gk253-audit-final-prepush.test.js",
+   "gitBlob": "85d21693257b0f3fd86ad941febab1cc29dae2e9"
+  },
+  {
+   "file": "gk253-durable-category-authority.test.js",
+   "gitBlob": "61a1117de2ebecb84903977d05dbe3f64cb4379c"
+  },
+  {
+   "file": "gk254-owned-asset-fail-closed.test.js",
+   "gitBlob": "9740e89d76b847ae7bd199c2a2c1369d5a72e355"
+  },
+  {
+   "file": "gk255-economic-authority-boundary.test.js",
+   "gitBlob": "c6cccf87dc7b129cf2ee67706bbc1e11211ed921"
+  },
+  {
+   "file": "gk258-fail-closed-grade-authority.test.js",
+   "gitBlob": "aab2a2b9bc328950812fc463d9863b8c9932d894"
+  },
+  {
+   "file": "gk259-governing-grade-provenance-propagation.test.js",
+   "gitBlob": "2c92f06ece11f592d0b181b31bcf2771c761dd66"
+  },
+  {
+   "file": "gk260-server-owned-grade-authority.test.js",
+   "gitBlob": "fc474c48e340e2066c522a7264aa52efc97970e3"
+  },
+  {
+   "file": "gk261-server-owned-model-authority.test.js",
+   "gitBlob": "f639d5db34be43ce9520a5c983ba6bd6a1ef721c"
+  },
+  {
+   "file": "gk262-public-surface-blockers.test.js",
+   "gitBlob": "85a439c988e2fd229678996a5ac5406d92eb5992"
+  },
+  {
+   "file": "gk263-marketplace-connection.test.js",
+   "gitBlob": "b27a0a3e8306cd5b262bc829c18fed26d7b6c60a"
+  },
+  {
+   "file": "gk264-ebay-connect-oauth.test.js",
+   "gitBlob": "d5171ad59bce5863ced48d279542dab5465b0183"
+  },
+  {
+   "file": "gk265-phase3-seller-execution.test.js",
+   "gitBlob": "778a4450a3f6ddae6d0ba9d3d74c50a82e32618a"
+  },
+  {
+   "file": "gk266-collection-continuity.test.js",
+   "gitBlob": "620ba21dd4b7ecf20f5c3fc5a374f5f5442d4ce5"
+  },
+  {
+   "file": "gk268-auth-launch-google-login.test.js",
+   "gitBlob": "a4ef7ee3d4f7ee34d768846052c62587a7f60d45"
+  },
+  {
+   "file": "gk268-auth-recovery-ux.test.js",
+   "gitBlob": "8904aaccf0afbe6016aef52fe8c162472b89c56f"
+  },
+  {
+   "file": "gk268-decisionsafe-advisory-verification.test.js",
+   "gitBlob": "6f1c113df32df19fef145cc44962ae5f890c80e7"
+  },
+  {
+   "file": "gk269-ebay-account-deletion.test.js",
+   "gitBlob": "3d6ae18ca726516c40df37faecdadecdf70528ea"
+  },
+  {
+   "file": "gk270-canonical-collection-projection.test.js",
+   "gitBlob": "a2e23f3a7bf35296df57d07ecd395acfaa564df4"
+  },
+  {
+   "file": "gk270-relink-tool.test.js",
+   "gitBlob": "6ca60bd3690744e85ee2d7a1f4a22fde6720c9fe"
+  },
+  {
+   "file": "gk271-enrich-handler-smoke.test.js",
+   "gitBlob": "93fea3f273c054321f2d831112ab25443eff8eae"
+  },
+  {
+   "file": "gk271-grade-handler-smoke.test.js",
+   "gitBlob": "4712489e345d19f94533f604787dc7eacc1014af"
+  },
+  {
+   "file": "gk271-market-evidence-foundation.test.js",
+   "gitBlob": "c616a5e6596dff61fc92e3c60569f54484310516"
+  },
+  {
+   "file": "gk271b-evidence-contract.test.js",
+   "gitBlob": "4eb0b3864e927a2a5194f8e47035df92f0f896d5"
+  },
+  {
+   "file": "gk272-classic-comics-refused-conflict-smoke.test.js",
+   "gitBlob": "d8ca9b41be091875134d1ce5b48f4b78ad89300d"
+  },
+  {
+   "file": "gk272b-display-authority.test.js",
+   "gitBlob": "66214f249e7efc06609a41f972bfb73f1753fa45"
+  },
+  {
+   "file": "gk272c-derived-economics-authority.test.js",
+   "gitBlob": "4064f81e5e6736bfd15950647aee416f47d78262"
+  },
+  {
+   "file": "gk272d-live-surfaces.test.js",
+   "gitBlob": "be65e7640de268b96cc72dd72647d4b131bf08da"
+  },
+  {
+   "file": "gk272e-condition-history-inference.test.js",
+   "gitBlob": "c84ec0e803d47e927496f23b916c2e8d32e671cb"
+  },
+  {
+   "file": "gk273-research-market.test.js",
+   "gitBlob": "e52972c8daea6c9ff58420a65d157804dcc1ff18"
+  },
+  {
+   "file": "gk274-prediction-anchor-unit.test.js",
+   "gitBlob": "090abf8b0ae953d9030a145c2992002fce1ab9c3"
+  },
+  {
+   "file": "gk276-0033-provenance-migration-contract.test.js",
+   "gitBlob": "e15c0a7979dd777d399dacd83490a981137c1b34"
+  },
+  {
+   "file": "gk276-0034-immutability-contract.test.js",
+   "gitBlob": "aa2a1cfc1f462235e884a44408fbe1c583ea4a8a"
+  },
+  {
+   "file": "gk276-economic-decision-live-proof.test.js",
+   "gitBlob": "61af3a4f77f24f5ee8a0af7d1e2df938a3bb994c"
+  },
+  {
+   "file": "gk276-enrich-canary-handler-smoke.test.js",
+   "gitBlob": "e2a9ac8f76ca9bdda7e0457ff5b5768d9837117e"
+  },
+  {
+   "file": "gk276-scorer-provenance-gate.test.js",
+   "gitBlob": "4b119c6ed058982581983931569b0bfbf4871799"
+  },
+  {
+   "file": "gk277-capture-decision-ingress-closed.test.js",
+   "gitBlob": "35eda9227ed56028fa991acb2f7000b42476d322"
+  },
+  {
+   "file": "gk278-learning-spine.test.js",
+   "gitBlob": "2996af89d6a80bfed808f28d7ead3adbcd98ac0b"
+  },
+  {
+   "file": "gk278b-identity-correction-integrity.test.js",
+   "gitBlob": "dbabe01efa03cad9de544600fff500eaa1041a35"
+  },
+  {
+   "file": "gk278c-corpus-exclusion-and-truncate.test.js",
+   "gitBlob": "26904ed306414e20bdd1b8dcd1ef875b80fa17f7"
+  },
+  {
+   "file": "gk279-0037-0038-empty-schema-path.test.js",
+   "gitBlob": "be9128be923804b9a0d77b3341a6e7573ea93fa3"
+  },
+  {
+   "file": "gk279-final-hardening.test.js",
+   "gitBlob": "ecd481cfa74833644f52084706064c933095af8b"
+  },
+  {
+   "file": "gk279-physical-copy-disambiguation.test.js",
+   "gitBlob": "1e322e307432b982c6b38c659c6a89f7b0b1730f"
+  },
+  {
+   "file": "gk280a-amendment.test.js",
+   "gitBlob": "bfa73ea44ddef6debd144e45a38e88848d4563b6"
+  },
+  {
+   "file": "gk280a-claim-policy-and-wiring.test.js",
+   "gitBlob": "ed11114ade4a81b0e6f25d92962929ed7955f1e3"
+  },
+  {
+   "file": "gk280a-cross-item-claim-regression.test.js",
+   "gitBlob": "5dabc960db580fb4e46815f23bb8fdf0de60fccc"
+  },
+  {
+   "file": "gk280a-grade-proof-claim.test.js",
+   "gitBlob": "0508f5985be99c5d0766653c14d7536157acca3f"
+  },
+  {
+   "file": "gk281-browser-lifecycle.test.js",
+   "gitBlob": "bb4a55d97cae82cd4966ef3e3453afdf9e45203b"
+  },
+  {
+   "file": "gk281-entry-point-wiring.test.js",
+   "gitBlob": "76cc2d77027f9dd4edcf1e838343963b113bbff3"
+  },
+  {
+   "file": "gk281-grade-attempt-client.test.js",
+   "gitBlob": "1b6252d7cfe57c88257087b856b5063801ec9445"
+  },
+  {
+   "file": "gk281-grade-attempt-idempotency.test.js",
+   "gitBlob": "f2c746fc59c434ce2f3e2baeb402c406ca2fa5ca"
+  },
+  {
+   "file": "gk281-provider-retry-uncertainty.test.js",
+   "gitBlob": "e9ad487b74562d92b0fc93c0aa93ddea60c96e2f"
+  },
+  {
+   "file": "gk289-evidence-pipeline-diagnostic.test.js",
+   "gitBlob": "4024d3cf09a046b77ed9009bed572e46388e7d56"
+  },
+  {
+   "file": "gk291-grade-match-evidence-diagnostic.test.js",
+   "gitBlob": "b16ddf4371ef5937de2fe06ac4ea15bb46d7b9cb"
+  },
+  {
+   "file": "gk300-d2-d3-retry-and-dead-branch.test.js",
+   "gitBlob": "02ff2538aab01353ae775f36c05cff5b6911ef6b"
+  },
+  {
+   "file": "gk300-evidence-capacity.test.js",
+   "gitBlob": "8232b2ba171d89dc78b529385cdf305aacd209da"
+  },
+  {
+   "file": "gk300-photo-input-identity-lock.test.js",
+   "gitBlob": "b68d2126ac181c7526690dcd20724b4a702c4020"
+  },
+  {
+   "file": "gocollect.test.js",
+   "gitBlob": "c05821cbae6722b638ce89b7d12007d005daa493"
+  },
+  {
+   "file": "governing-grade-comps-query.test.js",
+   "gitBlob": "d4d940c019752b0b9a7d1b32e3ea09ff1e68dba7"
+  },
+  {
+   "file": "grade-authority-control-plane.test.js",
+   "gitBlob": "cd0490960ce76b3637f0ffa1c2124cf252bfe8da"
+  },
+  {
+   "file": "grailkey-commit-b1-q84-issue-corroboration.test.js",
+   "gitBlob": "e0c7bb6ca55f243b401602c7945d601bd6afc3cf"
+  },
+  {
+   "file": "grailkey-commit-b2-cv-cache-guard.test.js",
+   "gitBlob": "c4323689aa2c68a6d218f253136291a4f95bc520"
+  },
+  {
+   "file": "grailkey-commit-c-collection-header.test.js",
+   "gitBlob": "cf3b02359ddedc8c16c893fc3a9ca1a91492670e"
+  },
+  {
+   "file": "grailkey-commit-d1-d2-printing-axis-injection.test.js",
+   "gitBlob": "f65f16216939d387aff786a7f83c7ea2b45440d4"
+  },
+  {
+   "file": "grailkey-commit-d3-variant-axis-separation.test.js",
+   "gitBlob": "a70b95533a4398e56bd0b41dbc8a9da461ccaf07"
+  },
+  {
+   "file": "grailkey-commit-e.test.js",
+   "gitBlob": "bfd5b5c7853eabb81cca5c81f2a952a5a92d7fbd"
+  },
+  {
+   "file": "grailkey-commit-f.test.js",
+   "gitBlob": "d0d870bd40d71fa9d4023ef876cfcd5c1b39df01"
+  },
+  {
+   "file": "grailkey-commit-g.test.js",
+   "gitBlob": "960331d4c30570d304990e6534baa16a87d2c5a5"
+  },
+  {
+   "file": "grailkey-commit-m-pc-query-fallback.test.js",
+   "gitBlob": "aeda7871e94b1748ddaaea1fb28bc24761dd615b"
+  },
+  {
+   "file": "grailkey-commit-n-variant-anchor-ordering.test.js",
+   "gitBlob": "53834a719c79e9b7d10ea47790861db20d5279aa"
+  },
+  {
+   "file": "grailkey-commit-p.test.js",
+   "gitBlob": "9416ebb954f86d6838ae2211c982431383bf5727"
+  },
+  {
+   "file": "grailkey-commit-p2.test.js",
+   "gitBlob": "469a96d953e21cb11f07678e8b184a754208f0d8"
+  },
+  {
+   "file": "grailkey-commit-q.test.js",
+   "gitBlob": "5aeab604127be6c3f08d0329439677017f659a80"
+  },
+  {
+   "file": "grailkey-commit-r.test.js",
+   "gitBlob": "bec25b2fe28320822ec0a6c7572c33535e84f5cb"
+  },
+  {
+   "file": "grailkey-commit-s.test.js",
+   "gitBlob": "a7729a94da75c01a54c0151a3ac790d3bcb41648"
+  },
+  {
+   "file": "grailkey-commit-t.test.js",
+   "gitBlob": "a5c41573d913fa983d603fe01a87d7459c9129d8"
+  },
+  {
+   "file": "grailkey-commit-v1.test.js",
+   "gitBlob": "f417f8a48e763c54dfd5140b1fd2192572efe30b"
+  },
+  {
+   "file": "grailkey-directive-ab-evidence-applicability.test.js",
+   "gitBlob": "09ebef0f57d73bf5ba689c3314479aba4fadd780"
+  },
+  {
+   "file": "grailkey-directive-ad-identity-recovery.test.js",
+   "gitBlob": "b7532ad0c9c66e192ffc718f396aa0381c5fb844"
+  },
+  {
+   "file": "grailkey-directive-ae-cache-identity-atomicity.test.js",
+   "gitBlob": "344019f1dfe15b55343df268c0ffd747bddbbcd0"
+  },
+  {
+   "file": "grailkey-directive-af-discriminative-corroboration.test.js",
+   "gitBlob": "92bbfbe64e2477ae419f824bc6c5bd2716cb9917"
+  },
+  {
+   "file": "grailkey-directive-ag-22e-provenance-exemption.test.js",
+   "gitBlob": "a748b53f421185367a20940a8a9452b822375c63"
+  },
+  {
+   "file": "grailkey-directive-ah-sold-fallback-authority.test.js",
+   "gitBlob": "f6904f20e4dcacba5fa148d36bf8cc76d77d8f35"
+  },
+  {
+   "file": "grailkey-directive-ai-visual-first-identity.test.js",
+   "gitBlob": "d02a672e9d88e49770176b62adec7d87c2b525d5"
+  },
+  {
+   "file": "grailkey-directive-aj-http-handler.test.js",
+   "gitBlob": "dc32048b62ee2f80b44f815c6b647b3cc31eb0d4"
+  },
+  {
+   "file": "grailkey-directive-aj-reconciler-reachability.test.js",
+   "gitBlob": "419a107e248fe0afcf85df1d9a8c844ba60aaed0"
+  },
+  {
+   "file": "grailkey-directive-ak-population-precedence.test.js",
+   "gitBlob": "1b93c40eee0d22498e7f748f3f37921a71244350"
+  },
+  {
+   "file": "grailkey-directive-al-4a-4e-variant-year-custody.test.js",
+   "gitBlob": "236036e976d92e01da8083e03f5392cd61c62906"
+  },
+  {
+   "file": "grailkey-directive-al-anchor-variant-authority.test.js",
+   "gitBlob": "e60df63eb5c925cf0704de1d5284ddea28491b10"
+  },
+  {
+   "file": "grailkey-directive-am-variant-custody-real.test.js",
+   "gitBlob": "3829f2495ac9ef011c68210ce711f94e8870c218"
+  },
+  {
+   "file": "grailkey-directive-an-physical-corroboration.test.js",
+   "gitBlob": "372aad4471691456c7baaa8df5fdbd83293c4b8e"
+  },
+  {
+   "file": "grailkey-directive-ao-companion-product-eligibility.test.js",
+   "gitBlob": "dc7898d77025686dde36db8ad43ff09d07d0a055"
+  },
+  {
+   "file": "grailkey-directive-ap-variant-unresolved-authority.test.js",
+   "gitBlob": "c8f22ec2b0a2021cf75065c8f13121abe6154713"
+  },
+  {
+   "file": "grailkey-directive-aq-canonical-facet-authority.test.js",
+   "gitBlob": "a315823602a190266e2a95d57903ca8c665f18e7"
+  },
+  {
+   "file": "grailkey-directive-aq-followup-gk128-evidence-completeness.test.js",
+   "gitBlob": "650ffe8eabf99cc8c4a7fa41baf364c93c3f9805"
+  },
+  {
+   "file": "grailkey-directive-ar-evidence-authority.test.js",
+   "gitBlob": "6940bae988b92ef51d976ad6cc67be21ea145761"
+  },
+  {
+   "file": "grailkey-directive-as-candidate-always-enters.test.js",
+   "gitBlob": "92f24ac449a2b9b9150f81819cb4de4036e565c3"
+  },
+  {
+   "file": "grailkey-directive-at-year-evidence.test.js",
+   "gitBlob": "3cf24435389c785cb1d30bfe3cda095a5ac89421"
+  },
+  {
+   "file": "grailkey-directive-au-dellotto-1963.test.js",
+   "gitBlob": "67114c4a5130c5d534cde867e25feb1ffd76cff2"
+  },
+  {
+   "file": "grailkey-directive-au-handler-smoke.test.js",
+   "gitBlob": "20c37a0e74b2c2c128c8fcf05aae199102e83ade"
+  },
+  {
+   "file": "grailkey-directive-av-handler-smoke.test.js",
+   "gitBlob": "b2c11967e5a4d0017daebcca4e50eb35758982ba"
+  },
+  {
+   "file": "grailkey-directive-av-title-megakey-authority.test.js",
+   "gitBlob": "551e92152021f9aab5c98dc5d0b72967bb237891"
+  },
+  {
+   "file": "grailkey-directive-aw-handler-smoke.test.js",
+   "gitBlob": "619c13083eb4a4281240540a7885b2bf1117e75e"
+  },
+  {
+   "file": "grailkey-directive-aw-title-canonicalization.test.js",
+   "gitBlob": "b2621b5e85ea4acfeea7ebdfa7e419452924a42f"
+  },
+  {
+   "file": "grailkey-directive-b-task2-ebay-unavailable.test.js",
+   "gitBlob": "8441963059112ddeec8e82e47eb29930c3537969"
+  },
+  {
+   "file": "grailkey-directive-b-task3-resurrect-rejected-evidence.test.js",
+   "gitBlob": "f89af6af14d28a8dd762f061903a7c8fcd3ea2bb"
+  },
+  {
+   "file": "grailkey-directive-h-item1-stale-pc-anchor.test.js",
+   "gitBlob": "b65fcf354ff856c1ee354a480d6cc9e966e0dbd8"
+  },
+  {
+   "file": "grailkey-directive-j-gk79a-relabel.test.js",
+   "gitBlob": "fc7f603fdd329b7a3a32540975c8e91bd13cc2d1"
+  },
+  {
+   "file": "grailkey-directive-o-comp-ladder-reorder.test.js",
+   "gitBlob": "7f0f3352664f24e46a3a7018530e0686ea39a8f8"
+  },
+  {
+   "file": "grailkey-directive-p-task3-variant-on-card.test.js",
+   "gitBlob": "bd1d5593545db801e63b784e5d41f27ded8fc7ec"
+  },
+  {
+   "file": "grailkey-directive-q-variant-null-custody.test.js",
+   "gitBlob": "73592ac88fdcfbc9e799efb5e1830390968fa36c"
+  },
+  {
+   "file": "grailkey-directive-r-early-return-variant.test.js",
+   "gitBlob": "e9ce30d9735bcc97deb1d13c897625b63f784392"
+  },
+  {
+   "file": "grailkey-directive-t-task2-imageurl.test.js",
+   "gitBlob": "d033e4a79c321438ea7bb413a0f6b4d7d474a48b"
+  },
+  {
+   "file": "grailkey-directive-t-task3-identity-authority.test.js",
+   "gitBlob": "17c9a52925f8787702be87e189bbaa4a814738dd"
+  },
+  {
+   "file": "grailkey-directive-t-task4-variant-correction.test.js",
+   "gitBlob": "ebf41a39c84032e949f95d13f87a2c9bd650af8a"
+  },
+  {
+   "file": "grailkey-directive-t-task5-revision-token.test.js",
+   "gitBlob": "fdce76678c8a092f97bc492b20e2dd4831f81a1c"
+  },
+  {
+   "file": "grailkey-directive-u-task2-stale-automatic-write.test.js",
+   "gitBlob": "c1e7b20b832f81b4069fadc249a044cce5884a4b"
+  },
+  {
+   "file": "grailkey-directive-v-task2-ownership-perimeter.test.js",
+   "gitBlob": "ce5ac1cc401ec83656989b82f2f0884ef6749c27"
+  },
+  {
+   "file": "grailkey-directive-x-gk94-stale-closure-listing.test.js",
+   "gitBlob": "d2c7f4c26f766569e0ede4e444a2fca9c0a89806"
+  },
+  {
+   "file": "grailkey-directive-z-transaction-authority.test.js",
+   "gitBlob": "a1b8ea4a8b4e5cb3c2812a6138c3c3ece8e9f9cd"
+  },
+  {
+   "file": "grailkey-dispatch-19-fix5-asset-type-override.test.js",
+   "gitBlob": "97ffd663356a1db94a82d436fcbafb4c9d5b19f7"
+  },
+  {
+   "file": "grailkey-dispatch-19-fix6-year-rescue.test.js",
+   "gitBlob": "0555fe5f4b53ee90a34077f692ac06c15f135fac"
+  },
+  {
+   "file": "grailkey-dispatch-19-vision-confidence-leak.test.js",
+   "gitBlob": "255c0da4b1a6ee5ed27f4259dd2d757097481619"
+  },
+  {
+   "file": "grailkey-dispatch-20-fix5-decline-logging.test.js",
+   "gitBlob": "dc12be31aaa933e571932f19cb23cc63f82f376c"
+  },
+  {
+   "file": "grailkey-dispatch-2026-08-21-gk145-gk146-measurement.test.js",
+   "gitBlob": "eb4ee63df7f10f10d61b07ad690a129750b305c9"
+  },
+  {
+   "file": "grailkey-dispatch-22-scanlog.test.js",
+   "gitBlob": "85931fe630fa7d11c89ad74b708acf971921d45a"
+  },
+  {
+   "file": "grailkey-dispatch-25-fix1-instrumentation.test.js",
+   "gitBlob": "17aa385be000480ea75171f74e50cf8b70488b0a"
+  },
+  {
+   "file": "grailkey-dispatch-25-fix2-unanimous-promotion.test.js",
+   "gitBlob": "d0456f01c1e134d1b2f4bbcef60c323d6e68c66c"
+  },
+  {
+   "file": "grailkey-dispatch-25-fix2c-axis-check.test.js",
+   "gitBlob": "a0c45f817f34b81b7c8d9b3e2815340aec74ac29"
+  },
+  {
+   "file": "grailkey-dispatch-26-fix4-zero-support-rescue.test.js",
+   "gitBlob": "b8415d131ab89386736042f339b50c358742390c"
+  },
+  {
+   "file": "grailkey-dispatch-27-fix27a-covertype-consensus.test.js",
+   "gitBlob": "b9d063ef90f9261b25e4a589da49d3b649737fb8"
+  },
+  {
+   "file": "grailkey-dispatch-28-variant-pricing-wiring.test.js",
+   "gitBlob": "ec0ce111d27dd8144604cdece03aa8d6dd525678"
+  },
+  {
+   "file": "grailkey-dispatch-29-fix3a-vision-prompt.test.js",
+   "gitBlob": "1c4b6455fd9f3aaa7acca05eca713b2be3b00af5"
+  },
+  {
+   "file": "grailkey-dispatch-30-gk41-non-comic-gate.test.js",
+   "gitBlob": "627e6bdd4c9ca93631b9dbbc010a146742600302"
+  },
+  {
+   "file": "grailkey-dispatch-31-fix31a-wrong-axis-removed.test.js",
+   "gitBlob": "f6b800c0b4a5f2aba192a3c2457484db9c9484c0"
+  },
+  {
+   "file": "grailkey-dispatch-31-fix31b-prompt-widening.test.js",
+   "gitBlob": "357f32e03dcfa9405dec2c1d6e5f0f59a457ebf9"
+  },
+  {
+   "file": "grailkey-dispatch-32-frozen-corpus.test.js",
+   "gitBlob": "f3dda697e9850d25e8ec8f21414ab6c9c6b18a78"
+  },
+  {
+   "file": "grailkey-dispatch-33-parity-harness.test.js",
+   "gitBlob": "81034586b9015f852ae1830cc2822f2bd6d8d34c"
+  },
+  {
+   "file": "grailkey-dispatch-46-gk62-vision-provenance.test.js",
+   "gitBlob": "ad2e9db0a451b08f209263af05316e911b386531"
+  },
+  {
+   "file": "grailkey-dispatch-47-gk39a-remove-fabricated-confidence.test.js",
+   "gitBlob": "a56f9249fa7a648130e94fbdf735aa9cdde0c148"
+  },
+  {
+   "file": "grailkey-dispatch-50-gk66-ladder-authority-removed.test.js",
+   "gitBlob": "809568b5616420628c36deb539f5eb5bf80602bc"
+  },
+  {
+   "file": "grailkey-dispatch-50-gk67-display-truth.test.js",
+   "gitBlob": "a3bec692ae379fee124e60baf93b7bcb87620671"
+  },
+  {
+   "file": "grailkey-dispatch-74-price-coercion.test.js",
+   "gitBlob": "3824e395bbaa2f6b78a5a0606c3d3b7478ce070c"
+  },
+  {
+   "file": "grailkey-dispatch-e-task2-asset-confirmation-badge.test.js",
+   "gitBlob": "c49f15ca4dbb7e0e395a3fe4b68c289a33167e5a"
+  },
+  {
+   "file": "grailkey-dispatch-e-task3-source-labels.test.js",
+   "gitBlob": "6ed21a0e77c7ef941d61cebb35add8f32c11dd09"
+  },
+  {
+   "file": "grailkey-dispatch-g-task1-floor-warning-wording.test.js",
+   "gitBlob": "d65c265785fe43833a75e901611ebbbbcd0f4f05"
+  },
+  {
+   "file": "grailkey-dispatch-g-task2-pc-anchor-authority.test.js",
+   "gitBlob": "a8da6d31718e39b41677828bba11faeccac0bc39"
+  },
+  {
+   "file": "grailkey-gk142-no-premium-parity.test.js",
+   "gitBlob": "38ba5934c528549dff5b7a6048b693951b9f5046"
+  },
+  {
+   "file": "grailkey-gk142-series-core-query-handler-smoke.test.js",
+   "gitBlob": "91eaaf64ea288b55be04b6cc01877c65174b75ae"
+  },
+  {
+   "file": "grailkey-gk142-series-core-query.test.js",
+   "gitBlob": "fa6f03c0d5a9b5485fb4d6b3f9b2530790d5f709"
+  },
+  {
+   "file": "grailkey-gk143-title-corruption.test.js",
+   "gitBlob": "270207dd07620beaf23d746e3e14dcdf625f1cb7"
+  },
+  {
+   "file": "grailkey-gk148-publisher-stoplist.test.js",
+   "gitBlob": "eb3172f75dbf41d70c37b8190e687524ea73b8a8"
+  },
+  {
+   "file": "grailkey-operator-panel-capture-wiring.test.js",
+   "gitBlob": "cc3b3b2cc25859834d9b19ada17f3ee4c87e20fb"
+  },
+  {
+   "file": "grailkey-outcome1-grading-calibration-patch.test.js",
+   "gitBlob": "8b20517068d321e5245fa62964a679026bedf494"
+  },
+  {
+   "file": "h8-bootstrap-gate.test.js",
+   "gitBlob": "87cef4cb2330a42d1288622709eb1fea8fad84a3"
+  },
+  {
+   "file": "h8-operator-proof-values.test.js",
+   "gitBlob": "22cbe58396f08a2f8ef2c927b9f6fcce0aaa0ac4"
+  },
+  {
+   "file": "identity-gate.test.js",
+   "gitBlob": "8468bfd72333df3b675182864dc32ce55ad9ba23"
+  },
+  {
+   "file": "identityAlignment.test.js",
+   "gitBlob": "a1fb2721b7fc8f4d2b0f717ec9ec8d52fbbd853b"
+  },
+  {
+   "file": "image-search-extraction.test.js",
+   "gitBlob": "259f853eb9c1077bf714c53324aa1bfc98769b85"
+  },
+  {
+   "file": "inventory-authority-live-proof.test.js",
+   "gitBlob": "159e69dbbc2dc0ad2d2e7fff6e9f818bc13a1b22"
+  },
+  {
+   "file": "inventory-authority-migration-contract.test.js",
+   "gitBlob": "3dc1b28cbfee72ea1b5b49017b29140814541cbd"
+  },
+  {
+   "file": "inventory-authority-sold-consistency.test.js",
+   "gitBlob": "f6ae419ca820fc4940b93a0fbf7a99953d2ea4b6"
+  },
+  {
+   "file": "launch1a-nonoperator-spend-ceiling.test.js",
+   "gitBlob": "073dccd78f2369383d6a33decf966798ff4a10ac"
+  },
+  {
+   "file": "launch1a-refusal-screen-browser.test.js",
+   "gitBlob": "996456aa7c69af138fd6ccec503126305b20065d"
+  },
+  {
+   "file": "launch1b-browser-certification.test.js",
+   "gitBlob": "d48f1a7f9bca51ad2ee47d93e7034760eaf4c407"
+  },
+  {
+   "file": "launch1b-image-principal-and-limits.test.js",
+   "gitBlob": "9255e070215fd8a0c40fefe5a84fbd80d8534797"
+  },
+  {
+   "file": "launch1b-protected-collection-image.test.js",
+   "gitBlob": "ed2398665924e7bc37660b41cad5a2db874366c3"
+  },
+  {
+   "file": "list-ebay-outcome1-handler-smoke.test.js",
+   "gitBlob": "fcf2a1daa0cf13dff99b875a50fd0efacb35df3f"
+  },
+  {
+   "file": "list-ebay-photo-handoff.test.js",
+   "gitBlob": "bbdd4abeadc6e9689e1811896d002b78a6047039"
+  },
+  {
+   "file": "list-price-warning.test.js",
+   "gitBlob": "3aaeeef18d9a970fa286855d7952949fcaedaec3"
+  },
+  {
+   "file": "listing-photo-certified-evidence.test.js",
+   "gitBlob": "93ba429850ac5a9dd01151040592d05ddf22d497"
+  },
+  {
+   "file": "listing.test.js",
+   "gitBlob": "50784d62b26fc7d04026e9c6bbf781ae308e0a15"
+  },
+  {
+   "file": "lock-race-teardown-harness.test.js",
+   "gitBlob": "c83dc58a67f9dcc1fd8bd65b5db9b1ae8c300aff"
+  },
+  {
+   "file": "low-grade-floor.test.js",
+   "gitBlob": "0982146cd87b874db017ef14048017a5eef8cf63"
+  },
+  {
+   "file": "marketplace-module-boundary.test.js",
+   "gitBlob": "a620f0e28c16a377d94d74dcb4516d7a32127edc"
+  },
+  {
+   "file": "max-buy-calculator.test.js",
+   "gitBlob": "e32159676b996c75ea71de78eb4d181a0d8bf8d8"
+  },
+  {
+   "file": "media-module-boundary.test.js",
+   "gitBlob": "ccd5af0c186018952ce0f9c8adc49b7b4222a84e"
+  },
+  {
+   "file": "mega-keys-duplicate-detector.test.js",
+   "gitBlob": "666f11d845007f96176207feb1431243d816849f"
+  },
+  {
+   "file": "mega-keys.test.js",
+   "gitBlob": "9b3a99d5d11d637b575678cb8d37e71233495aa3"
+  },
+  {
+   "file": "merge-site-parity.test.js",
+   "gitBlob": "eca82ad34b9cd535b56bd03b92fb209dd6c6aeca"
+  },
+  {
+   "file": "model-provenance-cost-observability.test.js",
+   "gitBlob": "bd5d81049b9aa729ac29308ce87000c3c12f4078"
+  },
+  {
+   "file": "oauth-seller-identity-proof.test.js",
+   "gitBlob": "2ec99d23075a7cf54c8c25f1a81acce4b4dfb829"
+  },
+  {
+   "file": "operator-action-0021-migration-contract.test.js",
+   "gitBlob": "2e3541edec759de3a7fe055c5037d5ec11b16e15"
+  },
+  {
+   "file": "operator-action-alignment-unit.test.js",
+   "gitBlob": "c5866b9b8024d246303366ea474cb2b5324e143b"
+  },
+  {
+   "file": "operator-action-handler-smoke.test.js",
+   "gitBlob": "cb802fa6eb0af95f0e930374ffe76a8057126708"
+  },
+  {
+   "file": "operator-action-live-proof.test.js",
+   "gitBlob": "359bb3114e5259b95fef635f9076436a50915358"
+  },
+  {
+   "file": "outcome-economics-handler-smoke.test.js",
+   "gitBlob": "9d2a92897f28533cacc691e5ed62fec4e0742196"
+  },
+  {
+   "file": "outcome1-0020-migration-contract.test.js",
+   "gitBlob": "285898a54c19a24299f8afe022f8d4af22042f8c"
+  },
+  {
+   "file": "outcome1-packet-safety.test.js",
+   "gitBlob": "d560487af005f3d428663db0fb993ae2cf8e0347"
+  },
+  {
+   "file": "outcome1-recordvaluation-idempotency-live-proof.test.js",
+   "gitBlob": "c768c9268e58142d21773d8715200a8a8aeb65bb"
+  },
+  {
+   "file": "outcome1-runtime-bridge-unit.test.js",
+   "gitBlob": "b8bdd7682e87cefd6ffd6f9553f276e1e3e8208a"
+  },
+  {
+   "file": "p0-operator-title-authority.test.js",
+   "gitBlob": "5ca158c8a5a47148d97f7e735964d235e2431853"
+  },
+  {
+   "file": "p0-operator-variant-authority.test.js",
+   "gitBlob": "9604a9f4e682a03660089c11d68013a3992fcf04"
+  },
+  {
+   "file": "p0a-rescan-asset-continuity.test.js",
+   "gitBlob": "ba50227b115b940549a24d18cc6785d6feb39a13"
+  },
+  {
+   "file": "p0a-rescan-continuity-handler-proof.test.js",
+   "gitBlob": "2ac6d28b3a350d1f2c546166d9970edab9656019"
+  },
+  {
+   "file": "p0b-deterministic-decision-selection.test.js",
+   "gitBlob": "27d1b59b05ebde6a86bebb30ba2247db2b2ce915"
+  },
+  {
+   "file": "pattern-k-dedupe-issue.test.js",
+   "gitBlob": "a6a7466903dbc7bd9cc5061fc29c1893cb4e5eb3"
+  },
+  {
+   "file": "pc-identity.test.js",
+   "gitBlob": "77de596b53b50e8f146e67bb206cf7e9405a009e"
+  },
+  {
+   "file": "pedigree-registry.test.js",
+   "gitBlob": "30b2af68bd08390e6318a793d1c375adb2750d68"
+  },
+  {
+   "file": "penetration.test.js",
+   "gitBlob": "7b0a5c4b7a1d50d32344a64aad6deeea0093f665"
+  },
+  {
+   "file": "perf-kv-dedup-and-oauth-cache.test.js",
+   "gitBlob": "1154183aa1c01c2633dbe7ebbdc8c1c87783a64e"
+  },
+  {
+   "file": "physical-asset-bulk-quicklist-gate.test.js",
+   "gitBlob": "74cd7117a3726fd594be544a3fec59e905d656f3"
+  },
+  {
+   "file": "physical-asset-link-gate-render.test.js",
+   "gitBlob": "169643017880f09fdaa81ae37aef5d57a5d6666e"
+  },
+  {
+   "file": "physical-asset-not-linked-handler.test.js",
+   "gitBlob": "fafdfc4fcd593a333841480ca0cb7b56339a0661"
+  },
+  {
+   "file": "pipeline-audit-merge.test.js",
+   "gitBlob": "3f53c49acdc664f32cf8c0410efc037fc7b357cf"
+  },
+  {
+   "file": "pipeline-audit.test.js",
+   "gitBlob": "d605ac94a02d5a64e967aa50188e3d0e9a2edcc5"
+  },
+  {
+   "file": "prediction-error-scoring-unit.test.js",
+   "gitBlob": "b7191de09c8d49352df8fafa5d478c4ae875bb5e"
+  },
+  {
+   "file": "price-lane-1-gk228-gk229-regression.test.js",
+   "gitBlob": "34aa16f962d9baaac69b1916b699ff3e239d9ec5"
+  },
+  {
+   "file": "priceBands.test.js",
+   "gitBlob": "2331f652128047384f3ea48c898008bb3191e18c"
+  },
+  {
+   "file": "pricecharting-sales.test.js",
+   "gitBlob": "36cb6d805d040c931084836a26e817df41899b97"
+  },
+  {
+   "file": "pricing-trust-commit-c.test.js",
+   "gitBlob": "a8dbcd41d62097b9f45b9090ae713a78ba06541e"
+  },
+  {
+   "file": "pricing-trust-p1.test.js",
+   "gitBlob": "6346846bd674073ccba4bb2ad18247e19f58b6d6"
+  },
+  {
+   "file": "pricing-trust-p2-p3.test.js",
+   "gitBlob": "2442ecfa6263e4a4c8cf08f0b47637155f96709d"
+  },
+  {
+   "file": "principal-scoped-client-storage.test.js",
+   "gitBlob": "ee7a391ef593fe0d202bb791add72d1678037d8a"
+  },
+  {
+   "file": "production-fixture-bank-replay.test.js",
+   "gitBlob": "8f726e249b11fe24177b9048b67a5dbe8f3d94c8"
+  },
+  {
+   "file": "q-adv397-visual-guard.test.js",
+   "gitBlob": "8cd34e5f37b28ec490dbaa393e7d1f22fc4bc798"
+  },
+  {
+   "file": "q-batman222-cv-zero-score.test.js",
+   "gitBlob": "87d90aba1557f13444b3c921942b64093ed9be71"
+  },
+  {
+   "file": "q-commitD1-evidence-eligibility.test.js",
+   "gitBlob": "45ea634ee45d9ee7b9eff8151d80f0062b95b0cc"
+  },
+  {
+   "file": "q-commitD1.1-collision-aware-eligibility.test.js",
+   "gitBlob": "04ea540c618f43d0ad0d57ed3e409a5c07d67ed1"
+  },
+  {
+   "file": "q-commitD2-derivation-trace.test.js",
+   "gitBlob": "0d5cd6fab1aa1b1a20ff2858adf47fed8567a2f1"
+  },
+  {
+   "file": "q-commitE-catalog-ladder-reference.test.js",
+   "gitBlob": "eca04dd1a5b6c18e562497f3f244ce2fdfdc15a1"
+  },
+  {
+   "file": "q-commitE1-catalog-ladder-authority.test.js",
+   "gitBlob": "3468bedb8e00323315002f3dfcf9b25d927b7f61"
+  },
+  {
+   "file": "q-fixb-publisher-zero-support.test.js",
+   "gitBlob": "2770c2b9b201a42267edf05154990e9363f97690"
+  },
+  {
+   "file": "q-flashgordon13-badge-accuracy.test.js",
+   "gitBlob": "ccc954861920368bc3a12667de44f966c420e88f"
+  },
+  {
+   "file": "q-flashgordon13-publisher-gate.test.js",
+   "gitBlob": "cd6c1da0a207a673a22b9ab940d2a6adca0678ad"
+  },
+  {
+   "file": "q-pc-requery-gate.test.js",
+   "gitBlob": "39495c86ac0a3d66ffff958f26657ca339ab44be"
+  },
+  {
+   "file": "q-pc-variant-score.test.js",
+   "gitBlob": "bc20f11971b79832b76a5c3b3bd941d3e7f31077"
+  },
+  {
+   "file": "q-strangeTales-containment.test.js",
+   "gitBlob": "7af4a8c7fffdcec365ee978ba0f8d7622fe9b6cf"
+  },
+  {
+   "file": "q-title-zero-support.test.js",
+   "gitBlob": "49229d072fae2cfaad60799d8fb89c9fc1726083"
+  },
+  {
+   "file": "q-trackB-commit1.1-verification-hardening.test.js",
+   "gitBlob": "adbf363effdc1e316509cee964c523963a916374"
+  },
+  {
+   "file": "q-trackB-commit2-era-classification.test.js",
+   "gitBlob": "01487e239221f6b6bd1310d2643b08b3e1ea4d0d"
+  },
+  {
+   "file": "q-trackB-commit3-manual-correction.test.js",
+   "gitBlob": "49a0fadcb2614a25308d2aed9e5f33ce12e83dda"
+  },
+  {
+   "file": "q-trackB-commit4-adoption-provisional.test.js",
+   "gitBlob": "dcd4454fcb2a31d904dc669bc2bcd189210960af"
+  },
+  {
+   "file": "q-trackB-commit4.1-spawn-visual-family-merge.test.js",
+   "gitBlob": "a7bfcc48188b210a6ea5c5fd057e087ddabfc2dd"
+  },
+  {
+   "file": "q-trackB-commit4.2-fingerprint-year-restamp.test.js",
+   "gitBlob": "75d24c43f78ed30a0cbd4a4836b251f6a2dea4de"
+  },
+  {
+   "file": "q-trackB-commit4.3-winning-family-authority.test.js",
+   "gitBlob": "ebd8185ff7b130705724b820e06ef3b94114353e"
+  },
+  {
+   "file": "q-trackB-commit4.3.1-retention-decline-fail-closed.test.js",
+   "gitBlob": "c6a07ba9f894e8b7020b07a413305e715f3a9b2c"
+  },
+  {
+   "file": "q-vision-zero-support.test.js",
+   "gitBlob": "0113ce493c540d7a9ea67b12f9932cde3f8454ed"
+  },
+  {
+   "file": "q110-intake-nonblocking.test.js",
+   "gitBlob": "4389567e0ce393adf0bbc59cfff5f0f8e3980d8c"
+  },
+  {
+   "file": "q111-variant-token-specificity.test.js",
+   "gitBlob": "ebdeed2fa64b0643713ed31701ad8c8371d63725"
+  },
+  {
+   "file": "q112-year-resolution.test.js",
+   "gitBlob": "f6083473cdba08f1f0310f3d95f0e31c84347f3a"
+  },
+  {
+   "file": "q113-sold-fallback-reasons.test.js",
+   "gitBlob": "86eea7f9f097967530494f3857ef1020aef12b28"
+  },
+  {
+   "file": "q115-variant-issue-filter.test.js",
+   "gitBlob": "2c3b8375c464bf4684c2c16f84df435688c756a2"
+  },
+  {
+   "file": "q116-printing-edition.test.js",
+   "gitBlob": "97810028afeda5640de84a1249e64d29f10a7619"
+  },
+  {
+   "file": "q117-cv-title-axis-field.test.js",
+   "gitBlob": "66aaad66529a4088e8e3897674d0691d4f57c2a9"
+  },
+  {
+   "file": "q118-vision-consistency.test.js",
+   "gitBlob": "d016c46ef4e12459376a9147b8a9367403d04a4a"
+  },
+  {
+   "file": "q119-compound-title-consolidation.test.js",
+   "gitBlob": "682b17628aadff059fa5da6515bee0d319f9fa8f"
+  },
+  {
+   "file": "q120-cv-year-penalty-and-marvel-tokenize.test.js",
+   "gitBlob": "c7550cd8304078c0b5f54a13f96f0f78380532be"
+  },
+  {
+   "file": "q121-cv-pool-year-hint.test.js",
+   "gitBlob": "5e533144a6ff6c46750a71d6f394583c8733968a"
+  },
+  {
+   "file": "q127-variant-pool-year-conflict.test.js",
+   "gitBlob": "7f5d44efa3850043f58ed95989a8a7dbe308ebc6"
+  },
+  {
+   "file": "q128-era-tolerance-consolidation.test.js",
+   "gitBlob": "1c46f1ba7e220ce904e897dbd96bb6dc273bf6c5"
+  },
+  {
+   "file": "q129-variant-comps-excluded-by-era.test.js",
+   "gitBlob": "a1d709007cd7ea3286eb569bb505d0efd180d353"
+  },
+  {
+   "file": "q130-john-giang-artist.test.js",
+   "gitBlob": "085e6ddcd254d4fb0918071b855828bf3bb15793"
+  },
+  {
+   "file": "q131-artist-pattern-word-boundaries.test.js",
+   "gitBlob": "1e3b7d4819a2e8d0c3e0ac390a492ba9534208d2"
+  },
+  {
+   "file": "q131-refused-identity-conflict-provisional.test.js",
+   "gitBlob": "1ca0efd8a2c264811012d0861032a2abef23d27d"
+  },
+  {
+   "file": "q131-systemic-audit-fixes.test.js",
+   "gitBlob": "9c45eacd41a1ad7d9f2fc0fac6c02542a0a23b31"
+  },
+  {
+   "file": "q132-david-nakayama-family-recovery.test.js",
+   "gitBlob": "7df04b349f9e04fe228c291c86a36c4cc32691a1"
+  },
+  {
+   "file": "q132-fix3-artist-conflict-surfacing.test.js",
+   "gitBlob": "be721463c5757a6bc505842b0da77d9ac91dbe3f"
+  },
+  {
+   "file": "q132-layer4-pc-year-gate.test.js",
+   "gitBlob": "cfb14f4f529f415c06b41ba1157b45b50ba0a1bb"
+  },
+  {
+   "file": "q132-layer4b-confirmedyear-correction.test.js",
+   "gitBlob": "4e89c6cef3f635002ced3980c36eefb5cdad4b22"
+  },
+  {
+   "file": "q132-layers-1-2-year-conflict-resolution.test.js",
+   "gitBlob": "c17598c746718e22a0852ccbd873a29fd412d21e"
+  },
+  {
+   "file": "q132-variant-year-family-corroboration.test.js",
+   "gitBlob": "9e3d1df33485eee8f12ead660c4f430d60d94e02"
+  },
+  {
+   "file": "q133-slice1b-eom-registry.test.js",
+   "gitBlob": "d006ed8280259b4fa3e7ccb17131084c090d9d99"
+  },
+  {
+   "file": "q133-slice1c-publisher-gate.test.js",
+   "gitBlob": "14216b0918f72a8b9c39bc4d8b8e2d9668a0b07b"
+  },
+  {
+   "file": "q133-slice2-contract-followup.test.js",
+   "gitBlob": "2e9bbf4e56fcf24303dc1a568db0a30527984f70"
+  },
+  {
+   "file": "q133-slice2-identityrefused-promotion.test.js",
+   "gitBlob": "69efa117b42870acdd2ca4d0dd13aab8cfa91f20"
+  },
+  {
+   "file": "q133-two-axis-pc-anchor-gate.test.js",
+   "gitBlob": "2742140c012d68fb84c0b1b63587d14684e37d25"
+  },
+  {
+   "file": "q134-provisional-override-boolean.test.js",
+   "gitBlob": "098a23e21f233073ce5f2039b307a8cfa50ede3b"
+  },
+  {
+   "file": "q135-p1-p2-p3-fixes.test.js",
+   "gitBlob": "0cb9205e6d13a086b7522bc597044a361675a59e"
+  },
+  {
+   "file": "q136-slice-a-artist-axis.test.js",
+   "gitBlob": "37c9bf5143195ae001471ec11adb975e42460939"
+  },
+  {
+   "file": "q136-slice-a2-identity-incomplete-provisional.test.js",
+   "gitBlob": "8a503ada3819eb607ec1fd15cc433d21333ce430"
+  },
+  {
+   "file": "q137-slice-a3-vision-low-confidence-corroborated.test.js",
+   "gitBlob": "19873c26bd4f09b06f60cc88f7a5aa553ce0e6da"
+  },
+  {
+   "file": "q138-slice-c-signed-match-dimension.test.js",
+   "gitBlob": "ead33630106c2e741ca211dbef58204c093db745"
+  },
+  {
+   "file": "q139-godds-acronym-tokenizer.test.js",
+   "gitBlob": "06bf7a7505bd997b1519bfc8f86b461798dca494"
+  },
+  {
+   "file": "q140-at-vision-zero-support-skip.test.js",
+   "gitBlob": "c3a30672fba2b77e1e5fd22fb80c4b3eb8014d1d"
+  },
+  {
+   "file": "q140-coherent-content-token-lane.test.js",
+   "gitBlob": "b24aa0ef4a467392aaafe5453eb602cc3f760b55"
+  },
+  {
+   "file": "q140-issue-consensus-corrective.test.js",
+   "gitBlob": "bedfd9ccf89e0ce2bd1072f6bf11e4305799b77c"
+  },
+  {
+   "file": "q141-merchandise-classifier.test.js",
+   "gitBlob": "1c929e722995b49c66eb2cd95d6b2020350ae639"
+  },
+  {
+   "file": "q141-rachta-lin-pricing-eligibility-gate.test.js",
+   "gitBlob": "0623401827ca8fd4990fa549400a5df5a5986310"
+  },
+  {
+   "file": "q141-v0i-slab-exclusion.test.js",
+   "gitBlob": "37faa7ce314e11588028f70ee429ce704f2fac65"
+  },
+  {
+   "file": "q141a-canonical-title-projection.test.js",
+   "gitBlob": "c4fb26c1266d17a7f4c471b9af8c0b1bc90febd9"
+  },
+  {
+   "file": "q141b-shared-issue-extractor.test.js",
+   "gitBlob": "77244e8644a74f6a95b97c9a0f133dde6f143ffd"
+  },
+  {
+   "file": "q141c-marketplace-category-rejection.test.js",
+   "gitBlob": "0a8d1fc67a08a81dd87b4f1712e9888b8903847a"
+  },
+  {
+   "file": "q142-assembly-integrity-family-population.test.js",
+   "gitBlob": "1c13c8d66526754d82784f919d4b909be6a6efc6"
+  },
+  {
+   "file": "q142-instance2-phase2-population.test.js",
+   "gitBlob": "f64a12918a9ed046b72222aca4b6aa4fa9dfc1a0"
+  },
+  {
+   "file": "q143-active-reference-range.test.js",
+   "gitBlob": "c92053060374827231d222686110ac9816efa55e"
+  },
+  {
+   "file": "q144-item1-canonical-issue-extraction.test.js",
+   "gitBlob": "17cc52425143e916e3ab1319057adc178434d5f3"
+  },
+  {
+   "file": "q144a-family-discriminator-gate.test.js",
+   "gitBlob": "3c52139c2b529d3addb22d24b420f2c93b52d249"
+  },
+  {
+   "file": "q144b-canonical-marker-allowance.test.js",
+   "gitBlob": "0c201a281e8c1f3a614a6982d7033b430e6a8e5a"
+  },
+  {
+   "file": "q144c-confirmed-identity-merge.test.js",
+   "gitBlob": "b8830f42b1f81e3c60acd48689e70126a0418347"
+  },
+  {
+   "file": "q144c-issue-presence-merge.test.js",
+   "gitBlob": "212848c7f153d275a0b42a85f312bea2b74be2be"
+  },
+  {
+   "file": "q145-contract-decision-sync.test.js",
+   "gitBlob": "13266c398c397fd00ee2de15c6f26647a4561002"
+  },
+  {
+   "file": "q21-transposition.test.js",
+   "gitBlob": "b2748ce04066f92a901617d13a89aa842499ce20"
+  },
+  {
+   "file": "q83-consensus-rescue.test.js",
+   "gitBlob": "a8bbd3531644571aca481fa6957bcb03d9b6dbbd"
+  },
+  {
+   "file": "q84-dual-axis.test.js",
+   "gitBlob": "bdb7965c1139daf1221021962af2e48b7485baae"
+  },
+  {
+   "file": "q85-compact-key.test.js",
+   "gitBlob": "9659a43cdd9a00d38403c5f995d0c19400a6a93b"
+  },
+  {
+   "file": "q86-year-confidence.test.js",
+   "gitBlob": "52db1410427fafafc1010c152714484abab9bd07"
+  },
+  {
+   "file": "q87-idrequired-cache.test.js",
+   "gitBlob": "13994fdce2e3f2805e73dd1b9d92cab1826ed2da"
+  },
+  {
+   "file": "qa-integration.test.js",
+   "gitBlob": "7f27fdcac4ab8ed877ae468ef9517509ea5c5349"
+  },
+  {
+   "file": "reidentify-control-restoration.test.js",
+   "gitBlob": "06fa052820a8c4b4b31f7ad09b4fc5bca77b70fa"
+  },
+  {
+   "file": "response-contract.test.js",
+   "gitBlob": "54eadaa9e9985b0b88950f1b17c45e195101906d"
+  },
+  {
+   "file": "sanity-thresholds.test.js",
+   "gitBlob": "6d3bca2193d5b5d18b6d2d7cebb561e598663c24"
+  },
+  {
+   "file": "scan-latency-instrumentation.test.js",
+   "gitBlob": "6775482795b30db559e468d100f5f75619338dea"
+  },
+  {
+   "file": "scan-latency-isolation-and-faults.test.js",
+   "gitBlob": "1e8d606ffd4c705c70d1638335f656261268fb9b"
+  },
+  {
+   "file": "second-principal-capture-certification.test.js",
+   "gitBlob": "7707274bbaa44eb712f7a88c78af648e7ab57638"
+  },
+  {
+   "file": "ship23-consistency.test.js",
+   "gitBlob": "d4d8fcc36dc0af2e8a8a0c3d6ad5495c03a7640b"
+  },
+  {
+   "file": "ship24-authentication.test.js",
+   "gitBlob": "3630a850eca6901e5e8f28af7eb94f8f09695614"
+  },
+  {
+   "file": "ship25-era-filter.test.js",
+   "gitBlob": "5b58afbe7bc2e30d64480ca7f220efd8b9c0e9f7"
+  },
+  {
+   "file": "ship25-velocity.test.js",
+   "gitBlob": "dc46404af9bb2db3a5388fccfea34d5cb31669b8"
+  },
+  {
+   "file": "ship26-integration.test.js",
+   "gitBlob": "7753bde613355a79569a7ccd3deca7a41701c475"
+  },
+  {
+   "file": "slice7-scan-ownership.test.js",
+   "gitBlob": "78b613cbf5b6c81cdc01df88ee23758af84eb7c7"
+  },
+  {
+   "file": "sold-insights-killswitch.test.js",
+   "gitBlob": "a2e3a61efdeae00f4675a8684a14c9b8c110b6f5"
+  },
+  {
+   "file": "sold-verification.test.js",
+   "gitBlob": "8bc87c1d27a2cfa46e2ed63cb00637aa400b112b"
+  },
+  {
+   "file": "spend-guard-env-boundary.test.js",
+   "gitBlob": "e2a8c3f92c09d2f23fe51d624a9825473e814650"
+  },
+  {
+   "file": "spend-guard.test.js",
+   "gitBlob": "07f589e16a1efae3d0cd49bf9c1be2fdd2cf5d57"
+  },
+  {
+   "file": "spend-refusal-message.test.js",
+   "gitBlob": "7256c808fab356ccfb1f92c53ddd492541f2a368"
+  },
+  {
+   "file": "sweep-runner-instrumentation.test.js",
+   "gitBlob": "ff95737064cd041c7e0f13336efa44ac0b510430"
+  },
+  {
+   "file": "tier-source-map-completeness.test.js",
+   "gitBlob": "4d4adee13643237d2fad11a9fbc73e3251b43b7e"
+  },
+  {
+   "file": "title-sanitization.test.js",
+   "gitBlob": "4f60ef855b849ebccc96ff33007259622b7ad06d"
+  },
+  {
+   "file": "title-strip-stats.test.js",
+   "gitBlob": "5a1a305ed2d6a2d509013c42773e462436095007"
+  },
+  {
+   "file": "u1-0039-migration-contract.test.js",
+   "gitBlob": "6eeed618eb158aa75873a1a7c413151c455db964"
+  },
+  {
+   "file": "u1-explicit-category-writers.test.js",
+   "gitBlob": "62d464de0cf8dcb1d95758fc1212bfdff3d1d00e"
+  },
+  {
+   "file": "u1-generic-book-live.test.js",
+   "gitBlob": "860058be799005e3067ea2c19ad82d5926d1c861"
+  },
+  {
+   "file": "u1-stale-client-contract.test.js",
+   "gitBlob": "c7c5a04099982bff19625a844face68ca5bc313d"
+  },
+  {
+   "file": "u4-generic-asset-capture-live-proof.test.js",
+   "gitBlob": "17e0eb09db441ae750ddf2a63c118fd55f75c166"
+  },
+  {
+   "file": "u4-generic-asset-safety.test.js",
+   "gitBlob": "24050c19337a98b77a67253f912665c6c0767577"
+  },
+  {
+   "file": "v1-collection-source-authority.test.js",
+   "gitBlob": "00c7dacf6dd59e87269b38e2835d7bf62c7fb354"
+  },
+  {
+   "file": "v1-enrich-authority-receipt.test.js",
+   "gitBlob": "29ab8afb4ac0d3739b4d2b945feef9caf50c1f6a"
+  },
+  {
+   "file": "v1-enrich-handler-truthfulness.test.js",
+   "gitBlob": "6b80fef908bebdff64f0756111ec40a56680a1bf"
+  },
+  {
+   "file": "v1-gk240-listing-authority-fail-closed.test.js",
+   "gitBlob": "fb8f42ed7ae39d2d6d53c9f37ade11ac0087ea7b"
+  },
+  {
+   "file": "v1-oml-refresh-proof.test.js",
+   "gitBlob": "755a5fc028efff7fb9f0c997c3d0e6856db1c04d"
+  },
+  {
+   "file": "v1-p0d-physical-evidence-authenticity.test.js",
+   "gitBlob": "3da8456235e537a66fda8a5e58f8fa6490dcd943"
+  },
+  {
+   "file": "v1-receipt-asset-binding.test.js",
+   "gitBlob": "6fd3ed57c75ee31dc9ea6c1bdfc6b78e23225bd3"
+  },
+  {
+   "file": "valuation-module-boundary.test.js",
+   "gitBlob": "95516275215224984bec2f798784b85d00f3a076"
+  },
+  {
+   "file": "variant-allowlist.test.js",
+   "gitBlob": "d1a9fc657910734f9e10d44598e45db6781005c7"
+  },
+  {
+   "file": "variantIdentity.test.js",
+   "gitBlob": "beb32093ef894573e40e85c30500e64e056d5414"
+  },
+  {
+   "file": "watch-accepted-pass-authority.test.js",
+   "gitBlob": "4221c15f5bfe95ccff448a6b3caed3df7993d66a"
+  },
+  {
+   "file": "watch-provenance-persisted-live.test.js",
+   "gitBlob": "7067cc30e7ffc5e0978049088a163556f0adcc5a"
+  }
+ ]
+}

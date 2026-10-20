@@ -1,0 +1,65 @@
+# Certification evidence: tested 596f8686c0d6fe985246657b94e3019107128204
+
+- Tested source SHA: `596f8686c0d6fe985246657b94e3019107128204`
+- HEAD when finalized: `596f8686c0d6fe985246657b94e3019107128204`
+- Complete (no INTERRUPTED / NOT_RUN / ENV_ERROR): **true**
+- Totals: {"total":479,"PASS":428,"FAIL":51,"TIMEOUT":0,"SKIP":0,"ENV_ERROR":0,"INTERRUPTED":0,"NOT_RUN":0}
+- Manifest matches ledger roster: true
+- Prediction SHA-256: `cbe196b1154d0fbd00a17981da4c8775da60fedd8210bcbee631b31c3654c7a3` (mtime precedes first run: true)
+- Prediction vs actual: PASS 428/428, FAIL 51/51, TIMEOUT 0/0, ENV_ERROR 0/0, INTERRUPTED 0/0, NOT_RUN 0/0, total 479/479
+
+## Unresolved results (classification and release-blocker status are assigned by a human, not by this tool)
+- FAIL artist-registry-sync.test.js (exit 1)
+- FAIL asset-graph-operator-actions-live-proof.test.js (exit 1)
+- FAIL b1rc-ebay-xml-contract.test.js (exit 1)
+- FAIL batch1-fixes.test.js (exit 1)
+- FAIL beta1a-0022-live-apply-gate.test.js (exit 1)
+- FAIL comp-filter-hygiene.test.js (exit 1)
+- FAIL d4-identifier-fabric-live-concurrency.test.js (exit 1)
+- FAIL d4-identifier-fabric-live-retry-closure.test.js (exit 1)
+- FAIL d4-identifier-fabric-live-retry-deterministic.test.js (exit 1)
+- FAIL d5a-market-observation-migration-contract.test.js (exit 1)
+- FAIL decision-engine.test.js (exit 1)
+- FAIL dispatch-42-comicvine-kill.test.js (exit 1)
+- FAIL eux-edition-verify-panel.test.js (exit 1)
+- FAIL gk179-environment-guard-latency.test.js (exit 2)
+- FAIL gk179-environment-guard-wiring-smoke.test.js (exit 2)
+- FAIL gk179-environment-marker-migration-contract.test.js (exit 2)
+- FAIL gk184-evidence-observed-at-unit.test.js (exit 1)
+- FAIL gk194-stored-function-resolution-scratch.test.js (exit 2)
+- FAIL gk213a-identity-authority.test.js (exit 1)
+- FAIL gk227-0029-migration-contract.test.js (exit 1)
+- FAIL gk270-canonical-collection-projection.test.js (exit 1)
+- FAIL gk270-relink-tool.test.js (exit 1)
+- FAIL gk280a-amendment.test.js (exit 1)
+- FAIL grailkey-directive-av-handler-smoke.test.js (exit 1)
+- FAIL grailkey-directive-aw-handler-smoke.test.js (exit 1)
+- FAIL grailkey-directive-j-gk79a-relabel.test.js (exit 1)
+- FAIL grailkey-directive-p-task3-variant-on-card.test.js (exit 1)
+- FAIL grailkey-directive-r-early-return-variant.test.js (exit 1)
+- FAIL grailkey-directive-v-task2-ownership-perimeter.test.js (exit 1)
+- FAIL grailkey-directive-x-gk94-stale-closure-listing.test.js (exit 1)
+- FAIL grailkey-dispatch-2026-08-21-gk145-gk146-measurement.test.js (exit 1)
+- FAIL grailkey-dispatch-30-gk41-non-comic-gate.test.js (exit 1)
+- FAIL grailkey-dispatch-33-parity-harness.test.js (exit 1)
+- FAIL grailkey-dispatch-e-task3-source-labels.test.js (exit 1)
+- FAIL grailkey-gk142-series-core-query-handler-smoke.test.js (exit 1)
+- FAIL grailkey-outcome1-grading-calibration-patch.test.js (exit 1)
+- FAIL identity-gate.test.js (exit 1)
+- FAIL image-search-extraction.test.js (exit 1)
+- FAIL marketplace-module-boundary.test.js (exit 1)
+- FAIL mega-keys.test.js (exit 1)
+- FAIL operator-action-live-proof.test.js (exit 1)
+- FAIL p0a-rescan-asset-continuity.test.js (exit 1)
+- FAIL p0a-rescan-continuity-handler-proof.test.js (exit 1)
+- FAIL pattern-k-dedupe-issue.test.js (exit 1)
+- FAIL priceBands.test.js (exit 1)
+- FAIL q-adv397-visual-guard.test.js (exit 1)
+- FAIL q-trackB-commit4.3-winning-family-authority.test.js (exit 1)
+- FAIL q141-rachta-lin-pricing-eligibility-gate.test.js (exit 1)
+- FAIL ship26-integration.test.js (exit 1)
+- FAIL sold-verification.test.js (exit 1)
+- FAIL u4-generic-asset-capture-live-proof.test.js (exit 1)
+
+## Coverage not captured by the runner
+- Per-assertion counts and skipped-assertion coverage are not recorded in the ledger; the last output lines of each file are kept in results.json (`tail`) and full logs only when --logdir was used.

@@ -1,0 +1,46 @@
+
+=== D4 Phase B, B7a deterministic closure (real PostgreSQL lock cycle, fresh fixture) ===
+
+  [db-admin-preflight] d4-identifier-fabric-live-retry-deterministic: connecting to host "<neon-host-redacted>" for verification (project/branch identity not independently checkable here — see file header)…
+(node:21732) Warning: SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca' are treated as aliases for 'verify-full'.
+In the next major version (pg-connection-string v3.0.0 and pg v9.0.0), these modes will adopt standard libpq semantics, which have weaker security guarantees.
+
+To prepare for this change:
+- If you want the current behavior, explicitly use 'sslmode=verify-full'
+- If you want libpq compatibility now, use 'uselibpqcompat=true&sslmode=require'
+
+See https://www.postgresql.org/docs/current/libpq-ssl.html for libpq SSL mode definitions.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  [db-admin-preflight] d4-identifier-fabric-live-retry-deterministic: PASSED — database "neondb", data1_dev present, environment identity confirmed.
+  Database deadlock_timeout (service and helper both run at this default): 1s
+FRESH_PAIR asset=01a15a44-d77e-70ed-8f8f-9d5c351b827a A=01a15a44-de6e-7750-a151-1c8841baafa2 B=01a15a44-e17a-749c-83c9-b9fa9be9e32b
+  ✓ fixture: freshly minted pair is live, unreferenced and has no supersession event
+  ✓ fixture: registering the same pair a second time throws (reuse is detected)
+  Lock graph (S waiting on H) before the cycle closed: [{"blocked_pid":1384,"blocking_pid":2151}]
+  H second-lock outcome: {"kind":"H_GOT_A"}
+  S retry-layer attempt errors: [{"attempt":1,"code":"40P01","message":"deadlock detected","t":1968}]
+  Victim (backend that received 40P01): V
+  ✓ F1: observer confirms the service transaction S is blocked behind H before the cycle is closed
+  ✓ F3a REAL: PostgreSQL itself aborted the service transaction S with SQLSTATE 40P01 (victim=V)
+  ✓ the 40P01 is PostgreSQL's own error ("deadlock detected"), observed at the real retry layer (not injected)
+  S final: {"ok":true,"attemptsUsed":2}  elapsed 2802ms
+  ✓ retry conversion: real 40P01 reached the retry layer and the retried transaction committed
+  ✓ the contractually required conversion occurred: 40P01 on attempt 1, successful commit on a later attempt, no raw 40P01 surfaced to the caller
+  Final durable rows: [{"id":"01a15a44-de6e-7750-a151-1c8841baafa2","superseded_by":"01a15a44-e17a-749c-83c9-b9fa9be9e32b"},{"id":"01a15a44-e17a-749c-83c9-b9fa9be9e32b","superseded_by":null}]
+  ✓ durable state: A.superseded_by = B
+  ✓ durable state: B remains live
+  ✓ state invariant no-duplicate-rows: each of 2 assertion id(s) appears once; no supersession event recorded twice
+  ✓ state invariant no-cycle: no cycle in 1 pair(s)
+  ✓ state invariant no-duplicate-evidence: no duplicate evidence-link rows
+  ✓ exactly one durable domain_event for this supersession (not one per retry attempt)
+  ✓ exactly one outbox side effect (not one per retry attempt)
+  ✓ exactly one idempotency_key row (the aborted 40P01 attempt rolled back before claiming it)
+  Leak check: {"idle":0,"waiting":0,"helperPresent":0}
+  ✓ cleanup: the helper transaction was rolled back
+  ✓ cleanup: no idle-in-transaction session left touching the assertion table
+  ✓ cleanup: no session left waiting on a lock
+  ✓ cleanup: the helper connection's backend is gone
+
+=== 19 passed, 0 failed ===
+
+SUMMARY: {"victim":"V","first40P01OffsetMs":1968,"attempts":2,"final":"SUCCESS","pair":{"a":"01a15a44-de6e-7750-a151-1c8841baafa2","b":"01a15a44-e17a-749c-83c9-b9fa9be9e32b"}}

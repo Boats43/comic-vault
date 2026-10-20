@@ -1,0 +1,13 @@
+{
+ "minMemFreeBeforeMB": 4702,
+ "minMemFreeAfterMB": 4855,
+ "maxWallMs": 226359,
+ "totalWallMs": 2463418,
+ "invocations": 14,
+ "heapMB": 1024,
+ "timeoutsMs": [
+  240000,
+  150000,
+  90000
+ ]
+}

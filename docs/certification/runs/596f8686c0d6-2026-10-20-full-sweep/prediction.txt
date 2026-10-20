@@ -1,0 +1,17 @@
+PRE-SWEEP PREDICTION (post-repair tree) - recorded 2026-10-20T04:11:41Z BEFORE any sweep of this SHA. Not to be edited afterwards.
+Exact SHA: 596f8686c0d6fe985246657b94e3019107128204 (parent db21499, parent-of-parent 8646878). Branch v1-source-authority. Clean tree. Discovered test files: 479.
+Reference arithmetic at db21499 (478 files, per dispatch): 426 PASS / 50 FAIL / 2 TIMEOUT.
+Dispatch nominal if BOTH concurrency files pass: 428 PASS / 50 FAIL / 0 TIMEOUT / 478 total.
+
+DELTAS vs db21499, each tied to a file and to commit 596f868:
+ 1. tests/lock-race-teardown-harness.test.js            NEW FILE (596f868)                       -> PASS (+1 file; measured 21/21 in 23 s). Total 478 -> 479.
+ 2. tests/d5b-live-apply-gate-a2-concurrency.test.js    TIMEOUT -> PASS (teardown fix, 596f868)    Measured 8/8 in 13 s; the previously hanging direction cannot hang (watchdog + concurrent finish; proven in the harness test).
+ 3. tests/d4-identifier-fabric-live-concurrency.test.js TIMEOUT -> FAIL (NOT pass), same commit.   The teardown fix removes the hang, but its probabilistic B7a assertion (needs a REAL 40P01 within 10x3 service races) was NOT observed in 4/4 post-fix runs (and 2/4 in the earlier runs): it is expected to FAIL on that single assertion (7 passed / 1 failed, ~45-50 s, inside the 90 s ceiling). B7a was deliberately NOT split (see report).
+ 4. tests/d4-identifier-fabric-concurrency.test.js       PASS -> PASS (596f868 hardens a latent hang that hit once at 140 s in manual runs; measured 6/6 pass, 4-12 s).
+ Everything else unchanged from the db21499 arithmetic (same 50 baseline FAIL files).
+
+EXPECTED TOTALS: 428 PASS / 51 FAIL / 0 TIMEOUT / 0 ENV_ERROR / 0 INTERRUPTED / 0 NOT_RUN = 479.
+Arithmetic: 426 +1 (harness test) +1 (d5b) = 428 PASS; 50 +1 (d4-live-concurrency B7a) = 51 FAIL; 2 -2 = 0 TIMEOUT.
+ALTERNATIVE (probability ~20-25%): if B7a happens to observe a 40P01, d4-live-concurrency passes: 429 PASS / 50 FAIL / 0 TIMEOUT.
+UNCERTAINTY: PASS 427-429, FAIL 50-52, TIMEOUT 0-1, ENV_ERROR 0-1 (memory floor/gate instrumentation now records per-file free memory). The sweep's gate may pause for memory; a pause is not a failure and the ledger is resumed from the same JSONL.
+This is a prediction, not a certification result.
