@@ -57,37 +57,43 @@ function makeFakeIndexedDB() {
   const stores = {};
   const keyPaths = {};
 
-  function makeRequest(work) {
+  // HARNESS FIX (root cause of this file's historic TIMEOUT, traced 2026-10-19): src/db.js mutations resolve ONLY on transaction.oncomplete (GK-234 B1 -- the real
+  // commit signal). The previous fake transaction had no event machinery, so every request succeeded but oncomplete never fired and persistCollectionItem's promise
+  // never settled. A real IDB transaction fires oncomplete after its last request settles; this fake now does the same (and onerror/onabort on failure).
+  function makeRequest(work, tx) {
     const req = { result: undefined, error: undefined, onsuccess: null, onerror: null };
+    if (tx) tx.pending++;
     queueMicrotask(() => {
       try {
         req.result = work();
         if (req.onsuccess) req.onsuccess({ target: req });
+        if (tx) { tx.pending--; if (tx.pending === 0) queueMicrotask(() => { if (tx.oncomplete) tx.oncomplete({ target: tx }); }); }
       } catch (e) {
         req.error = e;
         if (req.onerror) req.onerror({ target: req });
+        if (tx) { tx.error = e; if (tx.onabort) tx.onabort({ target: tx }); }
       }
     });
     return req;
   }
 
-  function storeApi(name) {
+  function storeApi(name, tx) {
     const map = stores[name];
     const keyPath = keyPaths[name];
     return {
-      put: (value) => makeRequest(() => { map.set(value[keyPath], value); return value[keyPath]; }),
-      get: (key) => makeRequest(() => map.get(key)),
-      getAll: () => makeRequest(() => Array.from(map.values())),
-      delete: (key) => makeRequest(() => { map.delete(key); }),
+      put: (value) => makeRequest(() => { map.set(value[keyPath], value); return value[keyPath]; }, tx),
+      get: (key) => makeRequest(() => map.get(key), tx),
+      getAll: () => makeRequest(() => Array.from(map.values()), tx),
+      delete: (key) => makeRequest(() => { map.delete(key); }, tx),
       createIndex: () => {},
-      index: () => ({ getAll: () => makeRequest(() => Array.from(map.values())) }),
+      index: () => ({ getAll: () => makeRequest(() => Array.from(map.values()), tx) }),
     };
   }
 
   const db = {
     objectStoreNames: { contains: (name) => !!stores[name] },
     createObjectStore: (name, opts) => { stores[name] = new Map(); keyPaths[name] = opts.keyPath; return storeApi(name); },
-    transaction: (name) => ({ objectStore: () => storeApi(name) }),
+    transaction: (name) => { const tx = { pending: 0, error: undefined, oncomplete: null, onerror: null, onabort: null }; tx.objectStore = () => storeApi(name, tx); return tx; },
   };
 
   return {
@@ -186,11 +192,12 @@ await dbClient.connect();
 await dbClient.query('SET search_path TO data1_dev');
 
 const ITEM_ID = `${TAG}-item1`;
+const RUN_TITLE = `Closeout${randomBytes(5).toString('hex')}`; // unique per run: GK-279 would (correctly) flag a repeat of an earlier run's identity as a possible second copy
 const LEGACY_ID = `${TAG}-legacy-untouched`;
 
 try {
   console.log('-- phone creates item (persistCollectionItem, real local write + real server round-trip) --\n');
-  const v1 = { assetCategory: 'comic', id: ITEM_ID, title: 'Brave and the Bold', issue: '141', year: '1978', grade: 'VG 4.0', images: ['fake-photo-data'] };
+  const v1 = { assetCategory: 'comic', id: ITEM_ID, title: RUN_TITLE, issue: '141', year: '1978', grade: 'VG 4.0', images: ['fake-photo-data'] };
   const savedV1 = await persistCollectionItem(v1);
   assertTrue(savedV1._syncStatus === 'synced', `create -> _syncStatus: 'synced' (got ${savedV1._syncStatus})`);
   {
@@ -207,7 +214,7 @@ try {
   }
 
   console.log('\n-- phone changes grade/title -> server receives updated state --\n');
-  const v2 = { ...v1, grade: 'FN 6.0', title: 'Brave and the Bold (corrected)' };
+  const v2 = { ...v1, grade: 'FN 6.0', title: `${RUN_TITLE} (corrected)` };
   const savedV2 = await persistCollectionItem(v2);
   assertTrue(savedV2._syncStatus === 'synced', `update -> _syncStatus: 'synced' (got ${savedV2._syncStatus})`);
 
@@ -215,11 +222,11 @@ try {
   {
     const serverItems = await fetchServerCollection();
     const found = (serverItems || []).find((i) => i.id === ITEM_ID);
-    assertTrue(found?.attributes.grade === 'FN 6.0' && found?.attributes.title === 'Brave and the Bold (corrected)', `desktop sees V2, not V1 (got grade=${found?.attributes.grade})`);
+    assertTrue(found?.attributes.grade === 'FN 6.0' && found?.attributes.title === `${RUN_TITLE} (corrected)`, `desktop sees V2, not V1 (got grade=${found?.attributes.grade})`);
   }
 
   console.log('\n-- server temporarily unavailable: local record survives, marked pending, never falsely synced --\n');
-  const v3 = { ...v2, grade: 'NM 9.0', title: 'Brave and the Bold (final)' };
+  const v3 = { ...v2, grade: 'NM 9.0', title: `${RUN_TITLE} (final)` };
   SIMULATE_OFFLINE = true;
   const savedV3 = await persistCollectionItem(v3);
   SIMULATE_OFFLINE = false;
@@ -249,7 +256,7 @@ try {
   {
     const serverItems = await fetchServerCollection();
     const found = (serverItems || []).find((i) => i.id === ITEM_ID);
-    assertTrue(found?.attributes.grade === 'NM 9.0' && found?.attributes.title === 'Brave and the Bold (final)', `second device sees V3, the final state (got grade=${found?.attributes.grade})`);
+    assertTrue(found?.attributes.grade === 'NM 9.0' && found?.attributes.title === `${RUN_TITLE} (final)`, `second device sees V3, the final state (got grade=${found?.attributes.grade})`);
     const serverRow = await dbClient.query('SELECT COUNT(*)::int AS n FROM collection_item WHERE principal_id = $1 AND id = $2', [JIMMY, ITEM_ID]);
     assertTrue(serverRow.rows[0].n === 1, 'still exactly one row for this id -- the outage+retry sequence never created a duplicate');
   }

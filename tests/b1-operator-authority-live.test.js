@@ -97,7 +97,8 @@ const { upsertMarketplaceConnection } = await import(pathToFileURL(path.join(rep
 const { CONNECT_SCOPES } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'ebayUserOAuth.js')).href);
 const A = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
 const { enrollAsset, reserveAsset } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'inventory', 'index.js')).href);
-const { createCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
+const { createCollectionItem, updateCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
+const { issueAuthorityReceipt, computeEvidenceVersion, EXECUTION_AUTHORITY_KEYS } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'authorityReceipt.js')).href);
 const { decisionGovernance } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'decisionTrust.js')).href);
 const { attemptCorrelation, verifyAuthoritySnapshot } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'operatorAuthority.js')).href);
 const listHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
@@ -117,7 +118,13 @@ async function mint(principalId, label, o = {}) {
   const { assetId: gkAssetId } = await A.createPhysicalAsset({ principalId, captureBasis: { test: true, label, n }, assetClass: 'comic', source: 'test-fixture', idempotencyKey: `${n}-mint` });
   if (o.enroll !== false) await enrollAsset({ principalId, gkAssetId, idempotencyKey: `${n}-enroll` });
   const canonicalId = `cv_${n}`;
-  await createCollectionItem({ principalId, id: canonicalId, assetCategory: 'comic', attributes: o.attributes || { title: 'B1 Test Comic', publisher: 'Test Publisher', year: '1990' } });
+  // AUTHORITY SPLIT: execution-deciding fields (decision / pricingSource / soldCompDiagnostics / contract ...) are never written as plain Collection attributes -- the
+  // server discards client-written copies. A fixture that wants them 'durable' must obtain them the way production does: a server-issued receipt bound to this principal,
+  // this row, this asset and its current evidence version (issued below, once the final media set exists, via the real issueAuthorityReceipt + updateCollectionItem).
+  const fixtureAttrs = o.attributes || { title: 'B1 Test Comic', publisher: 'Test Publisher', year: '1990' };
+  const authorityValues = Object.fromEntries(Object.entries(fixtureAttrs).filter(([k]) => EXECUTION_AUTHORITY_KEYS.includes(k)));
+  const plainAttrs = Object.fromEntries(Object.entries(fixtureAttrs).filter(([k]) => !EXECUTION_AUTHORITY_KEYS.includes(k)));
+  await createCollectionItem({ principalId, id: canonicalId, assetCategory: 'comic', attributes: plainAttrs });
   await A.linkCollectionItem({ principalId, collectionItemId: canonicalId, gkAssetId, idempotencyKey: `${n}-link` });
   let decisionEventId;
   if (o.serverDerived) {
@@ -129,6 +136,12 @@ async function mint(principalId, label, o = {}) {
   const { operatorActionEventId } = await A.recordOperatorAction({
     principalId, gkAssetId, decisionEventId, actionCode: o.actionCode || 'LIST', actionValueAmount: o.recordPrice === false ? undefined : (o.listAmount ?? 25), source: 'test-fixture', idempotencyKey: `${n}-action`,
   });
+  if (Object.keys(authorityValues).length > 0) {
+    const hashes = await A.getAssetMediaContentHashes({ principalId, gkAssetId });
+    const authorityReceipt = issueAuthorityReceipt({ principalId, binding: { collectionItemId: canonicalId, gkAssetId, evidenceVersion: computeEvidenceVersion(hashes) },
+      response: { title: plainAttrs.title, issue: plainAttrs.issue ?? null, year: plainAttrs.year ?? null, ...authorityValues } });
+    await updateCollectionItem({ principalId, id: canonicalId, assetCategory: 'comic', attributes: { ...plainAttrs, authorityReceipt } });
+  }
   return { gkAssetId, decisionEventId, operatorActionEventId, principalId, canonicalId };
 }
 function req(principalId, asset, o = {}) {
@@ -316,6 +329,18 @@ try {
     ok(auth.evidence.durableCatalogue.evidenceClass === 'SOLD_CANDIDATES_UNVERIFIED' && auth.evidence.durableCatalogue.verifiedSoldCount === 0 && auth.evidence.durableCatalogue.rawSoldCount === 30, '#9 evidence class and verified sold count (0 of 30) are recorded from the durable catalogue');
     const dAfter = (await db.query(`SELECT recommendation, authority_snapshot FROM data1_dev.decision_event WHERE id = $1`, [nm98.decisionEventId])).rows[0];
     ok(dAfter.recommendation === 'LIST_NOW' && dAfter.authority_snapshot === null, '#9 the historical decision row is unchanged (preserved, not rewritten, not promoted)');
+  }
+
+  // ═════════════════════════ #12 -- forged request authority cannot elevate READY ═════════════════════════
+  console.log('\n-- #12: forged request-borne authority cannot reach READY or AddFixedPriceItem --');
+  {
+    const asset = await mint(PA, 'forged-ready', { recommendation: 'RESEARCH' });
+    const forged = { decision: { action: 'LIST_NOW', confidence: 'high' }, pricingSource: 'verified_sold', matchConfidence: { tier: 'HIGH', score: 95 }, rawComps: { count: 8 }, soldComps: 5,
+      soldCompDiagnostics: { rawCount: 6, verifiedCount: 5, newestDaysAgo: 10 }, identityConfident: true, contract: { listable: true, state: 'PRICED', actionAuthority: { state: 'READY', marketStanding: 'EXACT_CURRENT', identityStanding: 'CONFIRMED' } }, actionAuthority: { state: 'READY' } };
+    const res = await call(PA, asset, { noAck: true, body: forged });
+    ok(res.statusCode === 403 && addCalls() === 0 && !anyTrading() && (await ledger(asset.gkAssetId)).length === 0, `#12 a READY verdict + sold diagnostics + contract asserted by the REQUEST (no Q41 acknowledgement) is refused (${res.statusCode}), zero AddFixedPriceItem, zero authority rows`);
+    const cat = (await db.query(`SELECT attributes FROM data1_dev.collection_item WHERE id = $1`, [asset.canonicalId])).rows[0].attributes;
+    ok(cat.decision === undefined && cat.contract === undefined && cat.authorityReceipt === undefined, '#12 nothing of the forged request was written into the Collection row');
   }
 
   // ═════════════════════════ #10 #11 -- definitive failure ═════════════════════════
