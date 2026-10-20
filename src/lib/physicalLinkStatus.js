@@ -57,3 +57,60 @@ export const recallLinkState = (itemId) => (itemId && known.has(itemId) ? known.
 export const forgetLinkStates = () => known.clear();   // logout / principal switch
 /** TEST SEAM ONLY: lets a server-side render (no effects run) start from a given server answer. Never called by application code. */
 export const __seedLinkStateForTests = rememberLinkState;
+
+// ── Execution surfaces other than the single-card button: "Post All Listable" and the chat "Quick List" actions ──
+// Per-item eligibility, verified at EXECUTION time against the server (a cached LINKED is never enough to fire a publish), and fail closed for every state but LINKED.
+// The server (api/list-ebay.js) remains the final enforcement authority; this only stops doomed or unauthorised attempts from being built client-side.
+
+/** Re-verifies ONE item with the server, then (only if LINKED) runs `onList(item)`. Throws a labelled PHYSICAL_ASSET_LINK_REQUIRED error otherwise; onList is never called. */
+export async function listWithLinkCheck({ item, authFetch, onList }) {
+  const r = await fetchPhysicalLinkStatus({ itemId: item?.id, authFetch });
+  if (item?.id) rememberLinkState(item.id, r.state);
+  const gate = listingLinkGate(r.state);
+  if (gate.blocked) {
+    const e = new Error(gate.label);
+    e.code = 'PHYSICAL_ASSET_LINK_REQUIRED';
+    e.linkState = r.state;
+    throw e;
+  }
+  return onList(item);
+}
+
+/**
+ * The Post All loop. Strictly sequential (the pause between publishes is preserved); EVERY item is link-checked individually right before its own publish, so a
+ * mixed batch publishes the linked items and reports the others as blocked with their own honest reason -- one blocked item never aborts or unblocks another.
+ * `onProgress(id, { state: 'posting'|'success'|'error', msg?, linkState? })`. `sleep` is injectable for tests.
+ */
+export async function runBulkListing({ items, authFetch, onList, onProgress = () => {}, delayMs = 1500, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+  const results = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    onProgress(it.id, { state: 'posting', msg: null });
+    try {
+      await listWithLinkCheck({ item: it, authFetch, onList });
+      results.push({ id: it.id, state: 'success' });
+      onProgress(it.id, { state: 'success' });
+    } catch (err) {
+      const blocked = err?.code === 'PHYSICAL_ASSET_LINK_REQUIRED';
+      results.push({ id: it.id, state: 'error', blocked, linkState: err?.linkState });
+      onProgress(it.id, { state: 'error', msg: err?.message || 'failed', linkState: err?.linkState });
+    }
+    if (i < items.length - 1) await sleep(delayMs);
+  }
+  return results;
+}
+
+/** Resolves link states for many items with bounded concurrency; results are remembered. Never throws (each item fails closed on its own). */
+export async function resolveLinkStates({ items, authFetch, concurrency = 4 }) {
+  const out = {};
+  const queue = [...items];
+  const worker = async () => {
+    while (queue.length) {
+      const it = queue.shift();
+      const r = await fetchPhysicalLinkStatus({ itemId: it?.id, authFetch });
+      if (it?.id) { rememberLinkState(it.id, r.state); out[it.id] = r.state; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
+  return out;
+}

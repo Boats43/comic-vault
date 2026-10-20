@@ -47,7 +47,7 @@ import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNER
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
 import { isAuthenticated, clearSession, getSession, authFetch, apiFetch, getPrincipalScope } from "./lib/grailkeySession.js";
-import { LINK_STATE, listingLinkGate, fetchPhysicalLinkStatus, rememberLinkState, recallLinkState } from "./lib/physicalLinkStatus.js";
+import { LINK_STATE, listingLinkGate, fetchPhysicalLinkStatus, rememberLinkState, recallLinkState, listWithLinkCheck, runBulkListing, resolveLinkStates } from "./lib/physicalLinkStatus.js";
 import { getProtectedImageUrl, subscribeProtectedImages, installImageRecovery } from "./lib/protectedImages.js";
 import { scopedGet, scopedSet } from "./lib/principalStorage.js";
 import { createScanTimer, parseServerTiming, createScanFinishSink, copyScanTimings, lastScanAt } from "./lib/scanLatency.js";
@@ -9651,7 +9651,7 @@ export function CollectionDetail({
 
 // --- Manage Tab: Claude Command Center ---
 
-function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleList, onUpdateAll, tradePiles, setTradePiles, setCatalogue }) {
+export function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleList, onUpdateAll, tradePiles, setTradePiles, setCatalogue }) {
   const [selectionType, setSelectionType] = useState(null); // 'bundle' | 'trade' | null
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bundling, setBundling] = useState(false);
@@ -9660,6 +9660,11 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   const [postAllRunning, setPostAllRunning] = useState(false);
   const [postAllResults, setPostAllResults] = useState([]); // [{ id, title, issue, priceNum, state, msg }]
   const [updateAllRunning, setUpdateAllRunning] = useState(false);
+  // PHYSICAL-ASSET LINK STATES for the bulk / quick-list execution surfaces. Source: the authenticated GET /api/assets read (src/lib/physicalLinkStatus.js);
+  // an item whose state is not (yet) LINKED is excluded from Post All and has a disabled Quick List button. Stored contract.listable / LIST_NOW / LIST_LOW are
+  // information only. Every publish is ALSO re-verified per item at execution time, and the server remains the final authority.
+  const [, bumpLinkStates] = useState(0);
+  const linkOf = (id) => recallLinkState(id);
   const [updateAllProgress, setUpdateAllProgress] = useState({ current: 0, total: 0 });
   const [tradePileModal, setTradePileModal] = useState(null); // { step: 1|2, wants: string[], notes: string }
   // U4 (Generic Asset Mode) — the entire mint/don't-mint decision point
@@ -9710,7 +9715,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
   // still fall back to the pre-Z decision/blockers-only check, unchanged
   // — passesContractGate's own fallback (`c.contract ? ... : true`)
   // would otherwise pass every legacy item unconditionally.
-  const getListableBooks = (aiTagsSnapshot) =>
+  const baseListable = (aiTagsSnapshot) =>
     catalogue.filter(
       (c) =>
         // U4/A4 — a generic asset has no automated pricing/identity and
@@ -9726,6 +9731,9 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
           : (c.decision?.action === 'LIST_NOW' || c.decision?.action === 'LIST_HIGH') &&
             (c.decision?.blockers?.length || 0) === 0)
     );
+  // Per-item execution eligibility: the stored-recommendation candidates above, narrowed to rows the SERVER has linked to a physical asset. Unknown / checking /
+  // unavailable / signed-out / not-linked are all excluded (fail closed).
+  const getListableBooks = (aiTagsSnapshot) => baseListable(aiTagsSnapshot).filter((c) => linkOf(c.id) === LINK_STATE.LINKED);
 
   const getEligibleForTrade = () =>
     catalogue.filter(
@@ -9746,30 +9754,13 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
       .filter(Boolean);
     if (items.length === 0) return;
     setPostAllRunning(true);
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      setPostAllResults((prev) =>
-        prev.map((r) => (r.id === it.id ? { ...r, state: "posting", msg: null } : r))
-      );
-      try {
-        await onListComic(it);
-        setPostAllResults((prev) =>
-          prev.map((r) => (r.id === it.id ? { ...r, state: "success" } : r))
-        );
-      } catch (err) {
-        setPostAllResults((prev) =>
-          prev.map((r) =>
-            r.id === it.id
-              ? { ...r, state: "error", msg: err?.message || "failed" }
-              : r
-          )
-        );
-      }
-      if (i < items.length - 1) {
-        await new Promise((res) => setTimeout(res, 1500));
-      }
-    }
+    // runBulkListing link-checks EACH item against the server immediately before its own publish; a blocked item is reported, never published, never aborts the batch.
+    await runBulkListing({
+      items, authFetch, onList: onListComic,
+      onProgress: (id, r) => setPostAllResults((prev) => prev.map((x) => (x.id === id ? { ...x, state: r.state, msg: r.msg ?? null } : x))),
+    });
     setPostAllRunning(false);
+    bumpLinkStates((n) => n + 1);
   };
 
   const openPostAll = (hotUnlisted) => {
@@ -10079,11 +10070,13 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
       setActionStatus((prev) => ({ ...prev, [action.comicId]: "listing" }));
       setActionErrorMsg((prev) => ({ ...prev, [action.comicId]: null }));
       try {
-        await onListComic(comic);
+        // QUICK LIST: re-verify the physical-asset link with the server right now; a stored recommendation is not authority. onListComic is not called unless LINKED.
+        await listWithLinkCheck({ item: comic, authFetch, onList: onListComic });
         setActionStatus((prev) => ({ ...prev, [action.comicId]: "listed" }));
       } catch (err) {
         setActionStatus((prev) => ({ ...prev, [action.comicId]: "error" }));
         setActionErrorMsg((prev) => ({ ...prev, [action.comicId]: err?.message || "Failed to list" }));
+        bumpLinkStates((n) => n + 1);
       }
       return;
     }
@@ -10105,6 +10098,16 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    const ids = new Set([...baseListable(aiTags).map((c) => c.id), ...(latestActions || []).filter((a) => a.action === 'list' && a.comicId).map((a) => a.comicId)]);
+    const need = catalogue.filter((c) => ids.has(c.id) && recallLinkState(c.id) === LINK_STATE.CHECKING);
+    if (need.length === 0) return undefined;
+    resolveLinkStates({ items: need, authFetch }).then(() => { if (!cancelled) bumpLinkStates((n) => n + 1); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogue, latestActions]);
 
   // Filter and sort
   const q = search.toLowerCase().trim();
@@ -10146,6 +10149,9 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
     if (s === "listing") return "Listing...";
     if (s === "listed") return "Listed! View on eBay →";
     if (s === "error") return "Failed — Retry";
+    if (a.action === "list" && a.comicId && listingLinkGate(linkOf(a.comicId)).blocked) {
+      return `\u{1F512} ${listingLinkGate(linkOf(a.comicId)).label}`;
+    }
     if (a.action === "list" && a.comicId) {
       const listItem = catalogue.find((c) => c.id === a.comicId);
       const realPrice = listItem ? getDisplayPrice(listItem) : null;
@@ -10334,7 +10340,7 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
               <div key={j} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <button
                   onClick={() => handleAction(a)}
-                  disabled={actionStatus[a.comicId] === "listing"}
+                  disabled={actionStatus[a.comicId] === "listing" || (a.action === "list" && listingLinkGate(linkOf(a.comicId)).blocked)}
                   title={actionStatus[a.comicId] === "error" ? (actionErrorMsg[a.comicId] || undefined) : undefined}
                   style={{
                     padding: "10px 16px",
@@ -10481,6 +10487,15 @@ function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onBundleLi
               >
                 📋 Post All Listable ({listableBooks.length})
               </button>
+            );
+          })()}
+          {(() => {
+            const excluded = baseListable(aiTags).filter((c) => linkOf(c.id) !== LINK_STATE.LINKED).length;
+            if (excluded === 0) return null;
+            return (
+              <span data-testid="postall-excluded" className="muted small" style={{ alignSelf: "center" }}>
+                {excluded} recommended but not linked to a physical asset \u2014 excluded
+              </span>
             );
           })()}
           {(() => {
