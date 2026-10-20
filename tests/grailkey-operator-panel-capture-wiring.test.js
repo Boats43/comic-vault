@@ -87,6 +87,11 @@ console.log('\n=== GrailKeyOperatorPanel capture wiring — real handler + real 
 
 const JIMMY = '01a0283a-b1b6-7f90-9b41-9c06bee6ecba';
 const TAG = `capture-wiring-${Date.now()}`;
+// Per-run unique identities: this file mints permanent Development assets, and GK-279 (server-owned physical-copy candidates) CORRECTLY answers a repeat of an
+// earlier run's identity with 409 PHYSICAL_COPY_DECISION_REQUIRED. The safeguard stays on; the fixture stops colliding with its own residue.
+const RUN = randomBytes(5).toString('hex');
+const PROOF_TITLE = `Wiring${RUN} Proof`;
+const ATTACK_TITLE = `Attack${RUN} Shape`;
 
 function mintTestToken(principalId) {
   const secret = process.env.GRAILKEY_SESSION_SECRET;
@@ -147,13 +152,13 @@ const LOCAL_PHOTO = `data:image/png;base64,${ONE_PX_PNG_B64}`;
 const COLLECTION_ITEM_ID = `${TAG}-item`;
 const createdAssetIds = [];
 
-await createCollectionItem({ principalId: JIMMY, id: COLLECTION_ITEM_ID, assetCategory: 'comic', attributes: { title: 'Final Capture Proof Comic', issue: '1', year: '2019' } });
+await createCollectionItem({ principalId: JIMMY, id: COLLECTION_ITEM_ID, assetCategory: 'comic', attributes: { title: PROOF_TITLE, issue: '1', year: '2019' } });
 
 try {
   console.log('-- OWNED PHYSICAL path: the exact request the button builds, sent to the real handler --\n');
   const item = {
     id: COLLECTION_ITEM_ID,
-    title: 'Final Capture Proof Comic',
+    title: PROOF_TITLE,
     issue: '1',
     year: '2019',
     images: [LOCAL_PHOTO],
@@ -198,7 +203,7 @@ try {
   console.log('\n-- GK-276 ADVERSARIAL: attacker-shaped payload (arbitrary dollar value + forged economic fields) --\n');
   {
     const ATTACK_ITEM_ID = `${TAG}-attack`;
-    await createCollectionItem({ principalId: JIMMY, id: ATTACK_ITEM_ID, assetCategory: 'comic', attributes: { title: 'Attack Shape Comic', issue: '1', year: '2019' } });
+    await createCollectionItem({ principalId: JIMMY, id: ATTACK_ITEM_ID, assetCategory: 'comic', attributes: { title: ATTACK_TITLE, issue: '1', year: '2019' } });
     const atkKey = randomUUID();
     const atk = buildRequestBody({ ...item, id: ATTACK_ITEM_ID, price: '$999999.00' }, ATTACK_ITEM_ID, atkKey);
     // forged economic fields at every level a client could place them

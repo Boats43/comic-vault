@@ -9,6 +9,7 @@
 // Never logs the token or passphrase anywhere in this file.
 
 import { isOutdatedClientResponse } from './clientContract.js';
+import { forgetLinkStates } from './physicalLinkStatus.js';
 
 const TOKEN_KEY = 'gk_session_token';
 const EXPIRES_KEY = 'gk_session_expires_at';
@@ -50,6 +51,7 @@ export function setSession(token, expiresAt) {
 // always sees the already-cleared state. No-op in a non-browser context
 // (no `window`), matching this file's existing defensive try/catch style.
 export function clearSession() {
+  try { forgetLinkStates(); } catch { /* memory only */ }
   try {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(EXPIRES_KEY);

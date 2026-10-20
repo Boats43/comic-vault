@@ -47,6 +47,7 @@ import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNER
 import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
 import { isAuthenticated, clearSession, getSession, authFetch, apiFetch, getPrincipalScope } from "./lib/grailkeySession.js";
+import { LINK_STATE, listingLinkGate, fetchPhysicalLinkStatus, rememberLinkState, recallLinkState } from "./lib/physicalLinkStatus.js";
 import { getProtectedImageUrl, subscribeProtectedImages, installImageRecovery } from "./lib/protectedImages.js";
 import { scopedGet, scopedSet } from "./lib/principalStorage.js";
 import { createScanTimer, parseServerTiming, createScanFinishSink, copyScanTimings, lastScanAt } from "./lib/scanLatency.js";
@@ -4488,6 +4489,16 @@ export function CollectionDetail({
   onNext,
 }) {
   const [listing, setListing] = useState(false);
+  // PHYSICAL-ASSET LINK STATE for the listing control. Source: the existing authenticated GET /api/assets?collectionItemId= (src/lib/physicalLinkStatus.js);
+  // nothing on the item can make a row LINKED. Re-verified on every mount/selection; every state except LINKED disables the executable listing action.
+  const [linkState, setLinkState] = useState(() => recallLinkState(item?.id));
+  useEffect(() => {
+    let cancelled = false;
+    if (!item?.id) return undefined;
+    setLinkState(recallLinkState(item.id));
+    fetchPhysicalLinkStatus({ itemId: item.id, authFetch }).then((r) => { if (cancelled) return; rememberLinkState(item.id, r.state); setLinkState(r.state); });
+    return () => { cancelled = true; };
+  }, [item?.id]);
   const [listError, setListError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(null);
@@ -8961,6 +8972,25 @@ export function CollectionDetail({
               // but button rendered "No price available" ACTIVE. Rule 21-0: incomplete
               // enrich → honest incomplete state, list button DISABLED, never phantom-rendered.
               const isIncompleteEnrich = !item.price && !item.decision && !item.year;
+
+              // PHYSICAL-ASSET LINK GATE (first, before any recommendation/contract logic): a stored LIST_NOW/LIST_LOW or contract.listable is
+              // informational history, never execution authority. Without a server-established link the executable action is disabled.
+              const linkGate = listingLinkGate(linkState);
+              if (linkGate.blocked) {
+                return (
+                  <>
+                    <div data-testid="listing-link-gate" style={{ padding: "10px 12px", marginBottom: 8, background: "rgba(245,158,11,0.10)", border: "1px solid #b45309", borderRadius: 6, fontSize: 12, color: "#fcd34d" }}>
+                      {linkGate.label}
+                      {item.decision?.action && (
+                        <div style={{ marginTop: 4, fontSize: 11, color: "#888" }}>Recorded recommendation (informational only, not an authorization): {item.decision.action}</div>
+                      )}
+                    </div>
+                    <button className="reset-btn" disabled={true} style={{ width: "100%", opacity: 0.5 }}>
+                      {`🔒 ${linkGate.label}`}
+                    </button>
+                  </>
+                );
+              }
 
               if (isIncompleteEnrich) {
                 return (
@@ -13970,6 +14000,7 @@ export default function App() {
       },
       body: JSON.stringify({
         q41Override: item.q41Override || null,
+        collectionItemId: item.id || null, // lookup key only: lets the server answer PHYSICAL_ASSET_NOT_LINKED to the row's authenticated owner
         ...(grailkeyLinkage || {}),
         // U4/A4 — raw signal only, same convention as pricingSource/
         // matchConfidence below: the server independently re-derives its

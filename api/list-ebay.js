@@ -54,7 +54,7 @@ import { uploadImageViaMediaApi, MediaApiError, hasMediaScope } from "../src/lib
 // endpoint has no mandatory GrailKey auth today, and this dispatch does
 // not add one).
 import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
-import { recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, getCanonicalCollectionItemIdForAsset, getOperatorActionForListing, getAssetMediaContentHashes, authorizeOperatorManualListing, recordMarketplaceAttemptPhase, ListingAttemptBlockedError, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
+import { recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, resolveCollectionItemLink, getCanonicalCollectionItemIdForAsset, getOperatorActionForListing, getAssetMediaContentHashes, authorizeOperatorManualListing, recordMarketplaceAttemptPhase, ListingAttemptBlockedError, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
 import { sanitizeQ41Ack, buildAckWarnings, classifyAddItemResponse } from "../src/lib/operatorAuthority.js";
 import { attemptListedOutcome } from "../src/lib/marketplaceOutcomeBridge.js";
 import { assertListingAuthorized, ListingPreflightFailedError } from "../src/lib/inventoryListingPreflight.js";
@@ -907,10 +907,34 @@ export default async function handler(req, res) {
       return;
     }
     if (!item.gkAssetId || !item.decisionEventId || !item.operatorActionEventId) {
-      res.status(400).json({
-        error: 'GRAILKEY_LINKAGE_INCOMPLETE',
-        message: 'gkAssetId, decisionEventId, and operatorActionEventId are all required to publish.',
-      });
+      // DISTINCT linkage failures (all before any eBay call; all keep the established GRAILKEY_LINKAGE_INCOMPLETE code, plus a machine-readable `reason`):
+      //   GK_ASSET_ID_MISSING -> (new) PHYSICAL_ASSET_NOT_LINKED when the caller proves, as the AUTHENTICATED OWNER of a named Collection row, that the row has no link;
+      //   DECISION_EVENT_MISSING / OPERATOR_ACTION_MISSING -> the asset is known but an event id is absent.
+      // Linkage-specific information is returned ONLY after the caller is shown to own the Collection row (getMyCollectionItem is principal-scoped); for a row that
+      // is not theirs or does not exist the response is the generic one, so linkage state of other principals' rows can never be probed. Nothing here mints,
+      // links, attests ownership, writes authority, or calls eBay.
+      if (!item.gkAssetId) {
+        const cid = typeof item.collectionItemId === 'string' && item.collectionItemId ? item.collectionItemId : null;
+        if (cid) {
+          let owned = false;
+          try { owned = !!(await getMyCollectionItem({ principalId: grailkeyPrincipalId, id: cid })); } catch { owned = false; }
+          if (owned) {
+            let linked = null;
+            try { linked = await resolveCollectionItemLink({ principalId: grailkeyPrincipalId, collectionItemId: cid }); } catch { linked = undefined; }
+            if (linked === null) {
+              res.status(409).json({
+                error: 'PHYSICAL_ASSET_NOT_LINKED',
+                message: 'This Collection record is not linked to a physical asset. Nothing was listed. Use "Capture as Owned Physical Asset" on this record if you own this copy.',
+              });
+              return;
+            }
+          }
+        }
+        res.status(400).json({ error: 'GRAILKEY_LINKAGE_INCOMPLETE', reason: 'GK_ASSET_ID_MISSING', message: 'gkAssetId, decisionEventId, and operatorActionEventId are all required to publish.' });
+        return;
+      }
+      const reason = !item.decisionEventId ? 'DECISION_EVENT_MISSING' : 'OPERATOR_ACTION_MISSING';
+      res.status(400).json({ error: 'GRAILKEY_LINKAGE_INCOMPLETE', reason, message: 'gkAssetId, decisionEventId, and operatorActionEventId are all required to publish.' });
       return;
     }
     try {
@@ -1100,6 +1124,8 @@ export default async function handler(req, res) {
           actionAuthority: authority,
           // V1 P0 — why the server could not rely on the stored evidence: VERIFIED | IDENTITY_MISMATCH | UNVERIFIED:<reason>
           authorityReceipt: authSources.receipt,
+          // distinct, machine-readable: the receipt is why standing could not be established (absent / unbound / stale / mismatch / invalid) vs an ordinary insufficiency
+          refusalReason: authSources.receipt === 'VERIFIED' ? 'AUTHORITY_INSUFFICIENT' : `AUTHORITY_RECEIPT_${String(authSources.receipt).replace(/[^A-Za-z0-9]+/g, '_').toUpperCase()}`,
         });
         return;
       }

@@ -33,6 +33,7 @@ delete process.env.MILESTONE_TEN_H8_PASS;
 delete process.env.MILESTONE_TEN_H8_BOOTSTRAP;
 
 const captureScanRoute = (await import(pathToFileURL(path.join(repoRoot, 'api', 'capture-scan.js')).href)).default;
+const { createCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
 const appendRoute = (await import(pathToFileURL(path.join(repoRoot, 'api', 'asset-media-append.js')).href)).default;
 const { closePool } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
 
@@ -85,11 +86,15 @@ const createdAssetIds = [];
 try {
   console.log('-- setup: mint one real test asset via the real capture-scan handler --\n');
   const collectionItemId = `${TAG}-item`;
+  // Current prerequisite (Universal U1 F+G): the durable Collection row exists BEFORE the physical asset is minted/linked. Per-run unique identity: GK-279 stays on and
+  // would (correctly) flag a repeat of an earlier run's identity as a probable second copy.
+  const RUN_TITLE = `Gk227${randomBytes(5).toString('hex')} Append`;
+  await createCollectionItem({ principalId: JIMMY, id: collectionItemId, assetCategory: 'comic', attributes: { title: RUN_TITLE, issue: '1', year: '2020' } });
   const mintBody = { ownershipAttestation: buildOwnershipAttestation('test'), assetClass: 'comic',
     scanPayload: {
       correlationId: randomUUID(),
       collectionItemId,
-      book: { title: 'GK-227 Append Test Comic', issue: '1', year: '2020' },
+      book: { title: RUN_TITLE, issue: '1', year: '2020' },
       outcome: { decisionAction: 'RESEARCH', pricingSource: 'ebay-active', price: '$10.00', gradeMultiplier: 1 },
     },
     photos: [{ bytes: realisticJpegBase64(0x01), contentType: 'image/jpeg', captureRole: 'capture-photo' }],
