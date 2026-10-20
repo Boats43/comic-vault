@@ -232,6 +232,18 @@ export function resolveGoverningGradingFormat(item) {
  * @param {object} item - { gradeAuthority, operatorGrade, operatorGradeNumeric, grade, numericGrade }
  * @returns {{ grade: string|null, numericGrade: number|null, source: 'operator'|'model' }}
  */
+/**
+ * The grade the COMPARABLE QUERY must target. Not a second algorithm: it composes the two existing resolvers exactly as the pricing block in api/enrich.js does --
+ * resolveGoverningGradingFormat first (a certified/graded copy never consults operator raw-grade authority: Section C), then resolveGoverningGrade (operator-confirmed
+ * grade, else the model/request grade). With no operator authority the result is byte-identical to the request's own grade/numericGrade (established behaviour).
+ */
+export function resolveGoverningGradeForComps({ cgcVerified, gradingFormatAuthority, operatorIsGraded, isGraded, gradeAuthority, operatorGrade, operatorGradeNumeric, grade, numericGrade } = {}) {
+  const fmt = resolveGoverningGradingFormat({ cgcVerified, gradingFormatAuthority, operatorIsGraded, isGraded });
+  if (fmt.isGraded === true) return { grade, numericGrade, source: 'request-graded', governingIsGraded: true };
+  const g = resolveGoverningGrade({ gradeAuthority, operatorGrade, operatorGradeNumeric, grade, numericGrade });
+  return { grade: g.grade, numericGrade: g.numericGrade, source: g.source, governingIsGraded: false };
+}
+
 export function resolveGoverningGrade(item) {
   if (item?.gradeAuthority === 'OPERATOR_CONFIRMED' && item?.operatorGrade) {
     return { grade: item.operatorGrade, numericGrade: item.operatorGradeNumeric ?? null, source: 'operator' };

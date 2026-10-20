@@ -120,7 +120,7 @@ import { extractCreatorsFromComps } from "../src/lib/premiumCreators.js";
 // calls them itself, server-side, so a validated operator ACTION — never a
 // raw client-asserted authority field — is the only way gradeAuthority/
 // gradingFormatAuthority can become 'OPERATOR_CONFIRMED' for a request.
-import { resolveGoverningGradingFormat, resolveGoverningGrade, setOperatorGrade, clearOperatorGrade, setOperatorGradingFormat, clearOperatorGradingFormat } from "../src/lib/gradeAuthority.js";
+import { resolveGoverningGradingFormat, resolveGoverningGrade, resolveGoverningGradeForComps, setOperatorGrade, clearOperatorGrade, setOperatorGradingFormat, clearOperatorGradingFormat } from "../src/lib/gradeAuthority.js";
 import { extractIssueFromEbayResults } from "../src/lib/identityAlignment.js";
 // Ship #20a.6.4 — refuse-to-price gate. Sanitizes Vision identity fields
 // and refuses to produce a price when title/issue/year/publisher can't
@@ -7486,6 +7486,14 @@ export default async function handler(req, res) {
                 `"${preAuthorityImageSearchTitle}" (confirmedIssue="${confirmedIssue}") before comps fetch`
               );
             }
+            // GOVERNING-GRADE QUERY (2026-10-19): the comparable query targets the SAME governing grade the pricing block and the listing title use -- an operator-confirmed
+            // grade (read server-side from the owned row; effective* values are resolved above, never trusted from the body) outranks the stored/request model grade, which
+            // previously drove the +/-1.5 window on every owned refresh (OML: stored VF 8.0 vs operator 9.2). Same two resolvers as the pricing block; no operator authority => unchanged.
+            const compsGrading = resolveGoverningGradeForComps({
+              cgcVerified: out.cgcVerified, gradingFormatAuthority: effectiveGradingFormatAuthority, operatorIsGraded: effectiveOperatorIsGraded, isGraded,
+              gradeAuthority: effectiveGradeAuthority, operatorGrade: effectiveOperatorGrade, operatorGradeNumeric: effectiveOperatorGradeNumeric, grade, numericGrade,
+            });
+            console.log(`[comps-grade] source=${compsGrading.source} requestGrade=${JSON.stringify(grade)} queryGrade=${JSON.stringify(compsGrading.grade)} queryNumeric=${JSON.stringify(compsGrading.numericGrade)}`);
             const result = await fetchComps({
               // Ship 26.3A — propagate confirmedTitle (Ship 26.2 override) into comps query.
               // Previously used original req.body.title, bypassing title-family correction.
@@ -7500,9 +7508,9 @@ export default async function handler(req, res) {
               // behavior change for the common case.
               title: seriesCoreQuery,
               issue: confirmedIssue,
-              grade,
+              grade: compsGrading.grade,
               isGraded,
-              numericGrade,
+              numericGrade: compsGrading.numericGrade,
               year: confirmedYear,
               variant: confirmedVariant,  // Ship #20a.6.18: uses confirmed variant (eBay consensus when gate fires, Vision otherwise)
               labelType: confirmedLabelType,  // Q100 FIX-A — gates auth tokens; Q106 FIX-1 — CGC-confirmed label when available
