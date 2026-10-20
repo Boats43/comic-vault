@@ -1,0 +1,3 @@
+# Raw certification evidence must keep its exact bytes (hashes are recorded over them): no line-ending conversion on add or checkout.
+docs/certification/runs/** -text
+docs/certification/targeted/** -text
