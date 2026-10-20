@@ -24,6 +24,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { Client } from 'pg';
 import { finishRace, closeRaceClients } from './helpers/lockRaceTeardown.js';
+import { evaluateRaceInvariants, collectRaceObservations, INVARIANT_IDS } from './helpers/d4RaceInvariants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
@@ -165,6 +166,9 @@ console.log('  identical mechanism, not a different one.\n');
 // -- recorded as a new incidental finding (ticket), not fixed here; this
 // test instead stays safely within the pool's real capacity.
 let pairsB7a, results, attemptLogs, saw40P01 = false, winningPairIndex = -1;
+// STATE INVARIANTS (2026-10-20): evaluated for EVERY completed race, whether or not a deadlock occurred (previously they ran only inside `if (saw40P01)` and were silently
+// skipped otherwise). A race that cannot be evaluated is recorded INCOMPLETE and fails below; it is never a silent pass.
+const raceEvaluations = [];
 const MAX_RACE_ATTEMPTS = 10;
 const PAIRS_PER_ATTEMPT = 3;
 let raceAttemptsUsed = 0;
@@ -193,6 +197,13 @@ for (let raceAttempt = 1; raceAttempt <= MAX_RACE_ATTEMPTS && !saw40P01; raceAtt
     }
   }
   if (!saw40P01) console.log('    (no 40P01 among these', PAIRS_PER_ATTEMPT, 'pairs this attempt)');
+  let evaluation;
+  try {
+    evaluation = evaluateRaceInvariants({ pairs: pairsB7a, results, attemptLogs, ...(await collectRaceObservations(setup, pairsB7a)) });
+  } catch (e) {
+    evaluation = INVARIANT_IDS.map((id) => ({ id, status: 'INCOMPLETE', detail: `observation query failed: ${e.message}` }));
+  }
+  raceEvaluations.push({ attempt: raceAttempt, invariants: evaluation });
 }
 
 assertTrue(saw40P01, `B7a: a REAL SQLSTATE 40P01 was observed within ${raceAttemptsUsed} race attempt(s) x ${PAIRS_PER_ATTEMPT} concurrent pairs (genuine Postgres deadlock, never injected)`);
@@ -210,45 +221,21 @@ const losingSide = winningLog.a.some(x => x.code === '40P01') ? winningLog.a : w
 console.log('  First 40P01 occurred on internal attempt #', losingSide.find(x => x.code === '40P01').attempt, 'of the losing side of pair', winningPairIndex);
 console.log('  Internal error-attempts recorded for that losing call:', JSON.stringify(losingSide));
 
-// Validate correctness across EVERY pair from the winning race attempt --
-// not just the one that deadlocked -- exactly one call per pair
-// succeeded, no raw 40P01 ever reached a caller as a final error, no
-// cycle, no duplicate rows anywhere across all PAIRS_PER_ATTEMPT pairs.
-let allExactlyOneSucceeded = true, anyRaw40P01Surfaced = false;
-for (let i = 0; i < PAIRS_PER_ATTEMPT; i++) {
-  const rA = results[i * 2], rB = results[i * 2 + 1];
-  const fulfilled = [rA, rB].filter(r => r.status === 'fulfilled').length;
-  if (fulfilled !== 1) allExactlyOneSucceeded = false;
-  if ([rA, rB].some(r => r.status === 'rejected' && r.reason?.code === '40P01')) anyRaw40P01Surfaced = true;
-}
-assertTrue(allExactlyOneSucceeded, `B7a: across all ${PAIRS_PER_ATTEMPT} pairs in the winning attempt, EXACTLY ONE call per pair succeeded (no cycle committed anywhere)`);
-assertTrue(!anyRaw40P01Surfaced, 'B7a: raw 40P01 NEVER reached any caller as a final surfaced error across all pairs -- the retry wrapper always converted it into either success or a clean, real, non-retryable rejection');
-
-const idsToCheck = pairsB7a.flatMap(p => [p.a, p.b]);
-const dupCheck = await setup.query(
-  `SELECT id, count(*)::int AS n FROM asset_identifier_assertion WHERE id = ANY($1::uuid[]) GROUP BY id HAVING count(*) > 1`,
-  [idsToCheck]
-);
-assertTrue(dupCheck.rows.length === 0, 'B7a: no duplicate rows across all pairs -- each assertion id appears exactly once');
-const cycleCheck = await setup.query(
-  `SELECT id, superseded_by FROM asset_identifier_assertion WHERE id = ANY($1::uuid[])`,
-  [idsToCheck]
-);
-let anyCycle = false;
-for (const p of pairsB7a) {
-  const ra = cycleCheck.rows.find(r => r.id === p.a);
-  const rb = cycleCheck.rows.find(r => r.id === p.b);
-  if (ra?.superseded_by !== null && rb?.superseded_by !== null) anyCycle = true;
-}
-assertTrue(!anyCycle, 'B7a: no cycle formed in the final graph, across all pairs, through the real service');
-const dupEvidence = await setup.query(
-  `SELECT assertion_id, observation_id, count(*)::int AS n FROM asset_identifier_assertion_evidence
-   WHERE assertion_id = ANY($1::uuid[]) GROUP BY assertion_id, observation_id HAVING count(*) > 1`,
-  [idsToCheck]
-);
-assertTrue(dupEvidence.rows.length === 0, 'B7a: no duplicate evidence-link rows caused by the retry, across all pairs');
+// The five state invariants for this and every other completed race are asserted below, outside this block.
 
 } // end if(saw40P01)
+
+console.log('\n-- B7a: state invariants for every completed race (evaluated whether or not a deadlock occurred) --\n');
+assertTrue(raceEvaluations.length >= 1, `B7a: at least one race completed and was evaluated (${raceEvaluations.length})`);
+for (const id of INVARIANT_IDS) {
+  const per = raceEvaluations.map((e) => ({ attempt: e.attempt, ...e.invariants.find((i) => i.id === id) }));
+  const bad = per.filter((i) => i.status === 'FAIL' || i.status === 'INCOMPLETE');
+  assertTrue(bad.length === 0, `B7a state invariant [${id}] holds in all ${per.length} completed race(s)${bad.length ? ' -- ' + bad.map((x) => `race ${x.attempt}: ${x.status} ${x.detail}`).join('; ') : ''}`);
+  if (id === 'no-raw-40P01-escape') {
+    for (const i of per) console.log(`    race ${i.attempt}: ${i.status} -- ${i.detail}`);
+    if (per.every((i) => i.status === 'VACUOUS')) console.log('  NOTE: vacuous in every race. This does NOT certify deadlock conversion; tests/d4-identifier-fabric-live-retry-deterministic.test.js independently establishes it.');
+  }
+}
 
 // --- non-retryable: genuine cross-asset integrity violation, 0 retries ---
 console.log('\n-- B7a: cross-asset integrity violation through the service -- must NOT retry --\n');
