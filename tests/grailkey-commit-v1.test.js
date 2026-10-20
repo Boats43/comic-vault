@@ -249,10 +249,26 @@ console.log('\nPart 5: all 24 real write sites route through writeConfirmed() â€
   // DOCUMENTED as unwrapped: (1) the `let confirmedVariant = manualVariantAccepted ...` declaration initializer (the first definition, not a later
   // write) and (2) the GK-152 comps-pool issue rescue `confirmedIssue = gk152Rescue.issue;` (added after V1; logged by its own
   // [gk152-comps-issue-rescue] line, but NOT by writeConfirmed -- an observability gap, banked, not fixed here). Any OTHER unwrapped write fails.
+  // Each exception names ONE exact write site. LAW: an exception to a structural invariant must fail when its subject disappears -- so the check is
+  // two-sided: (a) no bare line is outside the list, and (b) EVERY listed exception matches EXACTLY ONE current bare line. Merging the P0-C repair
+  // (which wraps the GK-152 write in writeConfirmed) therefore FAILS this test until the now-dead exception is deleted -- by design, not by reminder.
   const KNOWN_UNWRAPPED = [/^let confirmedVariant = manualVariantAccepted/, /^confirmedIssue = gk152Rescue\.issue;$/];
-  const unexpectedBare = bareLines.filter((l) => !KNOWN_UNWRAPPED.some((re) => re.test(l.trim())));
-  assertEq(unexpectedBare, [], `no UNEXPECTED bare (unwrapped) post-anchor assignment to any of the 5 fields exists (found: ${JSON.stringify(unexpectedBare)})`);
-  assertTrue(bareLines.length <= KNOWN_UNWRAPPED.length, `the documented-exception list is not growing silently (bare lines: ${bareLines.length}, documented: ${KNOWN_UNWRAPPED.length})`);
+  const evaluateUnwrapped = (bare, known) => ({
+    unexpected: bare.filter((l) => !known.some((re) => re.test(l.trim()))),
+    deadExceptions: known.filter((re) => bare.filter((l) => re.test(l.trim())).length === 0).map(String),
+    ambiguousExceptions: known.filter((re) => bare.filter((l) => re.test(l.trim())).length > 1).map(String),
+  });
+  const verdict = evaluateUnwrapped(bareLines, KNOWN_UNWRAPPED);
+  assertEq(verdict.unexpected, [], `no UNEXPECTED bare (unwrapped) post-anchor assignment to any of the 5 fields exists (found: ${JSON.stringify(verdict.unexpected)})`);
+  assertEq(verdict.deadExceptions, [], `every documented exception still matches a real unwrapped write site (a dead exception must be deleted: ${JSON.stringify(verdict.deadExceptions)})`);
+  assertEq(verdict.ambiguousExceptions, [], `every documented exception matches exactly ONE site, not several (${JSON.stringify(verdict.ambiguousExceptions)})`);
+  assertTrue(bareLines.length === KNOWN_UNWRAPPED.length, `bare lines (${bareLines.length}) equal documented exceptions (${KNOWN_UNWRAPPED.length}) one-to-one`);
+  // Self-test of the guard itself, on synthetic inputs (the guard must really bite in each direction):
+  const siteVariant = 'let confirmedVariant = manualVariantAccepted ? x : y;', siteIssue = 'confirmedIssue = gk152Rescue.issue;';
+  assertEq(evaluateUnwrapped([siteVariant, siteIssue], KNOWN_UNWRAPPED), { unexpected: [], deadExceptions: [], ambiguousExceptions: [] }, 'guard self-test: exactly the two known sites -> clean');
+  assertTrue(evaluateUnwrapped([siteVariant, siteIssue, 'confirmedYear = 1999;'], KNOWN_UNWRAPPED).unexpected.length === 1, 'guard self-test: an ADDITIONAL unwrapped write fails');
+  assertTrue(evaluateUnwrapped([siteVariant], KNOWN_UNWRAPPED).deadExceptions.length === 1, 'guard self-test: the known GK-152 site removed but its exception kept -> FAILS (exception is self-expiring)');
+  assertTrue(evaluateUnwrapped([siteVariant, siteIssue, siteIssue], KNOWN_UNWRAPPED).ambiguousExceptions.length === 1, 'guard self-test: the excused site duplicated -> FAILS (exception covers exactly one site)');
 
   const writeConfirmedCallLines = postAnchorLines.filter((line) => /confirmed\w+\s*=\s*writeConfirmed\(/.test(line.trim()));
   // RETIRED 2026-10-19 (P3): `exactly 24` was a snapshot of the number of wrapped sites at one commit; adding a correctly wrapped site is not a

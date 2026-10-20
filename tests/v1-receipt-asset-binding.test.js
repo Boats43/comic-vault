@@ -76,5 +76,34 @@ check('replay of A onto second-copy row rejected', governIncomingAuthority(incom
 check('unbound (pre-asset) receipt still accepted on any of the principal\'s own rows (no asset exists to protect yet)', governIncomingAuthority(incoming(receiptUnbound), P, STUB_ROW).verified === true);
 check('no rowId supplied => legacy behaviour preserved', governIncomingAuthority(incoming(receiptA), P).verified === true);
 
+// ---- evidence-version determinism (R3). computeEvidenceVersion is DUPLICATE-SENSITIVE by design (preserved, not changed here): it sorts, then hashes the
+// multiset. Old Man Logan #25 (Production asset 01a0bb24-...) has 8 media rows but only 7 distinct content hashes, so removing the duplicate RECORD would
+// change its version (08c87b24...), and the receipt would go EVIDENCE_VERSION_STALE.
+console.log('\n-- evidence version: determinism --');
+const H = ['b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f901', '0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9', 'ffeeddccbbaa00998877665544332211ffeeddccbbaa00998877665544332211'];
+const GOLDEN_INPUT = JSON.stringify(H);
+const GOLDEN = '1de3602a01e06e91f8b4ab1201b1736b';
+check('GOLDEN: the exact input set ' + GOLDEN_INPUT + ' -> ' + GOLDEN, computeEvidenceVersion(H) === GOLDEN, computeEvidenceVersion(H));
+check('golden is retrieval-order independent (all 6 permutations)', [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]].every((o) => computeEvidenceVersion(o.map((i) => H[i])) === GOLDEN));
+check('hash REMOVAL changes the version', computeEvidenceVersion(H.slice(0, 2)) !== GOLDEN && computeEvidenceVersion(H.slice(1)) !== GOLDEN && computeEvidenceVersion(H.slice(0, 2)) !== computeEvidenceVersion(H.slice(1)));
+check('hash ADDITION changes the version', computeEvidenceVersion([...H, 'ab'.repeat(32)]) !== GOLDEN);
+const dup = computeEvidenceVersion([...H, H[0]]);
+check('DUPLICATE addition changes the version (duplicate-sensitive, preserved)', dup !== GOLDEN);
+check('duplicate removal returns exactly to the original version', computeEvidenceVersion([H[0], H[1], H[2], H[0]].slice(0, 3)) === GOLDEN);
+check('duplicate version is itself deterministic across order', dup === computeEvidenceVersion([H[2], H[0], H[1], H[0]]) && dup === computeEvidenceVersion([H[0], H[0], H[2], H[1]]));
+check('the OML shape: 8 rows / 7 distinct -> dropping the duplicate RECORD changes the version', (() => {
+  const seven = Array.from({ length: 7 }, (_, i) => String(i + 1).repeat(64).slice(0, 64));
+  const eight = [...seven, seven[3]];
+  return computeEvidenceVersion(eight) !== computeEvidenceVersion(seven) && new Set(eight).size === 7 && eight.length === 8;
+})());
+check('empty evidence -> null (never a hash of nothing)', computeEvidenceVersion([]) === null && computeEvidenceVersion(undefined) === null && computeEvidenceVersion(null) === null);
+check('null / empty / non-string entries are dropped deterministically', computeEvidenceVersion([null, '', undefined, 7, ...H]) === GOLDEN && computeEvidenceVersion([null, '']) === null);
+check('only missing hashes + real ones == the real ones alone', computeEvidenceVersion([H[1], null, H[0], '', H[2]]) === GOLDEN);
+check('an unbound-evidence receipt (null version) on an asset that LATER gains media goes STALE', (() => {
+  const r = issueAuthorityReceipt({ principalId: P, response, binding: { collectionItemId: CANON_ROW, gkAssetId: ASSET_A, evidenceVersion: null } });
+  return listing(r, { gkAssetId: ASSET_A, collectionItemId: CANON_ROW, evidenceVersion: null }).sources.receipt === 'VERIFIED'
+    && listing(r, { gkAssetId: ASSET_A, collectionItemId: CANON_ROW, evidenceVersion: GOLDEN }).sources.receipt === 'EVIDENCE_VERSION_STALE';
+})());
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

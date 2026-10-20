@@ -65,7 +65,12 @@ console.log('Part 1: pre-conditions — visualReferenceEvidence reaches the clie
   const issueAuthSrc = readFileSync(path.join(repoRoot, 'src/lib/issueAuthority.js'), 'utf8').replace(/\r\n/g, '\n');
   const contractSrc = readFileSync(path.join(repoRoot, 'src/lib/responseContract.js'), 'utf8').replace(/\r\n/g, '\n');
 
-  assertTrue(enrichSrc.includes('res.status(200).json(finalizeResponse(out));'), 'E-Q1: real terminal send site sends the full `out` object (unchanged by this commit)');
+  // INVARIANT (not a literal string): the terminal send site sends the FULL finalized `out` -- either directly or through finalizeWithReceipt, which must
+  // finalize the SAME object and return it (adding only the server-signed authorityReceipt), never a projection.
+  const terminalSend = enrichSrc.match(/res\.status\(200\)\.json\((?:await )?(finalizeResponse|finalizeWithReceipt)\(out\)\);\s*\n\s*\} catch/);
+  const wrapper = enrichSrc.match(/const finalizeWithReceipt = async \(o\) => \{([\s\S]*?)\n  \};/);
+  const wrapperOk = !!wrapper && /const fin = finalizeResponse\(o\);/.test(wrapper[1]) && /return fin;/.test(wrapper[1]) && /fin\.authorityReceipt = /.test(wrapper[1]) && !/return \{/.test(wrapper[1]);
+  assertTrue(!!terminalSend && (terminalSend[1] === 'finalizeResponse' || wrapperOk), 'E-Q1: real terminal send site sends the full finalized `out` object (directly, or via a wrapper that finalizes and returns the same object)');
   assertFalse(contractSrc.includes('visualReferenceEvidence'), 'E-Q1: responseContract.js never references visualReferenceEvidence — nothing strips it (unchanged by this commit)');
   assertTrue(
     /return \{\s*familyKey:.*\s*rows,\s*count: rows\.length,\s*low,\s*high,\s*median:.*\s*marketState: 'active',\s*status: 'reference-only',\s*reason: 'provisional-visual-family',\s*\};/.test(issueAuthSrc),

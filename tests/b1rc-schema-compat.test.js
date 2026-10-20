@@ -63,7 +63,8 @@ const { upsertMarketplaceConnection } = await import(pathToFileURL(path.join(rep
 const { CONNECT_SCOPES } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'ebayUserOAuth.js')).href);
 const A = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
 const { enrollAsset } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'inventory', 'index.js')).href);
-const { createCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
+const { createCollectionItem, updateCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
+const { issueAuthorityReceipt, computeEvidenceVersion } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'authorityReceipt.js')).href);
 const handler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
 
 const db = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });
@@ -78,7 +79,7 @@ const nonce = (l) => `b1rc-${l}-${Date.now()}-${Math.random().toString(36).slice
 const pid = (await db.query('SELECT uuidv7() AS id')).rows[0].id;
 await db.query(`INSERT INTO data1_dev.gk_principal (id, display_name, kind) VALUES ($1, 'b1rc-compat', 'operator')`, [pid]);
 await upsertMarketplaceConnection({ principalId: pid, provider: 'EBAY', providerUserId: `b1rc-compat-${nonce('i')}`, refreshCredential: `fake-${nonce('r')}`, grantedScopes: [...CONNECT_SCOPES] });
-async function mint(label) {
+async function mint(label, { receipt = true } = {}) {
   const n = nonce(label);
   const { assetId: gkAssetId } = await A.createPhysicalAsset({ principalId: pid, captureBasis: { test: true, n }, assetClass: 'comic', source: 'test-fixture', idempotencyKey: `${n}-m` });
   await enrollAsset({ principalId: pid, gkAssetId, idempotencyKey: `${n}-e` });
@@ -87,13 +88,24 @@ async function mint(label) {
   const { decisionEventId } = await A.recordDecision({ principalId: pid, gkAssetId, recommendation: 'LIST_NOW', idempotencyKey: `${n}-d` });
   await A.attachMedia({ principalId: pid, gkAssetId, bytes: Buffer.from(PNG_URL.split(',')[1], 'base64'), contentType: 'image/png', captureRole: 'capture-photo', idempotencyKey: `${n}-p` });
   const { operatorActionEventId } = await A.recordOperatorAction({ principalId: pid, gkAssetId, decisionEventId, actionCode: 'LIST', actionValueAmount: 25, source: 'test-fixture', idempotencyKey: `${n}-a` });
+  if (receipt) {
+    // What a legitimate flow does: api/enrich.js signs the values IT derived, bound to this principal, this Collection row, this physical asset and its CURRENT
+    // evidence version; the client syncs the row and /api/collection verifies the receipt. Authority comes from that receipt, never from the listing request.
+    const hashes = await A.getAssetMediaContentHashes({ principalId: pid, gkAssetId });
+    const authorityReceipt = issueAuthorityReceipt({ principalId: pid, binding: { collectionItemId: `cv_${n}`, gkAssetId, evidenceVersion: computeEvidenceVersion(hashes) }, response: {
+      title: 'B1RC Compat Comic', issue: null, year: '1990',
+      decision: { action: 'LIST_NOW', confidence: 'high' }, pricingSource: 'verified_sold', matchConfidence: { tier: 'HIGH', score: 95 }, rawComps: { count: 8 }, soldComps: [{}, {}, {}, {}, {}],
+      soldCompDiagnostics: { rawCount: 6, verifiedCount: 5, newestDaysAgo: 10 }, identityConfident: true } });
+    await updateCollectionItem({ principalId: pid, id: `cv_${n}`, assetCategory: 'comic', attributes: { title: 'B1RC Compat Comic', publisher: 'T', year: '1990', authorityReceipt } });
+  }
   return { gkAssetId, decisionEventId, operatorActionEventId };
 }
-// A request the server's REAL authority re-derivation rates READY (verified, fresh sold evidence) -- no Q41 acknowledgment.
+// A request the server's REAL authority re-derivation rates READY -- no Q41 acknowledgment. The request carries ONLY linkage + price: the READY evidence is the
+// server-issued, asset-bound receipt persisted on the owned Collection row (mint() above). A request-borne verdict is never evidence (see forgedReadyReq).
 const readyReq = (a) => ({ method: 'POST', headers: { authorization: `Bearer ${issueToken({ principalId: pid }).token}` }, body: {
-  title: 'x', price: '$25.00', grade: 'VF', gkAssetId: a.gkAssetId, decisionEventId: a.decisionEventId, operatorActionEventId: a.operatorActionEventId, images: [PNG_URL],
-  decision: { action: 'LIST_NOW', confidence: 'high' }, pricingSource: 'verified_sold', matchConfidence: { tier: 'HIGH', score: 95 }, rawComps: { count: 8 }, soldComps: 5,
-  soldCompDiagnostics: { rawCount: 6, verifiedCount: 5, newestDaysAgo: 10 }, identityConfident: true } });
+  title: 'x', price: '$25.00', grade: 'VF', gkAssetId: a.gkAssetId, decisionEventId: a.decisionEventId, operatorActionEventId: a.operatorActionEventId, images: [PNG_URL] } });
+// The OLD unsafe contract, kept only as a negative: the same READY verdict asserted by the CLIENT in the request body.
+const forgedReadyReq = (a) => { const r = readyReq(a); r.body = { ...r.body, decision: { action: 'LIST_NOW', confidence: 'high' }, pricingSource: 'verified_sold', matchConfidence: { tier: 'HIGH', score: 95 }, rawComps: { count: 8 }, soldComps: 5, soldCompDiagnostics: { rawCount: 6, verifiedCount: 5, newestDaysAgo: 10 }, identityConfident: true }; return r; };
 const q41Req = (a) => { const r = readyReq(a); r.body = { ...r.body, pricingSource: 'browse_api', soldComps: 0, soldCompDiagnostics: null, q41Override: { priceOverridden: true, manualPrice: 25 } }; return r; };
 const notReadyNoAck = (a) => { const r = readyReq(a); r.body = { ...r.body, pricingSource: 'browse_api', soldComps: 0, soldCompDiagnostics: null }; return r; };
 const run = async (req) => { fetchCalls.length = 0; const res = mockRes(); await handler(req, res); return res; };
@@ -110,6 +122,11 @@ try {
   ok(res.statusCode === 200 && res.body.ok === true && adds() === 1, `an engine-READY listing still succeeds (${res.statusCode})`);
   ok(res.body.authority === undefined && (await ledgerRows(r1.gkAssetId)) === 0, 'it writes NO authority / attempt rows (the READY path is unchanged and has no ledger)');
   ok(!lastAddBody.includes('<UUID>') && !lastAddBody.includes('<SKU>'), 'its AddFixedPriceItem carries no UUID/SKU correlation');
+
+  console.log('\n-- SECURE CONTRACT: forged request-borne authority is rejected; only a server-issued, asset-bound receipt authorises --');
+  const rf = await mint('forged', { receipt: false });
+  res = await run(forgedReadyReq(rf));
+  ok(res.statusCode === 403 && adds() === 0, `a READY verdict asserted by the REQUEST on an asset with no receipt is rejected (${res.statusCode}), zero AddFixedPriceItem`);
 
   console.log('\n-- KNOWN GAP (asserted, not certified): the READY path has no attempt ledger --');
   const r2 = await mint('ready-amb');
