@@ -13,7 +13,7 @@
 // database, no secrets. Invoke: node tests/principal-scoped-client-storage.test.js
 
 import 'fake-indexeddb/auto';
-import { readFileSync, mkdtempSync, mkdirSync, copyFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, copyFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -64,6 +64,20 @@ copyFileSync(new URL('src/lib/collectionSync.js', ROOT), join(tmp, 'src/lib/coll
 copyFileSync(new URL('src/lib/grailkeySession.js', ROOT), join(tmp, 'src/lib/grailkeySession.js'));
 copyFileSync(new URL('src/lib/assetCategories.js', ROOT), join(tmp, 'src/lib/assetCategories.js')); // collectionSync (current) imports it
 copyFileSync(new URL('src/lib/clientContract.js', ROOT), join(tmp, 'src/lib/clientContract.js')); // grailkeySession (current) imports it
+copyFileSync(new URL('src/lib/physicalLinkStatus.js', ROOT), join(tmp, 'src/lib/physicalLinkStatus.js')); // grailkeySession (current) imports it (clearSession forgets link states)
+// FIXTURE COMPLETENESS (structural): every relative import of the CURRENT modules copied above must resolve inside the isolated tree, so a future new import in
+// grailkeySession/collectionSync fails HERE with the missing file named, not later as an opaque ERR_MODULE_NOT_FOUND (the exact failure of 2026-10-20).
+{
+  const missing = [];
+  for (const f of ['src/lib/grailkeySession.js', 'src/lib/collectionSync.js']) {
+    const src = readFileSync(new URL(f, ROOT), 'utf8');
+    for (const m of src.matchAll(/from\s+['"](\.{1,2}\/[^'"]+)['"]/g)) {
+      const target = join(tmp, 'src/lib', m[1]);
+      if (!existsSync(target)) missing.push(`${f} -> ${m[1]}`);
+    }
+  }
+  if (missing.length) { console.error('  ✗ isolated pre-fix fixture is missing current-module dependencies: ' + missing.join(', ')); process.exit(1); }
+}
 const oldDb = await import(pathToFileURL(join(tmp, 'src/db.js')).href);
 const oldPersist = await import(pathToFileURL(join(tmp, 'src/lib/collectionPersistence.js')).href);
 const oldSession = await import(pathToFileURL(join(tmp, 'src/lib/grailkeySession.js')).href);

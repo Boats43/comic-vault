@@ -855,7 +855,21 @@ console.log('\nPart 13: price authority cleared through the FULL finalizeRespons
 // clears an already-computed price, it does not prevent computation.
 {
   const enrichSrc = fs.readFileSync(path.join(__dirname, '../api/enrich.js'), 'utf8').replace(/\r\n/g, '\n');
-  const pricingCallIdx = enrichSrc.indexOf('issue: confirmedIssue,\n              grade,\n              isGraded,');
+  // STRUCTURAL locator (replaces a literal-text pin on the argument layout, which broke when `grade,` became `grade: compsGrading.grade,`):
+  // the pricing call is the `await fetchComps({ ... })` whose OWN argument object (up to its closing brace at the same depth) passes `issue: confirmedIssue`.
+  // Layout, argument order and sibling arguments are irrelevant; only the call identity and its issue binding are.
+  const locatePricingCall = (src) => {
+    const re = /await fetchComps\(\{/g;
+    let m;
+    while ((m = re.exec(src))) {
+      let depth = 1, i = m.index + m[0].length;
+      while (i < src.length && depth > 0) { const ch = src[i++]; if (ch === '{') depth++; else if (ch === '}') depth--; }
+      const body = src.slice(m.index, i);
+      if (/\bissue\s*:\s*confirmedIssue\b/.test(body)) return m.index;
+    }
+    return -1;
+  };
+  const pricingCallIdx = locatePricingCall(enrichSrc);
   const violationBlockIdx = enrichSrc.indexOf('out.price = null;\n      out.priceLow = null;\n      out.priceHigh = null;\n      out.priceBands = null;\n      out.pricingSource = \'refused-issue-fingerprint-violation\';');
   // The actual call (not this test's own citation comment a few lines
   // above the violation block, which also contains the literal text
@@ -865,6 +879,15 @@ console.log('\nPart 13: price authority cleared through the FULL finalizeRespons
   assertTrue(pricingCallIdx !== -1 && violationBlockIdx !== -1 && computeDecisionIdx !== -1, 'all three anchor points found in api/enrich.js source');
   assertTrue(pricingCallIdx < violationBlockIdx, 'ORDERING: the fetchComps({issue: confirmedIssue, ...}) pricing call runs BEFORE the violation-detection/price-clearing block — pricing is necessarily computed first, then retroactively cleared, never prevented from running');
   assertTrue(violationBlockIdx < computeDecisionIdx, 'ORDERING: the price-clearing block runs BEFORE out.decision = computeDecision(...) — decision/contract finalization always see the CLEARED state, never the stale price');
+  // NEGATIVE CONTROLS on the locator itself (synthetic source; the real file above is the positive case):
+  const VIOL = "out.price = null;\n      out.priceLow = null;\n      out.priceHigh = null;\n      out.priceBands = null;\n      out.pricingSource = 'refused-issue-fingerprint-violation';";
+  const good = `const result = await fetchComps({ title: t, grade: g.grade, issue: confirmedIssue, numericGrade: g.n });\n${VIOL}\nout.decision = computeDecision(out, {\n`;
+  const reordered = `${VIOL}\nconst result = await fetchComps({ title: t, issue: confirmedIssue });\nout.decision = computeDecision(out, {\n`;
+  const wrongIssue = `const result = await fetchComps({ title: t, issue: someOtherIssue });\n${VIOL}\nout.decision = computeDecision(out, {\n`;
+  const idxOf = (src) => ({ call: locatePricingCall(src), viol: src.indexOf(VIOL) });
+  assertTrue(idxOf(good).call !== -1 && idxOf(good).call < idxOf(good).viol, 'locator control: a reformatted/reordered-argument call is still found and still ordered BEFORE the violation block');
+  assertTrue(idxOf(reordered).call > idxOf(reordered).viol, 'locator control: if the pricing call were moved AFTER the violation block, the ORDERING assertion would FAIL');
+  assertEq(idxOf(wrongIssue).call, -1, 'locator control: a fetchComps call that does not bind issue: confirmedIssue is NOT accepted as the pricing call');
 }
 
 console.log(`\n=== Results: ${passed} passed, ${failed} failed ===`);
