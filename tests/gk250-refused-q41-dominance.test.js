@@ -115,6 +115,9 @@ const main = async () => {
   try {
     const mod = await server.ssrLoadModule('/src/App.jsx');
     const { CollectionDetail } = mod;
+    // The Q41 acknowledgement panel is part of the EXECUTABLE listing path, which (physical-asset link gate) is reachable only for a server-established LINKED row.
+    // The control scenario below is a legitimately linked item; the REFUSED scenarios above need no seed (they are blocked earlier, and unlinked/CHECKING would block them anyway).
+    const linkMod = await server.ssrLoadModule('/src/lib/physicalLinkStatus.js');
 
     for (const [label, assetType, extra] of [
       ['Refused Book', 'book', { title: 'The Rationalists' }],
@@ -143,6 +146,7 @@ const main = async () => {
       // isContractIdentityBlocked does NOT fire -- the real researchAckNeeded
       // path this app already relies on for a genuinely thin/unverified
       // comic that still deserves an operator-acknowledged listing option.
+      linkMod.__seedLinkStateForTests('legit-research', linkMod.LINK_STATE.LINKED);
       const item = {
         id: 'legit-research', title: 'Test Comic #2', issue: '2', assetType: 'comic',
         image: 'data:image/jpeg;base64,dGVzdA==',

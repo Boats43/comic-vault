@@ -111,6 +111,10 @@ const main = async () => {
   try {
     const mod = await server.ssrLoadModule('/src/App.jsx');
     const { CollectionDetail } = mod;
+    // The Q41 acknowledgement / List control is the EXECUTABLE listing path, reachable only for a server-established physical-asset LINK (physicalLinkStatus). This
+    // scenario models an owned, linked Old Man Logan, so the server answer is seeded as LINKED (the component's effect writes the same state from GET /api/assets).
+    const linkMod = await server.ssrLoadModule('/src/lib/physicalLinkStatus.js');
+    linkMod.__seedLinkStateForTests('oml-25-test', linkMod.LINK_STATE.LINKED);
 
     const baseItem = {
       id: 'oml-25-test',
