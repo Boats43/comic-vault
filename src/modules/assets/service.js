@@ -24,6 +24,7 @@ import { checkIdempotencyReplay, claimIdempotencyKey, computeRequestFingerprint 
 import { AssetServiceError, NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError, IdempotencyConflictError, PhysicalCopyDecisionRequiredError, PhysicalCopyCandidateCheckUnavailableError, ListingAttemptBlockedError, MediaCapacityExceededError } from './errors.js';
 import { OPERATOR_AUTHORITY_TYPE, RECONCILIATION_POLICY_VERSION, AMBIGUOUS_REVIEW_WINDOW_HOURS, assessListingAttemptGuard, reduceAttemptState, buildApprovalEvidence, evidenceScalars, buildGoverningGradeSnapshot, attemptCorrelation, evaluateOperatorReconciliation, reviewStatus, verifyAuthoritySnapshot, sameCents, toCents } from '../../lib/operatorAuthority.js';
 import { decisionGovernance } from '../../lib/decisionTrust.js';
+import { completePricingBasis, pricingBasisRefuses } from '../../lib/pricingBasisSnapshot.js';
 import { isPlausiblePhysicalCopyCandidate } from '../../lib/duplicateCopyDetection.js';
 import * as media from '../media/index.js';
 import { withRetryOn40P01 } from './retry.js';
@@ -2281,7 +2282,7 @@ function guardOrThrow(rows, exceptAttemptId) {
 
 export async function authorizeOperatorManualListing({
   principalId, gkAssetId, decisionEventId, operatorActionEventId, channel = 'ebay',
-  outgoingAmount, outgoingCurrency = 'USD', ackPayload, ackWarnings, durableAttrs, presentedAttrs, correlationId,
+  outgoingAmount, outgoingCurrency = 'USD', ackPayload, ackWarnings, durableAttrs, presentedAttrs, correlationId, pricingBasis = null,
 } = {}) {
   requireFields({ principalId, gkAssetId, decisionEventId, operatorActionEventId, outgoingAmount }, ['principalId', 'gkAssetId', 'decisionEventId', 'operatorActionEventId', 'outgoingAmount']);
   requireEnum(channel, ['ebay'], 'channel');
@@ -2290,6 +2291,10 @@ export async function authorizeOperatorManualListing({
   }
   if (!sameCents(ackPayload.manualPrice, outgoingAmount)) {
     throw new ValidationFailedError('MANUAL_PRICE_ACK_MISMATCH: the acknowledged price does not exactly equal the price being listed');
+  }
+  // GATE B -- defense in depth: an incoherent pricing basis is REFUSED, never preserved as though it were valid (the handler already refuses before any provider call).
+  if (pricingBasisRefuses(pricingBasis)) {
+    throw new ValidationFailedError('PRICING_BUNDLE_INCOHERENT: the stored pricing evidence is internally inconsistent; no authorization was recorded');
   }
 
   const client = await acquireConnection();
@@ -2323,6 +2328,9 @@ export async function authorizeOperatorManualListing({
       const valuations = await repo.listValuationsForAuthority(client, gkAssetId);
       const governance = decisionGovernance(decision, valuations, durableAttrs || null);
       const evidence = buildApprovalEvidence({ durableAttrs, presentedAttrs, decisionSnapshot: decision.authority_snapshot, decisionGovernance: governance });
+      // GATE B -- the immutable pricing-evidence snapshot rides inside the existing append-only AUTHORIZED evidence JSONB (no schema change). The approved price (an operator
+      // decision) and the engine prediction (a server-derived valuation, if qualified) are filled here, where the LIST action, decision and valuations are read, and kept separate.
+      if (pricingBasis && typeof pricingBasis === 'object') evidence.pricingBasis = completePricingBasis(pricingBasis, { action, decision, valuations, approvedCurrency: action.action_value_currency || outgoingCurrency });
       const scalars = evidenceScalars(evidence);
 
       const batchCorrelationId = correlationId || await newCorrelationId(client);

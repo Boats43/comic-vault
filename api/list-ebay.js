@@ -37,7 +37,8 @@
 // api/enrich.js's finalizeResponse already uses at enrich time.
 import { deriveLocks } from "../src/lib/responseContract.js";
 import { resolveListingAuthorityEvidence } from "../src/lib/listingAuthorityEvidence.js";
-import { computeEvidenceVersion } from "../src/lib/authorityReceipt.js";
+import { computeEvidenceVersion, verifyAuthorityReceipt } from "../src/lib/authorityReceipt.js";
+import { buildPricingBasis, pricingBasisRefuses } from "../src/lib/pricingBasisSnapshot.js";
 import { deriveActionAuthority } from "../src/lib/actionAuthority.js";
 import { toBuyerSafeListingFacts, buildGovernedListingTitle, rawConditionDisclosure } from "../src/lib/buyerSafeListingCopy.js";
 import { getMyCollectionItem, NotFoundError as CollectionNotFoundError } from "../src/modules/collection/index.js";
@@ -1047,12 +1048,13 @@ export default async function handler(req, res) {
       try { return computeEvidenceVersion(await getAssetMediaContentHashes({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId })); }
       catch { return 'EVIDENCE_UNAVAILABLE'; }
     };
+    const evidenceVersionNow = await currentEvidenceVersion();
     const { evidence: authEv, priorLockCodes: governedPriorLockCodes, sources: authSources } =
       resolveListingAuthorityEvidence(item, governedFacts, {
         principalId: grailkeyPrincipalId,
         gkAssetId: item.gkAssetId,
         collectionItemId: governedCanonicalId,
-        evidenceVersion: await currentEvidenceVersion(),
+        evidenceVersion: evidenceVersionNow,
       });
     console.log('[ebay] authority evidence sources:', JSON.stringify(authSources));
     const syntheticOut = {
@@ -1180,6 +1182,25 @@ export default async function handler(req, res) {
       return;
     }
 
+    // GATE-B-COHERENCE-BEGIN -- listing-time detection of an internally inconsistent pricing bundle (src/lib/pricingBundleCoherence.js). PARTIAL control: see that file's header.
+    // Placed AFTER every pre-existing local gate (authority, ack, price binding, inventory, duplicate and attempt guards) so their responses are unchanged, and BEFORE the operator
+    // authority row is written and before every eBay network call. No existing guard is disabled or reordered.
+    const coherenceReceipt = verifyAuthorityReceipt(governedFacts.authorityReceipt, grailkeyPrincipalId);
+    const coherenceReceiptPayload = coherenceReceipt.ok ? coherenceReceipt.payload : null;
+    const pricingBasisForAuthority = buildPricingBasis({
+      durable: governedFacts, receiptPayload: coherenceReceiptPayload, receiptBody: coherenceReceipt.ok ? governedFacts.authorityReceipt.body : null,
+      receiptBindingState: authSources.receipt === 'VERIFIED' ? 'BOUND' : String(authSources.receipt || 'NOT_CHECKED'), evidenceVersion: evidenceVersionNow,
+    });
+    if (pricingBasisRefuses(pricingBasisForAuthority)) {
+      console.error('[ebay] PRICING_BUNDLE_INCOHERENT — aborting before any eBay call:', JSON.stringify(pricingBasisForAuthority.coherence.violations));
+      res.status(409).json({
+        error: 'PRICING_BUNDLE_INCOHERENT',
+        message: 'The stored pricing evidence for this asset is internally inconsistent, so nothing was listed. Refresh the market data and review the card.',
+        violations: pricingBasisForAuthority.coherence.violations, protection: 'PARTIAL',
+      });
+      return;
+    }
+    // GATE-B-COHERENCE-END
     // GK-284 -- DURABLE OPERATOR_MANUAL AUTHORITY. When the engine's own authority is NOT READY, the only
     // way to reach a marketplace write is the operator's exact-price acknowledgment (Q41). That approval is
     // recorded durably HERE -- after every local precondition (ownership, inventory, duplicate and attempt
@@ -1199,6 +1220,7 @@ export default async function handler(req, res) {
           ackWarnings: buildAckWarnings({ authority, priorLockCodes, freshLockCodes: Array.isArray(freshLocks) ? freshLocks.map((l) => l && l.code) : [] }),
           durableAttrs: governedFacts,
           presentedAttrs: { pricingSource: item.pricingSource || null, soldCompDiagnostics: item.soldCompDiagnostics || null },
+          pricingBasis: pricingBasisForAuthority,
         });
       } catch (e) {
         console.error('[ebay] OPERATOR_MANUAL authority could not be recorded — aborting before any eBay call:', e?.code || e?.name, e?.message || e);
