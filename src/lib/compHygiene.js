@@ -1891,3 +1891,12 @@ export const detectVariantCompsExcludedByEra = (eraExcludedCount, eraExcludedSam
   if (finalHasDescriptor) return null;
   return { count: eraExcludedCount, samples: eraExcludedSamples || [] };
 };
+
+// GATE B (2026-10-21) -- ONE canonical notation for ratio-incentive variants. The same confirmed variant arrived as "1/25", "1:25" and "1 in 25"; eBay listings say "1:25", and the comp
+// variant-preference match is a substring/word match on the stored string, so "1/25" matched 0 of 21 listings and the 5 genuine 1:25 asks were then dropped by the price-sanity filter as
+// outliers against 16 regular covers. Only a whole ratio token of the form 1 <sep> N (N = 2-4 digits; sep = ":", "/", "-in-", " in ") is rewritten, to "1:N"; every other character of the
+// variant text is left exactly as supplied, and "1:25" is returned unchanged. Not a claim about which variant a book is -- notation only.
+export const canonicalizeRatioVariant = (variant) => {
+  if (variant == null) return variant;
+  return String(variant).replace(/\b1\s*(?:\/|-?\s*in\s*-?|:)\s*(\d{2,4})\b/gi, '1:$1');
+};

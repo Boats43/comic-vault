@@ -33,7 +33,7 @@ import { spendRefusalText, spendRefusalError } from "./lib/spendRefusalMessage.j
 import { runGradeAttempt, postGradeWithAttempt, KINDS as GRADE_ATTEMPT_KINDS, markConsumed as markGradeAttemptConsumed, beginBulkImport, alignBulkManifest, renewBulkAttempt, markBulkFile, singleFlight as gradeSingleFlight, fileFingerprint, mintAttemptId, ATTEMPT_STATUS as GRADE_ATTEMPT_STATUS } from "./lib/gradeAttemptClient.js";
 // Rapid double submission / duplicate change events for the SAME file: the second is ignored while the first runs.
 const gradeBlobFlights = new Set();
-import { chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction, detectIdentityConflict } from "./lib/dataQualityGuard.js";
+import { isPriceInvalidatingRefusal, chooseBetterPrice, chooseBetterGrade, applyProvisionalIdentity, mergeConfirmedIdentity, mergePipelineAudit, mergeActivePoolSuspect, applyFirstModelPrediction, detectIdentityConflict } from "./lib/dataQualityGuard.js";
 import { resolvePhotoRegradeIdentity } from "./lib/photoIdentityLock.js";
 import { resolveGoverningGrade,resolveGoverningGradingFormat, validateOperatorGrade, pickGradingAuthorityFields } from "./lib/gradeAuthority.js";
 import { governingTitleForMerge } from "./lib/operatorIdentityAuthority.js";
@@ -13040,9 +13040,9 @@ export default function App() {
                 return {
                   ...s,
                   comps: enrich.comps || s.comps,
-                  price: idGatedSel ? null : (enrich.price || s.price),
-                  priceLow: idGatedSel ? null : (enrich.priceLow || s.priceLow),
-                  priceHigh: idGatedSel ? null : (enrich.priceHigh || s.priceHigh),
+                  price: (idGatedSel || isPriceInvalidatingRefusal(enrich)) ? null : (enrich.price || s.price), // GATE B: a variant-evidence refusal invalidates the old price
+                  priceLow: (idGatedSel || isPriceInvalidatingRefusal(enrich)) ? null : (enrich.priceLow || s.priceLow),
+                  priceHigh: (idGatedSel || isPriceInvalidatingRefusal(enrich)) ? null : (enrich.priceHigh || s.priceHigh),
                   identityConfident: idGatedSel ? false : (enrich.identityConfident ?? s.identityConfident ?? true),
                   // GrailKey Commit C3 — see standard-merge comment for rationale.
                   assetTypeConfident: enrich.assetTypeConfident ?? s.assetTypeConfident ?? true,

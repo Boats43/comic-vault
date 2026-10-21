@@ -55,7 +55,9 @@ const ok = (c, l) => { if (c) { passed++; console.log(`  ✓ ${l}`); } else { fa
 const realLog = console.log;
 const handler = (await import('../api/enrich.js')).default;
 
-async function call(label, rows, variant) {
+// confirm=true sends the variant the way a real operator correction does (manualAuthority + the full manual-request contract). A bare variant string is a Vision claim, which the
+// identity reconciler correctly CLEARS (authority NONE, C8), so it never reaches pricing as a confirmed variant -- see S0 below.
+async function call(label, rows, variant, confirm = false) {
   POOL = rows; urls.length = 0;
   const logs = [];
   console.log = (...a) => { logs.push(a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ')); };
@@ -65,6 +67,7 @@ async function call(label, rows, variant) {
     await handler({ method: 'POST', headers: { authorization: `Bearer ${TOKEN}` }, body: {
       assetType: 'comic', title: 'Old Man Logan', issue: '25', year: '2017', publisher: 'Marvel', variant, grade: 'NM-', numericGrade: null, isGraded: false,
       confidence: 'high', reason: 'smoke', skipImageSearch: true, images: [],
+      ...(confirm ? { manualAuthority: { correctedBy: 'user', correctedFields: ['variant'] }, manualIdentity: true, skipVision: true, identitySource: 'manual' } : {}),
     } }, res);
   } catch (e) { threw = e; }
   console.log = realLog;
@@ -73,7 +76,7 @@ async function call(label, rows, variant) {
 }
 
 realLog('\n=== GATE B real-handler smoke: variant-evidence wiring in api/enrich.js ===\n');
-let r = await call('S1 variant 1:25 + 16 regular covers', REGULAR.map((x) => x), '1:25');
+let r = await call('S1 CONFIRMED variant 1:25 + 16 regular covers', REGULAR.map((x) => x), '1:25', true);
 ok(r.threw === null && r.status === 200, `S1: the handler ran without throwing (status ${r.status}${r.threw ? ', ' + r.threw.message : ''})`);
 ok(!r.logs.some((l) => l.includes('ReferenceError')), 'S1: no ReferenceError anywhere in the run (wiring-scope check)');
 ok(r.body && r.body.price == null && r.body.refusedToPrice === true, `S1: no price, refused (price ${r.body && r.body.price}, refused ${r.body && r.body.refusedToPrice})`);
@@ -83,14 +86,28 @@ ok(r.body && r.body.variantEvidence && r.body.variantEvidence.insufficient === t
 ok(r.body && /1:25/.test(String(r.body.priceNote || '')), 'S1: the operator-facing note names the variant');
 ok(r.body && r.body.contract && r.body.contract.listable !== true && r.body.contract.state === 'REFUSED', `S1: the contract is REFUSED and not listable (state ${r.body && r.body.contract && r.body.contract.state}, listable ${r.body && r.body.contract && r.body.contract.listable})`);
 
-r = await call('S2 variant 1:25 + 5 variant asks', VARIANT, '1:25');
+r = await call('S2 CONFIRMED variant 1:25 + 5 variant asks', VARIANT, '1:25', true);
 ok(r.threw === null && r.status === 200 && !r.logs.some((l) => l.includes('ReferenceError')), 'S2: ran cleanly');
 ok(r.body && r.body.priceBands && r.body.priceBands.count === 5 && r.body.priceBands.variantEvidence && r.body.priceBands.variantEvidence.applicable === 5 && r.body.priceBands.variantEvidence.nonVariant === 0, `S2: priced from exactly the 5 variant asks, band carries the proof (${r.body && r.body.priceBands && JSON.stringify(r.body.priceBands.variantEvidence)})`);
 ok(r.body && r.body.refusedToPrice !== true && r.body.pricingSource === 'active_ask_derived', `S2: not refused; honest source label (got ${r.body && r.body.pricingSource})`);
 ok(r.body && r.body.contract && r.body.contract.listable !== true, `S2: still NOT listable (asks only, no sold evidence; consistency is not sufficiency) -- state ${r.body && r.body.contract && r.body.contract.state}, listable ${r.body && r.body.contract && r.body.contract.listable}`);
 
-r = await call('S3 variant 1:25 + mixed pool', [...REGULAR, ...VARIANT], '1:25');
-ok(r.body && r.body.priceBands && r.body.priceBands.count === 5 && r.body.priceBands.variantEvidence && r.body.priceBands.variantEvidence.nonVariant > 0, `S3: only the variant asks price it, the excluded rows are counted (${r.body && r.body.priceBands && JSON.stringify(r.body.priceBands.variantEvidence)})`);
+r = await call('S3 CONFIRMED variant 1:25 + mixed pool', [...REGULAR, ...VARIANT], '1:25', true);
+ok(r.body && r.body.priceBands && r.body.priceBands.count === 5 && r.body.priceBands.variantEvidence && r.body.priceBands.variantEvidence.applicable === 5, `S3: only the 5 variant asks price it (${r.body && r.body.priceBands && JSON.stringify(r.body.priceBands.variantEvidence)})`);
+ok(r.body && r.body.rawComps && r.body.rawComps.count === 5 && r.logs.some((l) => /variant preference filter: before=21 after=5/.test(l)), 'S3: the upstream comps variant preference already removed the 16 regular covers (21 -> 5), so none reach the band engine');
+ok(r.body && r.body.price !== '$4.18' && r.body.pricingSource === 'active_ask_derived', `S3: price is not the regular-cover $4.18 and is labelled an ask-derived price, not a sale (${r.body && r.body.price}, ${r.body && r.body.pricingSource})`);
+
+// S5: notation mismatch. The operator confirmed "1/25"; listings say "1:25". comps.js variant preference previously matched on the stored string, kept all 21 (0 match), and the price-sanity filter then dropped the 5 genuine asks as outliers; the band-level evidence
+// is now notation-insensitive too (canonicalizeRatioVariant), so both layers agree: 21 -> 5, priced from the 5 variant asks only.
+r = await call('S5 CONFIRMED variant 1/25 + mixed pool (notation mismatch)', [...REGULAR, ...VARIANT], '1/25', true);
+ok(r.body && r.body.priceBands && r.body.priceBands.count === 5 && r.body.priceBands.variantEvidence && r.body.priceBands.variantEvidence.applicable === 5 && r.body.rawComps && r.body.rawComps.count === 5 && r.logs.some((l) => /variant preference filter: before=21 after=5/.test(l)), `S5: 1/25 and 1:25 normalize end to end -- the upstream variant preference narrows 21 -> 5 and the band is built from the 5 (${r.body && r.body.priceBands && JSON.stringify(r.body.priceBands.variantEvidence)})`);
+ok(r.body && r.body.pricingSource === 'active_ask_derived' && r.body.price !== '$4.18', `S5: not the regular-cover price (${r.body && r.body.price})`);
+
+// S0: a bare Vision claim of 1:25 is NOT variant authority (Directive AM F-3 / C8): the reconciler clears it before pricing. The book is then priced as the regular edition and the
+// response carries no variant claim at all. This pins that boundary: an unconfirmed variant never produces variant-exact pricing, and never silently prices the regular covers AS the variant.
+r = await call('S0 UNCONFIRMED (bare Vision) variant 1:25 + 16 regular covers', REGULAR, '1:25', false);
+ok(r.body && !r.body.variantNote && r.logs.some((l) => /CLEARING confirmedVariant "1:25" -> null/.test(l)), 'S0: the uncorroborated Vision variant is cleared; no variant claim is carried');
+ok(r.body && (!r.body.priceBands || !r.body.priceBands.variantEvidence), 'S0: no variant-exact evidence is claimed for the regular-edition price');
 
 r = await call('S4 NO variant + 16 regular covers', REGULAR, '');
 ok(r.threw === null && r.status === 200, 'S4: ran cleanly');

@@ -79,6 +79,7 @@ import {
   evaluateEraYearMatch,
   hasNamedVariantDescriptor,
   detectVariantCompsExcludedByEra,
+  canonicalizeRatioVariant,
 } from "../src/lib/compHygiene.js";
 
 import { classifyVariantTokens } from "../src/lib/imageSearchIdentity.js";
@@ -581,7 +582,8 @@ export const computeMatchConfidence = (comps, opts = {}) => {
  *   the threshold); isolated=true when Filter 1c narrowed the pool on a
  *   premium/specific signal (drives out.premiumVariantIsolated downstream).
  */
-export const applyVariantPreferenceFilter = (pool, variant) => {
+export const applyVariantPreferenceFilter = (pool, rawVariant) => {
+  const variant = canonicalizeRatioVariant(rawVariant); // GATE B: "1/25" / "1 in 25" match listings that say "1:25"
   const before = pool.length;
   // GrailKey Directive AB (GK-101) — `matched` is the evidence-applicability
   // signal: null when there's no confirmedVariant to check the pool
@@ -1101,7 +1103,7 @@ export const fetchComps = async ({
     '30 cent': '30 cent',
   };
   const shortVariant = variant
-    ? Object.entries(VARIANT_SHORT).find(([k]) => String(variant).toLowerCase().includes(k))?.[1] || null
+    ? Object.entries(VARIANT_SHORT).find(([k]) => String(canonicalizeRatioVariant(variant)).toLowerCase().includes(k))?.[1] || null
     : null;
   const variantKeyword = shortVariant ? ` ${shortVariant}` : "";
 

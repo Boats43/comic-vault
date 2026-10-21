@@ -53,7 +53,17 @@ const hasKey = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key
  * @param {object} current - existing data in catalogue
  * @returns {object} { price, pricingSource, preserved }
  */
+// GATE B (2026-10-21) -- a refusal that says the PRIOR price does not apply to this book. 'refused-variant-evidence-insufficient': the confirmed ratio variant has too few listings of its own,
+// so the price the row already holds (built from regular covers) is not evidence for it. Unlike the generic refusals ranked above (a thin refresh must not destroy a good price), this one
+// invalidates the old scalar price: it is never preserved and never back-filled with `?? current.price` (the stale-$4.18 resurrection: an unranked refusal vs an unranked 'active_ask_derived'
+// fell through to the nullish back-fill). The old figure stays reachable only as historicalPricingEvidence (src/lib/pricingBundleMerge.js).
+export const PRICE_INVALIDATING_REFUSALS = new Set(['refused-variant-evidence-insufficient']);
+export const isPriceInvalidatingRefusal = (enrich) => !!enrich && PRICE_INVALIDATING_REFUSALS.has(enrich.pricingSource);
+
 export function chooseBetterPrice(incoming, current) {
+  if (isPriceInvalidatingRefusal(incoming)) {
+    return { price: null, priceLow: null, priceHigh: null, pricingSource: incoming.pricingSource, priceNote: incoming.priceNote ?? null, preserved: false };
+  }
   const inRank = PRICE_RANK[incoming?.pricingSource] ?? 9;
   const curRank = PRICE_RANK[current?.pricingSource] ?? 9;
 

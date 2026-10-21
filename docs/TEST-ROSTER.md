@@ -7,7 +7,7 @@
 ## Current stamp
 | Count | At | What changed |
 |---|---|---|
-| **486** | the Gate B pricing-integrity repair commit (the commit after `ba19141`) | +4: `tests/gate-b-variant-evidence.test.js`, `tests/gate-b-pricing-bundle-merge.test.js`, `tests/gate-b-enrich-variant-refusal-smoke.test.js`, `tests/gated-run.test.js` |
+| **488** | the Gate B pricing repair WIP branch (`wip/gate-b-pricing-2026-10-21`) | +6 over `ba19141` (4 listed below, plus `tests/gate-b-ratio-notation.test.js`, `tests/gate-b-pricing-persistence-readback.test.js`): `tests/gate-b-variant-evidence.test.js`, `tests/gate-b-pricing-bundle-merge.test.js`, `tests/gate-b-enrich-variant-refusal-smoke.test.js`, `tests/gated-run.test.js` |
 
 ## History since the last fully measured sweep (each count measured from the git tree)
 | Count | At | What changed | Sweep result |
