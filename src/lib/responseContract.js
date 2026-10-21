@@ -84,6 +84,7 @@ function normalizeSource(pricingSource) {
 // Unlisted/unknown codes default to 'integrity' (conservative).
 const INSUFFICIENCY_REFUSAL_SLUGS = new Set([
   'refused-tier-bypass-detected',
+  'refused-variant-evidence-insufficient', // GATE B: too few listings name the confirmed ratio variant — insufficiency, acknowledgeable only with an explicit operator price, never automatic
   'refused-no-data-sources',
   'refused',
 ]);

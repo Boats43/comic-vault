@@ -84,6 +84,7 @@ const CV_BUILD = typeof __CV_BUILD__ !== "undefined" ? __CV_BUILD__ : "dev";
 import { genericDisplayLabel } from "./lib/genericAssetCapture.js";
 import { useClerk } from "@clerk/react";
 import { deriveMarketCopy, NEUTRAL_MARKET_FOOTER } from "./lib/marketEvidence.js";
+import { mergePricingBundle } from "./lib/pricingBundleMerge.js";
 import { getDisplayPrice, getAuthorityPrice, getAdvisoryContractPrice, isIdentityDisplayGated, describeActiveEvidenceProvenance, isIdentityAuthorityInsufficient, getDisplayConditionEvidence, POLYBAG_FLAG_OBSERVATION_TEXT } from "./lib/displayAuthority.js";
 
 // Same gate src/main.jsx uses to decide whether <ClerkProvider> is mounted
@@ -12116,7 +12117,7 @@ export default function App() {
                 soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
                 normalizedEvidence: enrich.normalizedEvidence || cur.normalizedEvidence || null,
                 // P0-B — Persist tier-based pricing metadata
-                priceBands: enrich.priceBands || cur.priceBands || {},
+                ...mergePricingBundle(cur, enrich), // GATE B: bands, pool, trace and recommendation move together as one bundle (src/lib/pricingBundleMerge.js)
                 demandSignals: enrich.demandSignals || cur.demandSignals || {},
                 // Book-level comps cache fields
                 compsCachedAt: enrich.compsCachedAt || cur.compsCachedAt || null,
@@ -12137,7 +12138,6 @@ export default function App() {
                 pcAnchorYear: enrich.pcAnchorYear ?? null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
-                rawComps: enrich.rawComps || cur.rawComps || null,
                 priceChart: enrich.priceChart || cur.priceChart || null,
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 decision: syncedDecision,
@@ -12287,7 +12287,7 @@ export default function App() {
                 goCollect: enrich.goCollect || s.goCollect || null,
                 // FIX: Explicit preservation (redundant with spread, but defensive)
                 claudeCheck: enrich.claudeCheck || s.claudeCheck || null,
-                priceBands: enrich.priceBands || s.priceBands || null,
+                ...mergePricingBundle(s, enrich), // GATE B: bands, pool, trace and recommendation move together as one bundle (src/lib/pricingBundleMerge.js)
                 demandSignals: enrich.demandSignals || s.demandSignals || null,
                 // Ship #24a-3 — same LOW-match gate as the catalogue merge
                 contract: lowMatch ? (s.contract ?? null) : (enrich.contract ?? s.contract ?? null),
@@ -12915,7 +12915,6 @@ export default function App() {
                   pcAnchorYear: enrich.pcAnchorYear ?? null,
                   salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                   velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
-                  rawComps: enrich.rawComps || cur.rawComps || null,
                   priceChart: enrich.priceChart || cur.priceChart || null,
                   matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                   gradeMultiplier: enrich.gradeMultiplier || null,
@@ -12990,7 +12989,7 @@ export default function App() {
                   contract: enrich.contract ?? cur.contract ?? null, authorityReceipt: enrich.contract ? (enrich.authorityReceipt ?? null) : (cur.authorityReceipt ?? null), // Ship #24a-3
                   // FIX: Persist AI/pricing state to eliminate stale-refresh loop
                   claudeCheck: enrich.claudeCheck || cur.claudeCheck || null,
-                  priceBands: enrich.priceBands || cur.priceBands || null,
+                  ...mergePricingBundle(cur, enrich), // GATE B: bands, pool, trace and recommendation move together as one bundle (src/lib/pricingBundleMerge.js)
                   demandSignals: enrich.demandSignals || cur.demandSignals || null,
                   megaKeysSchemaVersion: enrich.megaKeysSchemaVersion || null,
                   manualConfirmed: priceChanged ? false : (cur.manualConfirmed || false),
@@ -13073,7 +13072,7 @@ export default function App() {
                   pcAnchorYear: enrich.pcAnchorYear ?? null,
                   salesVelocity: enrich.salesVelocity || s.salesVelocity || null,
                   velocityAnalysis: enrich.velocityAnalysis || s.velocityAnalysis || null,
-                  rawComps: enrich.rawComps || s.rawComps || null,
+                  ...mergePricingBundle(s, enrich), // GATE B: bands, pool, trace and recommendation move together as one bundle (src/lib/pricingBundleMerge.js)
                   priceChart: enrich.priceChart || s.priceChart || null,
                   confidenceLevel: enrich.confidenceLevel || s.confidenceLevel || "LOW",
                   matchConfidence: enrich.matchConfidence || s.matchConfidence || null,
@@ -13522,7 +13521,7 @@ export default function App() {
                 soldCompDiagnostics: enrich.soldCompDiagnostics || cur.soldCompDiagnostics || null,
                 normalizedEvidence: enrich.normalizedEvidence || cur.normalizedEvidence || null,
                 // P0-B — Persist tier-based pricing metadata
-                priceBands: enrich.priceBands || cur.priceBands || {},
+                ...mergePricingBundle(cur, enrich), // GATE B: bands, pool, trace and recommendation move together as one bundle (src/lib/pricingBundleMerge.js)
                 demandSignals: enrich.demandSignals || cur.demandSignals || {},
                 // Book-level comps cache fields
                 compsCachedAt: enrich.compsCachedAt || cur.compsCachedAt || null,
@@ -13543,7 +13542,6 @@ export default function App() {
                 pcAnchorYear: enrich.pcAnchorYear ?? null,
                 salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                 velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
-                rawComps: enrich.rawComps || cur.rawComps || null,
                 priceChart: enrich.priceChart || cur.priceChart || null,
                 matchConfidence: enrich.matchConfidence || cur.matchConfidence || null,
                 decision: enrich.decision || cur.decision,
@@ -14470,7 +14468,7 @@ export default function App() {
       // refresh can anchor to it via id= instead of re-running q= search.
       pcProductId: enrich.pcProductId || item.pcProductId || null,
       // P0-B — Persist tier-based pricing metadata
-      priceBands: enrich.priceBands || item.priceBands || {},
+      ...mergePricingBundle(item, enrich), // GATE B: bands, pool, trace and recommendation move together as one bundle (src/lib/pricingBundleMerge.js)
       demandSignals: enrich.demandSignals || item.demandSignals || {},
       imageSearchResults: enrich.imageSearchResults || item.imageSearchResults || null,
       salesByGrade: enrich.salesByGrade || item.salesByGrade || null,
@@ -14485,7 +14483,6 @@ export default function App() {
       pcAnchorYear: enrich.pcAnchorYear ?? null,
       salesVelocity: enrich.salesVelocity || item.salesVelocity || null,
       velocityAnalysis: enrich.velocityAnalysis || item.velocityAnalysis || null,
-      rawComps: enrich.rawComps || item.rawComps || null,
       priceChart: enrich.priceChart || item.priceChart || null,
       confidenceLevel: enrich.confidenceLevel || item.confidenceLevel || "LOW",
       matchConfidence: enrich.matchConfidence || item.matchConfidence || null,
@@ -16169,7 +16166,7 @@ export default function App() {
                                   pcAnchorYear: enrich.pcAnchorYear ?? null,
                                   salesVelocity: enrich.salesVelocity || cur.salesVelocity || null,
                                   velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null,
-                                  rawComps: enrich.rawComps || cur.rawComps || null,
+                                  ...mergePricingBundle(cur, enrich), // GATE B: bands, pool, trace and recommendation move together as one bundle (src/lib/pricingBundleMerge.js)
                                   priceChart: enrich.priceChart || cur.priceChart || null,
                                   confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW",
                                   pricingSource: enrich.pricingSource || null,
@@ -16289,7 +16286,7 @@ export default function App() {
                                   // 2026-07-18 — fold in identity/asset-type gate (was previously
                                   // absent on this duplicate-confirm path).
                                   const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
-                                  const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, authorityReceipt: enrich.contract ? (enrich.authorityReceipt ?? null) : (cur.authorityReceipt ?? null), decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GK-259 — governing-grade provenance-display fields, same pattern as refreshMarketData */ governingGrade: enrich.governingGrade ?? cur.governingGrade ?? null, governingGradeNumeric: enrich.governingGradeNumeric ?? cur.governingGradeNumeric ?? null, governingGradeSource: enrich.governingGradeSource ?? cur.governingGradeSource ?? null, governingIsGraded: enrich.governingIsGraded ?? cur.governingIsGraded ?? null, governingGradingFormatSource: enrich.governingGradingFormatSource ?? cur.governingGradingFormatSource ?? null, gradeResolutionStatus: enrich.gradeResolutionStatus ?? cur.gradeResolutionStatus ?? null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
+                                  const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, authorityReceipt: enrich.contract ? (enrich.authorityReceipt ?? null) : (cur.authorityReceipt ?? null), decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, ...mergePricingBundle(cur, enrich), priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GK-259 — governing-grade provenance-display fields, same pattern as refreshMarketData */ governingGrade: enrich.governingGrade ?? cur.governingGrade ?? null, governingGradeNumeric: enrich.governingGradeNumeric ?? cur.governingGradeNumeric ?? null, governingGradeSource: enrich.governingGradeSource ?? cur.governingGradeSource ?? null, governingIsGraded: enrich.governingIsGraded ?? cur.governingIsGraded ?? null, governingGradingFormatSource: enrich.governingGradingFormatSource ?? cur.governingGradingFormatSource ?? null, gradeResolutionStatus: enrich.gradeResolutionStatus ?? cur.gradeResolutionStatus ?? null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                                   // GK-213A (Operator Authority) — site-parity: this was the one
                                   // "fresh save" merge site with no title/issue/year/publisher key
                                   // at all (silently frozen on the addToCatalogue-time value,
@@ -16416,7 +16413,7 @@ export default function App() {
                                   // 2026-07-18 — fold in identity/asset-type gate (was previously
                                   // absent on this duplicate-confirm path).
                                   const idGatedDup = enrich.identityConfident === false || enrich.assetTypeConfident === false;
-                                  const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, authorityReceipt: enrich.contract ? (enrich.authorityReceipt ?? null) : (cur.authorityReceipt ?? null), decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, rawComps: enrich.rawComps || cur.rawComps || null, priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GK-259 — governing-grade provenance-display fields, same pattern as refreshMarketData */ governingGrade: enrich.governingGrade ?? cur.governingGrade ?? null, governingGradeNumeric: enrich.governingGradeNumeric ?? cur.governingGradeNumeric ?? null, governingGradeSource: enrich.governingGradeSource ?? cur.governingGradeSource ?? null, governingIsGraded: enrich.governingIsGraded ?? cur.governingIsGraded ?? null, governingGradingFormatSource: enrich.governingGradingFormatSource ?? cur.governingGradingFormatSource ?? null, gradeResolutionStatus: enrich.gradeResolutionStatus ?? cur.gradeResolutionStatus ?? null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
+                                  const updated = { ...cur, assetTypeConfident: enrich.assetTypeConfident ?? cur.assetTypeConfident ?? true, contract: enrich.contract ?? cur.contract ?? null, authorityReceipt: enrich.contract ? (enrich.authorityReceipt ?? null) : (cur.authorityReceipt ?? null), decision: enrich.decision || cur.decision || null, comps: enrich.comps || cur.comps, price: idGatedDup ? null : (enrich.price || cur.price), priceLow: idGatedDup ? null : (enrich.priceLow || cur.priceLow), priceHigh: idGatedDup ? null : (enrich.priceHigh || cur.priceHigh), identityConfident: idGatedDup ? false : (enrich.identityConfident ?? cur.identityConfident ?? true), identityMissingFields: enrich.identityMissingFields ?? cur.identityMissingFields ?? null, identityReasons: enrich.identityReasons ?? cur.identityReasons ?? null, keyIssue: enrich.keyIssue || cur.keyIssue, soldComps: enrich.soldComps || cur.soldComps || [], imageSearchResults: enrich.imageSearchResults || cur.imageSearchResults || null, salesByGrade: enrich.salesByGrade || cur.salesByGrade || null, priceLadder: enrich.priceLadder || cur.priceLadder || null, pcAnchorTrust: enrich.pcAnchorTrust ?? null, pcAnchorYear: enrich.pcAnchorYear ?? null, salesVelocity: enrich.salesVelocity || cur.salesVelocity || null, velocityAnalysis: enrich.velocityAnalysis || cur.velocityAnalysis || null, ...mergePricingBundle(cur, enrich), priceChart: enrich.priceChart || cur.priceChart || null, confidenceLevel: enrich.confidenceLevel || cur.confidenceLevel || "LOW", pricingSource: enrich.pricingSource || null, priceNote: enrich.priceNote || null, gradeMultiplier: enrich.gradeMultiplier || null, defectPenalty: enrich.defectPenalty || cur.defectPenalty || null, comicVine: enrich.comicVine || null /* Dispatch 42 Task 1 — no cur.comicVine fallback, no CV resurrection */, certNumber: enrich.certNumber || cur.certNumber || null, labelType: enrich.labelType || cur.labelType || null, labelNotes: enrich.labelNotes || cur.labelNotes || null, cgcVerified: enrich.cgcVerified || cur.cgcVerified || false, cgcLabel: enrich.cgcLabel || cur.cgcLabel || null, /* GK-259 — governing-grade provenance-display fields, same pattern as refreshMarketData */ governingGrade: enrich.governingGrade ?? cur.governingGrade ?? null, governingGradeNumeric: enrich.governingGradeNumeric ?? cur.governingGradeNumeric ?? null, governingGradeSource: enrich.governingGradeSource ?? cur.governingGradeSource ?? null, governingIsGraded: enrich.governingIsGraded ?? cur.governingIsGraded ?? null, governingGradingFormatSource: enrich.governingGradingFormatSource ?? cur.governingGradingFormatSource ?? null, gradeResolutionStatus: enrich.gradeResolutionStatus ?? cur.gradeResolutionStatus ?? null, /* GrailKey Directive Q, Task 2 — presence-aware, was `|| cur.variant || null` (resurrected a revoked variant on an authoritative server null) */ variant: Object.prototype.hasOwnProperty.call(enrich, 'variantNote') ? enrich.variantNote : cur.variant, variantMultiplier: enrich.variantMultiplier || cur.variantMultiplier || null,
                                   // GK-213A (Operator Authority) — site-parity: this was the one
                                   // "fresh save" merge site with no title/issue/year/publisher key
                                   // at all (silently frozen on the addToCatalogue-time value,

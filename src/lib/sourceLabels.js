@@ -49,6 +49,7 @@ export const PRICING_SOURCE_LABELS = {
   "identity-required": "identity required — not yet priced",
   active_reference_range: "active reference range",
   "refused-tier-bypass-detected": "refused — pricing tier bypass detected",
+  "refused-variant-evidence-insufficient": "refused — too few listings for the confirmed variant",
   // No longer assigned by api/enrich.js (removed, comment-only reference
   // at :10345) but still actively checked as a legacy value by
   // decisionEngine.js:514, App.jsx:4152, and dataQualityGuard.js:22 — an

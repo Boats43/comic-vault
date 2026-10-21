@@ -34,6 +34,7 @@ import {
   detectIdentityConflict,
   mergeIdentityAuthority,
 } from '../src/lib/dataQualityGuard.js';
+import { mergePricingBundle } from '../src/lib/pricingBundleMerge.js';
 
 let passed = 0;
 let failed = 0;
@@ -189,7 +190,7 @@ console.log('\nSection 5: duplicate-confirm — real shipped source, executed as
 
   const block = appSource.slice(idx, objEnd);
   const fn = new Function(
-    'enrich', 'cur', 'mergeConfirmedIdentity', 'applyProvisionalIdentity',
+    'enrich', 'cur', 'mergeConfirmedIdentity', 'applyProvisionalIdentity', 'mergePricingBundle',
     `${block}\nreturn updated;`
   );
 
@@ -199,11 +200,11 @@ console.log('\nSection 5: duplicate-confirm — real shipped source, executed as
   const conflictingEnrich = {
     title: 'A Totally Different Book', identityConfident: true, assetTypeConfident: true,
   };
-  const updated = fn(conflictingEnrich, cur, mergeConfirmedIdentity, applyProvisionalIdentity);
+  const updated = fn(conflictingEnrich, cur, mergeConfirmedIdentity, applyProvisionalIdentity, mergePricingBundle);
   assertEq(updated.title, 'The Rationalists', 'duplicate-confirm (real shipped code): OPERATOR_CONFIRMED title survives a conflicting enrich response' + site);
 
   const unlockedCur = { title: 'Old Title', identityAuthority: {} };
-  const updatedUnlocked = fn(conflictingEnrich, unlockedCur, mergeConfirmedIdentity, applyProvisionalIdentity);
+  const updatedUnlocked = fn(conflictingEnrich, unlockedCur, mergeConfirmedIdentity, applyProvisionalIdentity, mergePricingBundle);
   assertEq(updatedUnlocked.title, conflictingEnrich.title, 'duplicate-confirm (real shipped code): unlocked item now DOES adopt a corrected title (closes the pre-existing site-parity gap — title was previously frozen forever on this path)' + site);
   }
 }

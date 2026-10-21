@@ -8520,7 +8520,11 @@ export default async function handler(req, res) {
     // because confirmedVariant was categorically never populated from
     // backfill before Fix 27-A (Dispatch 26/27) started producing real
     // values in it.
+    // GATE B (2026-10-20): computePriceBands reports, for a confirmed ratio variant (1:25 ...), how many admissible listings actually named that variant. Filled only on a
+    // no-band result; read at the tier-bypass refusal below so the refusal can say WHY instead of "insufficient comps".
+    const priceBandsDiagnostics = {};
     const priceBandsRaw = computePriceBandsFromSold({
+      diagnostics: priceBandsDiagnostics,
       soldComps: filteredSold,
       activeComps: rawComps,
       pcBase,
@@ -8691,6 +8695,8 @@ export default async function handler(req, res) {
         count: priceBandsRaw.count,
         tier: priceBandsRaw.tier,
         variantAdjusted: priceBandsRaw.variantAdjusted || false,
+        // GATE B: proof the band applies to the confirmed ratio variant (applicable = listings whose own title names the ratio); null for non-ratio-variant books.
+        variantEvidence: priceBandsRaw.variantEvidence || null,
       };
       // D2 (Commit D2) — shared structured derivation trace, built once
       // inside computePriceBands (src/lib/priceBands.js) by whichever
@@ -10076,6 +10082,13 @@ export default async function handler(req, res) {
         out.priceNote = `Insufficient verified comps (${rawComps.count}) — try refresh or edit fields`;
         out.refusedToPrice = true;
         out.confidenceLevel = 'LOW';
+        // GATE B: the pool held admissible listings but fewer than 3 named the confirmed ratio variant. Say so; never band the regular covers.
+        const vEv = priceBandsDiagnostics.variantEvidence;
+        if (vEv && vEv.insufficient) {
+          out.pricingSource = 'refused-variant-evidence-insufficient';
+          out.priceNote = `No price: only ${vEv.applicable} listing(s) name the ${vEv.ratio} variant (${vEv.nonVariant} other listing(s) are not that variant). A band needs at least 3 — set the price yourself or refresh later.`;
+          out.variantEvidence = vEv;
+        }
         console.log(
           '[P0-A-refuse] tier-bypass path blocked —',
           'rawComps.count:', rawComps.count,

@@ -321,7 +321,22 @@ export function buildVerifiedSoldPool(soldComps, { title, issue, variant }) {
  * Prevents modern variant asks (1:100 sketch, timeless, etc.) from
  * contaminating vintage/standard edition pricing.
  */
-export function buildVerifiedActivePool(comps, { title, issue, year, variant, editionLane = false }) {
+// GATE B (2026-10-20) -- EXACT-VARIANT EVIDENCE FOR RATIO-INCENTIVE VARIANTS.
+// A confirmed variant used to do only one thing in this builder: it switched the variant-contamination reject OFF (Q75-2 below), so regular-cover listings were
+// admitted into a band for a variant book (Old Man Logan #25 1:25: a 16-listing pool of regular covers produced a $4.18 band for a copy whose variant asks run $15-25).
+// For a confirmed ratio variant (1:25, 1/25, 1 in 25 ...) a listing is now evidence ONLY if its own title names the SAME ratio; a regular cover, a different ratio, a
+// bare number, or a row with no title is not applicable evidence. Non-ratio variants (newsstand, Whitman, 2nd print, ...) and non-variant books are unchanged.
+const RATIO_VARIANT_RE = new RegExp(String.raw`\b1\s*(?::|\/|-?\s*in\s*-?)\s*(\d{2,4})\b`, 'i');
+export function getRatioVariantN(variant) {
+  const m = RATIO_VARIANT_RE.exec(String(variant || ''));
+  return m ? m[1] : null;
+}
+export function titleShowsRatioVariant(title, n) {
+  if (!title || !n) return false;
+  return new RegExp(String.raw`\b1\s*(?::|\/|-?\s*in\s*-?)\s*${n}\b`, 'i').test(String(title));
+}
+
+export function buildVerifiedActivePool(comps, { title, issue, year, variant, editionLane = false, variantEvidence = null }) {
   if (!comps || !comps.prices || comps.prices.length === 0) {
     return [];
   }
@@ -336,6 +351,8 @@ export function buildVerifiedActivePool(comps, { title, issue, year, variant, ed
   // Q75 era/variant filters
   const confirmedYear = year ? parseInt(year, 10) : null;
   const scanIsVariant = variant && variant.trim().length > 0;
+  const ratioN = getRatioVariantN(variant);
+  if (variantEvidence && ratioN) Object.assign(variantEvidence, { required: true, ratio: `1:${ratioN}`, variant: String(variant), applicable: 0, nonVariant: 0 });
   const VARIANT_CONTAM_ACTIVE = /\b(1:25|1:50|1:100|1:500|incentive|sketch|virgin|timeless|ratio|exclusive|convention|sdcc|nycc)\b/i;
   const YEAR_TOKEN_RE = /\b(19\d{2}|20\d{2})\b/;
 
@@ -420,6 +437,16 @@ export function buildVerifiedActivePool(comps, { title, issue, year, variant, ed
         console.log(`[Q75] active rejected: "${p.title?.slice(0, 60)}" reason=variant`);
         return false;
       }
+    }
+
+    // GATE B: exact-variant evidence (ratio variants only). Runs after every other filter so `nonVariant` counts rows that were otherwise admissible.
+    if (ratioN) {
+      const rowTitle = (typeof p === 'object' && p?.title) ? String(p.title) : '';
+      if (!titleShowsRatioVariant(rowTitle, ratioN)) {
+        if (variantEvidence) variantEvidence.nonVariant++;
+        return false;
+      }
+      if (variantEvidence) variantEvidence.applicable++;
     }
 
     return true;
@@ -652,7 +679,8 @@ function applyVariantFallbackDivergenceCap(result, verifiedActive, variantAdjust
  *
  * FLOORS: Tier 0 liability + verified-sold low ONLY (never asks)
  */
-export function computePriceBands({
+function computePriceBandsCore({
+  __variantEvidence = null,
   soldComps,
   activeComps,
   pcBase,
@@ -672,7 +700,7 @@ export function computePriceBands({
   // GK-172 — editionLane forwarded from the caller (api/enrich.js stamps
   // it from rawComps.reprintFiltered, the same flag the edition-gate
   // already sets when it isolates to a confirmed non-original printing).
-  const verifiedActive = buildVerifiedActivePool(activeComps, { title, issue, year, variant, editionLane });
+  const verifiedActive = buildVerifiedActivePool(activeComps, { title, issue, year, variant, editionLane, variantEvidence: __variantEvidence });
 
   // Extract recency band counts from LIVE soldVerifyResult.
   // EX-A (Q109 greenlight): rows re-admitted by the soldVerification.js
@@ -1089,6 +1117,30 @@ export function computePriceBands({
   // No data available
   console.log('[price-bands] tier=4 no data available');
   return null;
+}
+
+/**
+ * Public entry. Runs the tier engine and, for a CONFIRMED RATIO VARIANT (1:25 etc.), reports the exact-variant evidence the bands were built from:
+ *   result.variantEvidence = { required, ratio, variant, applicable, nonVariant, insufficient }
+ * so a consumer can prove a band applies to the variant (applicable = rows whose own title names the ratio; nonVariant = otherwise-admissible rows that did not).
+ * When the engine produces NO band and a ratio variant was confirmed, the same object is written to `diagnostics.variantEvidence` (a caller-supplied object) with
+ * insufficient=true if admissible-but-not-variant evidence existed, so the caller can refuse with an explicit, honest reason instead of "insufficient comps".
+ * Never invents a band: the null contract of the engine is unchanged. Non-ratio variants and non-variant books get no `variantEvidence` and behave exactly as before.
+ */
+export function computePriceBands(args) {
+  const variantEvidence = { required: false };
+  const result = computePriceBandsCore({ ...args, __variantEvidence: variantEvidence });
+  if (!variantEvidence.required) return result;
+  const summary = {
+    required: true,
+    ratio: variantEvidence.ratio,
+    variant: variantEvidence.variant,
+    applicable: variantEvidence.applicable,
+    nonVariant: variantEvidence.nonVariant,
+    insufficient: !result && variantEvidence.nonVariant > 0 && variantEvidence.applicable < 3,
+  };
+  if (args && args.diagnostics && typeof args.diagnostics === 'object') args.diagnostics.variantEvidence = summary;
+  return result ? { ...result, variantEvidence: summary } : result;
 }
 
 /**
