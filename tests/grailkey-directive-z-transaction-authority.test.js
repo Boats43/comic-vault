@@ -322,7 +322,8 @@ console.log('\nPart 4: server-side independent re-derivation (DIRECT predicate, 
 // ═══════════════════════════════════════════════════════════════════════
 console.log('\nPart 5: consumer rewiring (source proof, MIRRORED)\n');
 {
-  const appSrc = readFileSync(path.join(repoRoot, 'src/App.jsx'), 'utf8').replace(/\r\n/g, '\n');
+  // The readiness/metrics helpers were relocated (verbatim) from App.jsx into src/lib/collectionMetrics.js; the assertions are unchanged.
+  const appSrc = (readFileSync(path.join(repoRoot, 'src/App.jsx'), 'utf8') + '\n' + readFileSync(path.join(repoRoot, 'src/lib/collectionMetrics.js'), 'utf8')).replace(/\r\n/g, '\n');
   const contractSrc = readFileSync(path.join(repoRoot, 'src/lib/responseContract.js'), 'utf8').replace(/\r\n/g, '\n');
   const listEbaySrc = readFileSync(path.join(repoRoot, 'api/list-ebay.js'), 'utf8').replace(/\r\n/g, '\n');
 

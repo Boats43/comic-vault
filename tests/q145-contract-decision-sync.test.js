@@ -39,7 +39,8 @@ import { finalizeResponse } from '../src/lib/responseContract.js';
 import { computeDecision } from '../src/lib/decisionEngine.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const appSrc = readFileSync(join(__dirname, '../src/App.jsx'), 'utf8');
+// The readiness/metrics/channel helpers were relocated (verbatim) from App.jsx into src/lib/collectionMetrics.js; the assertions are unchanged.
+const appSrc = readFileSync(join(__dirname, '../src/App.jsx'), 'utf8') + '\n' + readFileSync(join(__dirname, '../src/lib/collectionMetrics.js'), 'utf8');
 
 let passed = 0;
 let failed = 0;

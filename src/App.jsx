@@ -44,7 +44,7 @@ import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectio
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
 import { mintScanId, nextGeneration, applyScanOwnershipGuard, CURRENT_SCAN_OWNERSHIP_MODE, SCAN_OWNERSHIP_MODE, wasSupersededByCorrection, logStaleScanResponse } from "./lib/scanOwnership.js";
-import { getAggregateCollectionStatus } from "./lib/collectionMetrics.js";
+import { getAggregateCollectionStatus, createCollectionMetrics, COLLECTION_VALUE_DEFINITIONS } from "./lib/collectionMetrics.js";
 import { parsePriceNumber } from "./lib/responseContract.js";
 import { isAuthenticated, clearSession, getSession, authFetch, apiFetch, getPrincipalScope } from "./lib/grailkeySession.js";
 import { LINK_STATE, listingLinkGate, fetchPhysicalLinkStatus, rememberLinkState, recallLinkState, listWithLinkCheck, runBulkListing, resolveLinkStates } from "./lib/physicalLinkStatus.js";
@@ -413,385 +413,13 @@ const getMarketSignal = (item) => {
   return { badge: 'UNKNOWN', color: '#888', icon: '❓' };
 };
 
-// Listing Readiness helpers
-const getPhotoChecklist = (item) => {
-  if (!item) {
-    return { front: false, back: false, spine: false, pages: false, count: 0 };
-  }
-  const photos = getComicPhotos(item);
-  return {
-    front: photos.length > 0,
-    back: photos.length > 1,
-    spine: photos.length > 2,
-    pages: photos.length > 3,
-    count: photos.length
-  };
-};
-
-const getListingReadiness = (item) => {
-  if (!item) {
-    return {
-      frontPhoto: { status: 'fail', label: 'Front photo', required: true },
-      backPhoto: { status: 'caution', label: 'Back photo', required: false },
-      spinePhoto: { status: 'caution', label: 'Spine photo', required: false },
-      pagesPhoto: { status: 'caution', label: 'Pages photo', required: false },
-      identityConfirmed: { status: 'fail', label: 'Identity unresolved', state: 'UNRESOLVED', required: true },
-      priceReady: { status: 'fail', label: 'Price ready', required: true },
-      decisionSafe: { status: 'fail', label: 'Decision safe', required: true },
-      marketEvidence: { status: 'fail', label: 'Market evidence', required: false }
-    };
-  }
-
-  const photos = getPhotoChecklist(item);
-  const decision = item.decision || {};
-  const displayPrice = getDisplayPrice(item);
-  const listPrice = parseFloat(item.listPrice || 0);
-  const price = Math.max(displayPrice, listPrice);
-  const soldComps = Array.isArray(item.soldComps) ? item.soldComps : [];
-  const activeCount = item.rawComps?.count || 0;
-  const blockers = Array.isArray(decision.blockers) ? decision.blockers : [];
-  const hasBlockers = blockers.length > 0;
-
-  return {
-    frontPhoto: {
-      status: photos.front ? 'pass' : 'fail',
-      label: 'Front photo',
-      required: true
-    },
-    backPhoto: {
-      status: photos.back ? 'pass' : 'caution',
-      label: 'Back photo',
-      required: false
-    },
-    spinePhoto: {
-      status: photos.spine ? 'pass' : 'caution',
-      label: 'Spine photo',
-      required: false
-    },
-    pagesPhoto: {
-      status: photos.pages ? 'pass' : 'caution',
-      label: 'Pages photo',
-      required: false
-    },
-    identityConfirmed: (() => {
-      // Q145 dispatch (2026-07-22) — tri-state: CONFIRMED / PROVISIONAL /
-      // UNRESOLVED, replacing the binary blocked/confirmed collapse that
-      // let a promoted provisional identity (Q133 Slice 2 — Vision
-      // disagreed, the pool corroborated, decision.action never became
-      // ID_REQUIRED by design) render as an unqualified "✓ Identity
-      // confirmed."
-      //
-      // Discovered while implementing this fix, not assumed: out.
-      // identityProvisional and out.listingHardLockReason (the two signals
-      // this fix was specified to use) are NOT present on the client's
-      // catalogue item at all — grepped every merge site in this file,
-      // zero hits for either field name. Using them directly here would
-      // have been a silent no-op, the exact class of bug this whole
-      // session has been auditing. The reliable, already-merged proxy is
-      // item.contract.locks (deriveLocks, responseContract.js, pushes
-      // {code: out.listingHardLockReason || 'listing-hard-locked', ...}
-      // whenever out.listingHardLocked is true) — contract itself IS
-      // merged on every path (see the `contract:` field in each catalogue
-      // merge object). Falls back to the raw fields for a legacy/no-
-      // contract item in case a future merge-path fix adds them.
-      // GrailKey Directive Z — item.contract.actionAuthority.identityStanding
-      // (responseContract.js) is computed server-side on `out`, BEFORE the
-      // client-merge boundary this comment's own investigation found strips
-      // item.identityProvisional/listingHardLockReason entirely — it does
-      // not have the gap the fallback below works around, so it's preferred
-      // whenever present. Falls back to the pre-Z local re-derivation only
-      // for legacy items scanned before actionAuthority existed.
-      const authority = item.contract?.actionAuthority;
-      const isUnresolved = authority
-        ? authority.identityStanding === 'UNRESOLVED'
-        : decision.action === 'ID_REQUIRED' || (hasBlockers && blockers.includes('identity-not-confident'));
-      const isProvisional = !isUnresolved && (
-        authority
-          ? authority.identityStanding === 'CONFLICTED'
-          : (
-            item.identityProvisional === true ||
-            item.listingHardLockReason === 'identity-unresolved' ||
-            (item.contract?.locks || []).some((l) => l.code === 'identity-unresolved')
-          )
-      );
-      return {
-        status: isUnresolved ? 'fail' : isProvisional ? 'caution' : 'pass',
-        label: isUnresolved ? 'Identity unresolved' : isProvisional ? 'Identity provisional — verify before listing' : 'Identity confirmed',
-        state: isUnresolved ? 'UNRESOLVED' : isProvisional ? 'PROVISIONAL' : 'CONFIRMED',
-        required: true
-      };
-    })(),
-    priceReady: {
-      status: price > 0 ? 'pass' : 'fail',
-      label: 'Price ready',
-      required: true
-    },
-    decisionSafe: (() => {
-      // GrailKey Directive Z (GK-96) — a field labeled "safe" whose
-      // negative branch was unreachable for every LIST_LOW is fabricated
-      // assurance, not cosmetic wording (a GK-39-class defect, third
-      // instance). Reads item.contract.actionAuthority.state (the one
-      // transaction verdict every listability consumer now derives
-      // from, responseContract.js) rather than decision.action directly
-      // -- decision.action alone can no longer render "safe": a
-      // thin/stale/tier-4 (pc_estimate) book with decision.action=
-      // LIST_LOW now correctly reads REVIEW/LOCKED here, not 'pass'.
-      // Falls back to the pre-Z action-only heuristic ONLY for legacy
-      // catalogue entries scanned before this field existed
-      // (actionAuthority === undefined, not any other falsy value).
-      const authority = item.contract?.actionAuthority;
-      if (authority) {
-        return {
-          status: authority.state === 'READY' ? 'pass' :
-                  authority.state === 'REVIEW' ? 'caution' :
-                  'fail',
-          label: 'Decision safe',
-          required: true
-        };
-      }
-      return {
-        status: decision.action === 'LIST_NOW' || decision.action === 'LIST_LOW' ? 'pass' :
-                decision.action === 'RESEARCH' || decision.action === 'GRADE_CANDIDATE' ? 'caution' :
-                'fail',
-        label: 'Decision safe',
-        required: true
-      };
-    })(),
-    marketEvidence: {
-      // Commit B.2 (Strange Tales dispatch) — must reflect ZERO exact
-      // evidence, not just raw comp-pool population. A pool population
-      // from an unrelated/misidentified search (e.g. a null-confirmedIssue
-      // scan whose active pool matched on title alone) used to still show
-      // "pass" here — the checkmark could stay satisfied even when the
-      // underlying identity was genuinely unresolved. item.marketEvidenceReady
-      // (out.marketEvidenceReady, api/enrich.js) is the authoritative
-      // field, already zeroed whenever confirmedIssue is null (Commit A.2
-      // forces rawPricingPool=[] for every row in that case, which is
-      // exactly what marketEvidenceReady counts). Falls back to the prior
-      // raw-population check only for items scanned before this field
-      // existed (item.marketEvidenceReady === undefined, not false) —
-      // backward compatibility for already-cached catalogue entries, not a
-      // loophole for new scans.
-      status: item.marketEvidenceReady === false ? 'fail' :
-              item.marketEvidenceReady === true ? 'pass' :
-              soldComps.length > 0 || activeCount > 0 ? 'pass' :
-              item.pricingSource === 'pricecharting' ? 'caution' :
-              'fail',
-      label: 'Market evidence',
-      required: false
-    }
-  };
-};
-
-const getReadinessStatus = (item) => {
-  if (!item) {
-    return {
-      badge: 'BLOCKED',
-      color: '#e05656',
-      icon: '🚫',
-      bg: 'rgba(239,68,68,0.1)',
-      border: 'rgba(239,68,68,0.3)'
-    };
-  }
-
-  const checklist = getListingReadiness(item);
-  const decision = item.decision || {};
-  const blockers = Array.isArray(decision.blockers) ? decision.blockers : [];
-  const hasBlockers = blockers.length > 0;
-
-  // BLOCKED: DO_NOT_LIST, ID_REQUIRED, or blockers present
-  if (decision.action === 'DO_NOT_LIST' || decision.action === 'ID_REQUIRED' || hasBlockers) {
-    return {
-      badge: 'BLOCKED',
-      color: '#e05656',
-      icon: '🚫',
-      bg: 'rgba(239,68,68,0.1)',
-      border: 'rgba(239,68,68,0.3)'
-    };
-  }
-
-  // PHOTOS NEEDED: missing front photo or decision safe but missing photos
-  if (checklist.frontPhoto.status !== 'pass' ||
-      (checklist.decisionSafe.status === 'pass' && checklist.frontPhoto.status === 'pass' &&
-       (checklist.backPhoto.status !== 'pass' || checklist.spinePhoto.status !== 'pass' || checklist.pagesPhoto.status !== 'pass'))) {
-    return {
-      badge: 'PHOTOS NEEDED',
-      color: '#fbbf24',
-      icon: '📷',
-      bg: 'rgba(251,191,36,0.1)',
-      border: 'rgba(251,191,36,0.3)'
-    };
-  }
-
-  // READY: required items pass, decision LIST_NOW or LIST_LOW
-  if (checklist.frontPhoto.status === 'pass' &&
-      checklist.identityConfirmed.status === 'pass' &&
-      checklist.priceReady.status === 'pass' &&
-      checklist.decisionSafe.status === 'pass' &&
-      !hasBlockers) {
-    return {
-      badge: 'READY',
-      color: '#22c55e',
-      icon: '✓',
-      bg: 'rgba(34,197,94,0.1)',
-      border: 'rgba(34,197,94,0.3)'
-    };
-  }
-
-  // NEEDS REVIEW: everything else (RESEARCH, caution states, etc.)
-  return {
-    badge: 'NEEDS REVIEW',
-    color: '#fbbf24',
-    icon: '⚠️',
-    bg: 'rgba(251,191,36,0.1)',
-    border: 'rgba(251,191,36,0.3)'
-  };
-};
-
-// Collection-level metrics helper
-const getCollectionMetrics = (catalogue) => {
-  if (!catalogue || !Array.isArray(catalogue) || catalogue.length === 0) {
-    return {
-      totalComics: 0,
-      totalValue: 0,
-      ready: { count: 0, value: 0 },
-      photosNeeded: { count: 0, value: 0 },
-      needsReview: { count: 0, value: 0 },
-      blocked: { count: 0, value: 0 },
-      liquidValue: 0
-    };
-  }
-
-  const metrics = {
-    totalComics: catalogue.length,
-    totalValue: 0,
-    ready: { count: 0, value: 0 },
-    photosNeeded: { count: 0, value: 0 },
-    needsReview: { count: 0, value: 0 },
-    blocked: { count: 0, value: 0 },
-    liquidValue: 0
-  };
-
-  for (const item of catalogue) {
-    if (!item) continue;
-
-    try {
-      const displayPrice = getDisplayPrice(item);
-      const listPrice = parseFloat(item.listPrice || 0);
-      const price = Math.max(displayPrice, listPrice);
-
-      if (isNaN(price) || !isFinite(price)) continue;
-
-      metrics.totalValue += price;
-
-      const readiness = getReadinessStatus(item);
-
-      if (readiness.badge === 'READY') {
-        metrics.ready.count++;
-        metrics.ready.value += price;
-        metrics.liquidValue += price;
-      } else if (readiness.badge === 'PHOTOS NEEDED') {
-        metrics.photosNeeded.count++;
-        metrics.photosNeeded.value += price;
-        metrics.liquidValue += price; // PHOTOS_NEEDED items are listable/liquid
-      } else if (readiness.badge === 'NEEDS REVIEW') {
-        metrics.needsReview.count++;
-        metrics.needsReview.value += price;
-      } else if (readiness.badge === 'BLOCKED') {
-        metrics.blocked.count++;
-        metrics.blocked.value += price;
-      }
-    } catch (err) {
-      console.warn('[getCollectionMetrics] skipping malformed item:', err.message);
-      continue;
-    }
-  }
-
-  return metrics;
-};
+// Listing-readiness, collection-metrics and channel-routing helpers live in src/lib/collectionMetrics.js
+// (createCollectionMetrics, instantiated below once getComicPhotos is defined) so the dashboard invariants are testable.
 
 // getAggregateCollectionStatus — extracted to src/lib/collectionMetrics.js
 // for testability (imported at top of file). Computed ONLY from
-// getCollectionMetrics' own output above, never independently re-derived,
+// getCollectionMetrics' own output (src/lib/collectionMetrics.js), never independently re-derived,
 // so the header and the bucket grid it sits above can never disagree.
-
-// Q145 dispatch (2026-07-22, Poison Ivy #31 collection-routing class) —
-// single shared channel resolver. Prefers item.contract?.bestChannel
-// (server-synced post any I9/sold-side-anchor demotion, since Q145's
-// server-side fix — src/lib/responseContract.js's syncDecisionToContract)
-// over the legacy item.decision?.bestChannel copy, which a stale
-// catalogue entry (scanned before this fix shipped, never re-enriched)
-// could still carry out of sync with its own stored contract.
-//
-// Defense-in-depth, explicitly secondary to the server-side fix — not
-// equally load-bearing. Also refuses to trust contract.bestChannel
-// blindly: a contract that's LOCKED, REFUSED, ID_REQUIRED, or simply not
-// listable is force-routed to research/blocked regardless of whatever
-// bestChannel value it carries, so a future contract-assembly bug in
-// THAT field specifically still can't misroute a book to Sell/Bundle/
-// Trade/Grade.
-const getAuthoritativeChannel = (item) => {
-  if (!item) return null;
-  const contract = item.contract;
-  const legacy = item.decision?.bestChannel || null;
-  if (!contract) return legacy;
-
-  if (contract.state === 'ID_REQUIRED') return 'blocked';
-  if (contract.state === 'REFUSED' || contract.state === 'LOCKED' || contract.listable === false) {
-    return 'research';
-  }
-  return contract.bestChannel || legacy || null;
-};
-
-// Session 2A: Channel routing metrics
-const getChannelMetrics = (catalogue) => {
-  if (!catalogue || !Array.isArray(catalogue) || catalogue.length === 0) {
-    return {
-      cash_sale: { count: 0, value: 0 },
-      bundle: { count: 0, value: 0 },
-      grade: { count: 0, value: 0 },
-      barter: { count: 0, value: 0 },
-      research: { count: 0, value: 0 },
-      blocked: { count: 0, value: 0 }
-    };
-  }
-
-  const metrics = {
-    cash_sale: { count: 0, value: 0 },
-    bundle: { count: 0, value: 0 },
-    grade: { count: 0, value: 0 },
-    barter: { count: 0, value: 0 },
-    research: { count: 0, value: 0 },
-    blocked: { count: 0, value: 0 }
-  };
-
-  for (const item of catalogue) {
-    if (!item) continue;
-    const channel = getAuthoritativeChannel(item);
-    if (!channel) continue;
-
-    try {
-      const displayPrice = getDisplayPrice(item);
-      const listPrice = parseFloat(item.listPrice || 0);
-      const price = Math.max(displayPrice, listPrice);
-
-      if (isNaN(price) || !isFinite(price)) continue;
-
-      if (metrics[channel]) {
-        metrics[channel].count++;
-        // Only add to value if item has a valid price (not null/undefined)
-        if (price > 0 && item.price != null) {
-          metrics[channel].value += price;
-        }
-      }
-    } catch (err) {
-      console.warn('[getChannelMetrics] skipping malformed item:', err.message);
-      continue;
-    }
-  }
-
-  return metrics;
-};
 
 
 // Ship #24 Amendment C — client-side drift alarm (dev mode only).
@@ -955,6 +583,9 @@ const getComicPhotos = (comic) => {
   }
   return [];
 };
+
+const { getPhotoChecklist, getListingReadiness, getReadinessStatus, getCollectionMetrics, getAuthoritativeChannel, getChannelMetrics } =
+  createCollectionMetrics({ getComicPhotos });
 
 // ─── Ship #26 — NO-DEAD-END CARDS (display-only, no pricing math) ───
 // Every card must offer: market reference points (when the engine
@@ -3455,7 +3086,7 @@ function FloatingSearchBar({ value, onChange, items, onAskClaude, onClaudeCardCh
   );
 }
 
-function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, onDelete, refreshingPrices, snapshots, bulkEnrichProgress }) {
+function CollectionList({ items, listableValue, soldCount, soldRevenue, onOpen, onDelete, refreshingPrices, snapshots, bulkEnrichProgress }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [sortBy, setSortBy] = useState("recent");
@@ -3708,10 +3339,10 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
         <div className="stat">
           <div className="stat-value">
             {items.some(c => !c.marketPending)
-              ? fmt(liquidValue)
+              ? fmt(listableValue)
               : "Updating…"}
           </div>
-          <div className="stat-label">Liquid Value</div>
+          <div className="stat-label" title={COLLECTION_VALUE_DEFINITIONS.listableValue}>Listable Value (est.)</div>
         </div>
         {soldCount > 0 && (
           <div className="stat">
@@ -3844,11 +3475,21 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
               </div>
             </div>
 
-            {/* Liquid Value highlight */}
-            <div style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", textAlign: "center" }}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: "#22c55e", marginBottom: 1 }}>💰 LIQUID VALUE</div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: "#22c55e" }}>{fmt(metrics.liquidValue)}</div>
-              <div style={{ fontSize: 9, color: "#22c55e", opacity: 0.7, marginTop: 2 }}>Ready + Photos Needed</div>
+            {/* Listable value (estimate) + Total estimated value — definitions travel with the numbers (COLLECTION_VALUE_DEFINITIONS) */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
+              <div title={metrics.definitions.listableValue} style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", textAlign: "center" }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: "#22c55e", marginBottom: 1 }}>LISTABLE VALUE (EST.)</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "#22c55e" }}>{fmt(metrics.listableValue)}</div>
+                <div style={{ fontSize: 9, color: "#22c55e", opacity: 0.7, marginTop: 2 }}>Decision-safe records · estimate, not sale proceeds</div>
+                {metrics.nonListable.count > 0 && (
+                  <div style={{ fontSize: 9, color: "#fbbf24", marginTop: 2 }}>Excludes {metrics.nonListable.count} not-listable ({fmt(metrics.nonListable.value)})</div>
+                )}
+              </div>
+              <div title={metrics.definitions.totalValue} style={{ padding: "8px 10px", borderRadius: 6, background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)", textAlign: "center" }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: "#818cf8", marginBottom: 1 }}>TOTAL ESTIMATED VALUE</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "#818cf8" }}>{fmt(metrics.totalValue)}</div>
+                <div style={{ fontSize: 9, color: "#818cf8", opacity: 0.7, marginTop: 2 }}>All {metrics.totalComics} records · estimate, not sale proceeds</div>
+              </div>
             </div>
           </div>
         );
@@ -3912,6 +3553,14 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
                   <div style={{ fontSize: 10, fontWeight: 600, color: "#ef4444", marginBottom: 1 }}>🚫 BLOCKED</div>
                   <div style={{ fontSize: 14, fontWeight: 800, color: "#ef4444", marginBottom: 1 }}>{channels.blocked.count}</div>
                   <div style={{ fontSize: 9, color: "#ef4444", opacity: 0.8 }}>{fmt(channels.blocked.value)}</div>
+                </div>
+              )}
+
+              {channels.unrouted.count > 0 && (
+                <div title={COLLECTION_VALUE_DEFINITIONS.routing} style={{ padding: "6px 8px", borderRadius: 6, background: "rgba(148,163,184,0.08)", border: "1px solid rgba(148,163,184,0.25)" }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#94a3b8", marginBottom: 1 }}>UNROUTED</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#94a3b8", marginBottom: 1 }}>{channels.unrouted.count}</div>
+                  <div style={{ fontSize: 9, color: "#94a3b8", opacity: 0.8 }}>no channel yet · {fmt(channels.unrouted.value)}</div>
                 </div>
               )}
             </div>
@@ -4119,6 +3768,12 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
                 }
                 return g;
               })();
+          // R7 — the operator-confirmed grade governs pricing (resolveGoverningGrade); item.grade stays the
+          // automated estimate by design and is shown labelled, never overwritten.
+          const govGrade = resolveGoverningGrade(item);
+          const operatorGradeTxt = govGrade.source === 'operator' && govGrade.grade
+            && String(govGrade.grade).trim() !== String(item.grade ?? '').trim()
+            ? String(govGrade.grade).trim() : null;
           const isSelected = selected.has(item.id);
           return (
           <div
@@ -4163,7 +3818,7 @@ function CollectionList({ items, liquidValue, soldCount, soldRevenue, onOpen, on
                 <div style={{ fontSize: 11, color: '#d4af37', marginTop: 1 }}>⚡ {item.variant}</div>
               )}
               <div className="cl-row2 muted small">
-                {item.publisher}{item.publisher && item.year ? " · " : ""}{item.year}{gradeTxt ? ` · ${gradeTxt}` : ""}
+                {item.publisher}{item.publisher && item.year ? " · " : ""}{item.year}{operatorGradeTxt ? ` · ${operatorGradeTxt} (operator)` : ""}{gradeTxt ? ` · ${operatorGradeTxt ? "model: " : ""}${gradeTxt}` : ""}
               </div>
               {(() => {
                 // When engine cannot price the book, hide both range and
@@ -15323,7 +14978,7 @@ export default function App() {
   // under the "Liquid Value" label — confirmed live: a card showed 0
   // ready items yet "Liquid Value: $537." A SECOND, separate, correctly-
   // filtered "Liquid Value" already existed lower in the same view
-  // (getCollectionMetrics(items).liquidValue, ready+photosNeeded only) —
+  // (getCollectionMetrics(items).listableValue, ready+photosNeeded, non-listable excluded) —
   // two different numbers, one label, same screen. Reusing
   // getCollectionMetrics here (single source of truth, the same pure
   // function CollectionList's own bucket grid already calls) rather than
@@ -15331,7 +14986,7 @@ export default function App() {
   // displays can now never disagree, since both are the same function
   // applied to the same catalogue. totalValue itself is left untouched
   // for ManagePage's own, legitimately different, unfiltered-total use.
-  const liquidValue = getCollectionMetrics(catalogue).liquidValue;
+  const listableValue = getCollectionMetrics(catalogue).listableValue;
 
   const soldRevenue = catalogue.reduce((sum, item) => {
     if (item.status === "sold" && item.soldPrice != null) {
@@ -16580,7 +16235,7 @@ export default function App() {
         ) : (
           <CollectionList
             items={catalogue}
-            liquidValue={liquidValue}
+            listableValue={listableValue}
             soldCount={soldCount}
             soldRevenue={soldRevenue}
             refreshingPrices={refreshingPrices}
