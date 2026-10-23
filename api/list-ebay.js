@@ -1109,6 +1109,26 @@ export default async function handler(req, res) {
     const authority = deriveActionAuthority(syntheticOut, freshLocks, syntheticOut.decision);
     const serverReady = authority.state === 'READY' && priorLockCodes.length === 0;
 
+    // C1 (2026-10-23) -- PUBLICATION REQUIRES A VERIFIED AUTHORITY RECEIPT, INDEPENDENT OF Q41.
+    // Q41 is an operator's exact-price acknowledgement, never evidence: it must not stand in for a server-signed
+    // receipt that verifies for THIS principal, names THIS catalogue row and asset, matches the row's identity and
+    // carries the CURRENT media evidence version. Anything else (absent / malformed / forged / wrong principal /
+    // identity mismatch / unbound / other asset or row / stale evidence) refuses here, before any price binding,
+    // photo work, token exchange, ledger or inventory write, or eBay call. Same refusal shape and code as the
+    // not-READY refusal below, with the explicit AUTHORITY_RECEIPT_* reason.
+    if (authSources.receipt !== 'VERIFIED') {
+      const receiptRefusalReason = `AUTHORITY_RECEIPT_${String(authSources.receipt).replace(/[^A-Za-z0-9]+/g, '_').toUpperCase()}`;
+      console.error(`[ebay] ${receiptRefusalReason} — verified authority receipt required; aborting before any eBay call`);
+      res.status(403).json({
+        error: 'ACTION_AUTHORITY_NOT_READY',
+        message: 'A verified authority receipt for this asset is required to list, with or without an acknowledged price — nothing was listed.',
+        actionAuthority: authority,
+        authorityReceipt: authSources.receipt,
+        refusalReason: receiptRefusalReason,
+      });
+      return;
+    }
+
     if (!serverReady) {
       // Q41 acknowledged-override: an operator who explicitly set and
       // verified their own price may still list a non-READY book — the
