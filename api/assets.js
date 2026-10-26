@@ -1,6 +1,7 @@
 // GET /api/assets                          -> { assets: [...] }  (list-my-assets)
 // GET /api/assets?gkAssetId=<uuid>         -> { asset }           (getPhysicalAsset)
 // GET /api/assets?collectionItemId=<id>    -> { asset }           (resolve then getPhysicalAsset)
+// GET /api/assets?listings=1               -> { listings: [...] } (GK-P0: durable eBay listing state per catalogue item, from outcome_event)
 //
 // DATA-1D, T3 — the first real authenticated READ surface. Requires
 // `Authorization: Bearer <token>` (src/modules/auth/index.js); the
@@ -21,7 +22,7 @@
 // `/api/asset-media?mediaId=<id>`, itself authenticated the same way.
 
 import { verifyToken, InvalidTokenError } from '../src/modules/auth/index.js';
-import { getPhysicalAsset, listMyAssets, resolveCollectionItemLink, NotFoundError, AuthorizationFailedError } from '../src/modules/assets/index.js';
+import { getPhysicalAsset, listMyAssets, listMyListingStates, resolveCollectionItemLink, NotFoundError, AuthorizationFailedError } from '../src/modules/assets/index.js';
 import { checkRateLimit } from './rate-limit.js';
 import { getInventoryState } from '../src/modules/inventory/index.js';
 
@@ -79,6 +80,11 @@ export default async function handler(req, res) {
         inventoryState = undefined;
       }
       return res.status(200).json({ asset: { ...asset, media: rewriteMediaUris(asset.media) }, ...(inventoryState !== undefined ? { inventoryState } : {}) });
+    }
+    // GK-P0 — durable eBay listing association (outcome_event), principal-scoped.
+    if (req.query?.listings === '1') {
+      const listings = await listMyListingStates({ principalId });
+      return res.status(200).json({ listings });
     }
     const assets = await listMyAssets({ principalId });
     return res.status(200).json({ assets });

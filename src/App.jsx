@@ -1,4 +1,5 @@
 import { Component, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { isItemListed, getItemEbayUrl, normalizeListingStatus, applyProviderStatus, reconcileCatalogueWithDurableListings } from "./lib/listingState.js";
 import {
   getAllComics,
   putComic,
@@ -134,7 +135,7 @@ const getVaultHeaders = () => {
 function normalizeItem(item) {
   if (!item) return item;
   return {
-    ...item,
+    ...normalizeListingStatus(item),
     decision: item.decision || {},
     claudeCheck: item.claudeCheck || {},
     priceBands: item.priceBands || {},
@@ -3702,8 +3703,8 @@ function CollectionList({ items, listableValue, soldCount, soldRevenue, onOpen, 
           const priceMatch = sq.match(/^\$(\d+)\+?$/);
           if (priceMatch) return (getDisplayPrice(item) || 0) >= parseInt(priceMatch[1]);
           if (sq === "key" || sq === "keys") return showKeyIssue(item.keyIssue);
-          if (sq === "listed") return item.status === "listed";
-          if (sq === "unlisted") return item.status !== "listed";
+          if (sq === "listed") return isItemListed(item);
+          if (sq === "unlisted") return !isItemListed(item);
           if (sq === "sold") return item.status === "sold";
           const hay = `${item.title} ${item.publisher} ${item.year} ${item.grade} ${item.keyIssue}`.toLowerCase();
           return hay.includes(sq);
@@ -3717,8 +3718,8 @@ function CollectionList({ items, listableValue, soldCount, soldRevenue, onOpen, 
             if (eraFilter === "bronze") return yr >= 1970 && yr <= 1985;
             if (eraFilter === "modern") return yr >= 1986;
             if (eraFilter === "keys") return showKeyIssue(item.keyIssue);
-            if (eraFilter === "listed") return item.status === "listed";
-            if (eraFilter === "unlisted") return item.status !== "listed";
+            if (eraFilter === "listed") return isItemListed(item);
+            if (eraFilter === "unlisted") return !isItemListed(item);
             if (eraFilter === "sold") return item.status === "sold";
             return true;
           })
@@ -3864,7 +3865,7 @@ function CollectionList({ items, listableValue, soldCount, soldRevenue, onOpen, 
                   })() : ''}
                 </div>
               )}
-              {(showKeyIssue(item.keyIssue) || item.status === "listed" || item.status === "sold" || item.purchasePrice > 0 || item.megaKeyFloorApplied || item.manualReviewRequired || item.gradeExceedsMap || getAuthoritativeChannel(item)) && (
+              {(showKeyIssue(item.keyIssue) || isItemListed(item) || item.status === "sold" || item.purchasePrice > 0 || item.megaKeyFloorApplied || item.manualReviewRequired || item.gradeExceedsMap || getAuthoritativeChannel(item)) && (
                 <div className="cl-row3">
                   {getAuthoritativeChannel(item) && (() => {
                     const ch = getAuthoritativeChannel(item);
@@ -3920,7 +3921,7 @@ function CollectionList({ items, listableValue, soldCount, soldRevenue, onOpen, 
                       🔑 {isMegaKeyFloorCurrentlyVerified(item) ? "VERIFIED" : "ESTIMATED"}
                     </span>
                   )}
-                  {item.status === "listed" && <span className="pill pill-listed">LISTED</span>}
+                  {isItemListed(item) && <span className="pill pill-listed">LISTED</span>}
                   {item.status === "sold" && <span className="pill pill-sold">SOLD</span>}
                   {item.purchasePrice > 0 && getDisplayPrice(item) > 0 && (() => {
                     const roi = ((getDisplayPrice(item) - item.purchasePrice) / item.purchasePrice) * 100;
@@ -4301,7 +4302,7 @@ export function CollectionDetail({
 
   const photos = getComicPhotos(item);
   const canAddMore = photos.length < 4;
-  const isListed = item.status === "listed" && item.ebayUrl;
+  const isListed = isItemListed(item) && !!getItemEbayUrl(item);
 
   // Pricing: single source of truth via getDisplayPrice.
   const hasComps =
@@ -7942,12 +7943,12 @@ export function CollectionDetail({
               <span className="muted small">on eBay</span>
             </div>
             <a
-              href={item.ebayUrl}
+              href={getItemEbayUrl(item)}
               target="_blank"
               rel="noopener noreferrer"
               className="listed-link"
             >
-              {item.ebayUrl}
+              {getItemEbayUrl(item)}
             </a>
             <button
               className="reset-btn"
@@ -9379,7 +9380,7 @@ export function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onB
         // getDisplayPrice(c) already resolves to 0 for it today (explicit
         // here as defense-in-depth, not relying only on that side effect).
         c.assetCategory !== 'generic' &&
-        c.status !== "listed" &&
+        !isItemListed(c) &&
         getDisplayPrice(c) > 0 &&
         c.identityConfident !== false &&
         (c.contract
@@ -9397,7 +9398,7 @@ export function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onB
         c.decision?.action !== 'ID_REQUIRED' &&
         c.decision?.action !== 'DO_NOT_LIST' &&
         (c.decision?.blockers?.length || 0) === 0 &&
-        c.status !== 'listed' &&
+        !isItemListed(c) &&
         c.status !== 'sold' &&
         getDisplayPrice(c) > 0 &&
         getAuthoritativeChannel(c) !== 'research' &&
@@ -9582,9 +9583,9 @@ export function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onB
   const totalGainPct = totalCostBasis > 0 ? (totalGain / totalCostBasis) * 100 : null;
   const [metrics, setMetrics] = useState(() => {
     // Instant default metrics from local data — no API wait.
-    const listed = catalogue.filter((c) => c.status === "listed").length;
+    const listed = catalogue.filter((c) => isItemListed(c)).length;
     const keys = catalogue.filter((c) => showKeyIssue(c.keyIssue)).length;
-    const stagnant = catalogue.filter((c) => c.status !== "listed" && (Date.now() - (c.timestamp || 0)) > 86400000 * 30).length;
+    const stagnant = catalogue.filter((c) => !isItemListed(c) && (Date.now() - (c.timestamp || 0)) > 86400000 * 30).length;
     const m = [
       { label: "Total Value", value: fmt(totalValue), color: "green" },
       { label: "Listed", value: `${listed} of ${catalogue.length}`, color: listed < catalogue.length / 2 ? "red" : "green" },
@@ -9667,7 +9668,7 @@ export function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onB
       }
     });
     catalogue.forEach((c) => {
-      if (!tags[c.id] && c.status !== "listed" && (Date.now() - (c.timestamp || 0)) > 86400000 * 30) {
+      if (!tags[c.id] && !isItemListed(c) && (Date.now() - (c.timestamp || 0)) > 86400000 * 30) {
         tags[c.id] = { emoji: "⏳", label: "STAGNANT" };
       }
     });
@@ -9773,8 +9774,8 @@ export function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onB
       const priceMatch = q.match(/^\$(\d+)\+?$/);
       if (priceMatch) return (marketValueOf(item) || 0) >= parseInt(priceMatch[1]);
       if (q === "key" || q === "keys") return showKeyIssue(item.keyIssue);
-      if (q === "listed") return item.status === "listed";
-      if (q === "unlisted") return item.status !== "listed";
+      if (q === "listed") return isItemListed(item);
+      if (q === "unlisted") return !isItemListed(item);
       if (q === "hot") return aiTags[item.id]?.label === "HOT";
       if (q === "stagnant") return aiTags[item.id]?.label === "STAGNANT";
       if (q === "bundle") return aiTags[item.id]?.label === "BUNDLE";
@@ -10342,7 +10343,7 @@ export function ManagePage({ catalogue, totalValue, onOpenItem, onListComic, onB
                       {tag.emoji} {tag.label}
                     </span>
                   )}
-                  {item.status === "listed" && (
+                  {isItemListed(item) && (
                     <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: "rgba(22,163,106,0.2)", color: "#16a34a", fontWeight: 700 }}>
                       LISTED
                     </span>
@@ -11429,6 +11430,15 @@ export default function App() {
         for (const item of serverItems) {
           if (!mine()) return;
           const existingImages = existingById.get(item.id)?.images;
+          // GK-P0 — the server attributes carry no listing association (the
+          // durable source is the outcome_event ledger, reconciled below).
+          // putComic is a full replace, so keep this device's own listing
+          // fields rather than erasing them on every login.
+          const existingLocal = existingById.get(item.id);
+          const keepListing = (!item.attributes?.ebayItemId && existingLocal?.ebayItemId)
+            ? Object.fromEntries(['status', 'ebayItemId', 'ebayUrl', 'listedAt', 'endedAt', 'soldPrice', 'soldAt', 'buyerFeedback', 'ebayProviderStatus', 'ebayProviderCheckedAt']
+                .filter((k) => existingLocal[k] !== undefined).map((k) => [k, existingLocal[k]]))
+            : {};
           await putComic({
             id: item.id,
             // U4 fix — item.assetCategory is a TOP-LEVEL collection_item
@@ -11440,6 +11450,7 @@ export default function App() {
             // exactly the cross-device round-trip U4.6 requires to work.
             assetCategory: item.assetCategory, // U1 — never defaulted; the server row always carries its explicit category
             ...item.attributes,
+            ...keepListing,
             ...(existingImages ? { images: existingImages } : {}),
             _syncStatus: "synced",
           });
@@ -11461,6 +11472,28 @@ export default function App() {
       const items = await getAllComics();
       if (!mine()) return;
       setCatalogue(items.map(normalizeItem));
+      if (!mine()) return;
+      // GK-P0 LISTING RECONCILIATION — the outcome_event ledger is the
+      // authoritative record that an eBay listing exists for an owned asset.
+      // Restore the association after refresh / emptied IndexedDB / a second
+      // device. Best-effort and read-only: a failed or unauthorized fetch
+      // changes nothing locally (and never un-lists anything).
+      try {
+        const lr = await authFetch('/api/assets?listings=1');
+        const body = lr && lr.ok ? await lr.json().catch(() => null) : null;
+        if (body && Array.isArray(body.listings) && mine()) {
+          const { items: reconciled, changed } = reconcileCatalogueWithDurableListings(items, body.listings);
+          if (changed.length) {
+            for (const c of changed) {
+              if (!mine()) return;
+              const base = items.find((x) => x.id === c.id);
+              if (base) await putComic({ ...base, ...c.patch });
+            }
+            if (!mine()) return;
+            setCatalogue(reconciled.map(normalizeItem));
+          }
+        }
+      } catch { /* never blocks hydrate */ }
       if (!mine()) return;
       // GRAILKEY DURABLE BUYER DECISION LEDGER V1 — same authenticated-
       // reconnect trigger, same "never block, best-effort" contract.
@@ -13486,7 +13519,7 @@ export default function App() {
     if (!item) return { id, ok: true, skipped: true };
 
     // If listed on eBay with a known ItemID, offer to delist first.
-    if (item.status === "listed" && item.ebayItemId) {
+    if (isItemListed(item) && item.ebayItemId) {
       const choice = prompt(
         `"${item.title}" is listed on eBay.\n\n` +
         `Type 1 to Remove from eBay + Collection\n` +
@@ -13839,16 +13872,14 @@ export default function App() {
     // GK-94 (Directive X) — status-field-only patch, same fresh-read
     // discipline as listOnEbay above: never spread the closed-over
     // pre-request `item` back into catalogue state.
-    const statusFields = { status: data.status }; // "sold", "ended", or "active"
-    if (data.status === "sold") {
-      statusFields.soldPrice = data.soldPrice;
-      statusFields.soldAt = data.soldAt;
-      if (data.buyerFeedback != null) {
-        statusFields.buyerFeedback = data.buyerFeedback;
-      }
-    } else if (data.status === "ended") {
-      statusFields.endedAt = data.endedAt;
-    }
+    // GK-P0 — the provider's word (active|ended|sold) is OBSERVATION, not
+    // GrailKey state. applyProviderStatus maps it onto the app's own
+    // status vocabulary (active -> listed, ended -> ended, never sold),
+    // records the raw provider status separately, never touches the listing
+    // association, and returns null for an unrecognised response so it
+    // can never un-list or re-enable publication.
+    const statusFields = applyProviderStatus(item, data);
+    if (!statusFields) return data;
 
     setCatalogue((prev) => prev.map((x) => {
       if (x.id !== item.id) return x;

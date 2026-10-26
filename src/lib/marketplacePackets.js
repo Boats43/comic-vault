@@ -1,3 +1,4 @@
+import { isItemListed } from './listingState.js';
 // Marketplace Listing Packet Generator
 // Generates copy-ready listing packets for channels without full API automation:
 // Mercari, Facebook Marketplace, Craigslist, Whatnot
@@ -306,7 +307,7 @@ export const generatePacket = (item, channel, getDisplayPrice, getComicPhotos) =
   };
 
   // Add warning for already-listed items
-  if (item.status === 'listed') {
+  if (isItemListed(item)) {
     packet.warnings.push('Already listed on eBay');
   }
 

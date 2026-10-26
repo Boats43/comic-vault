@@ -42,6 +42,7 @@ export {
   getOperatorActionForListing,
   getAssetMediaContentHashes,
   listPhysicalOrphans,
+  listMyListingStates,
   listMissingProjections,
   getLiveIdentityAssignment,
   recordIdentifierDefinition,

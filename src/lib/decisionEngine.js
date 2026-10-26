@@ -1,3 +1,4 @@
+import { isItemListed } from './listingState.js';
 import { enforceFloor } from './pricingEngine.js';
 import { parsePriceNumber } from './responseContract.js';
 
@@ -879,7 +880,7 @@ export function computeDecision(item, context = {}) {
   const isLowDollar = systemPrice != null && systemPrice < 10;
   const catalogue = context.catalogue || [];
   const unlistedLowDollar = catalogue.filter(c =>
-    c.status !== 'listed' &&
+    !isItemListed(c) &&
     c.price < 10 &&
     (item.id ? c.id !== item.id : true)  // Only exclude self if we have an id
   ).length;

@@ -506,6 +506,53 @@ export async function listActiveListingsForChannel(client, { gkAssetId, channel 
   return active;
 }
 
+// GK-P0 LISTING RECONCILIATION — read-only. The durable outcome_event
+// ledger is the authoritative source of "this physical asset has an
+// eBay listing". Ownership is enforced in the join itself (current_owner),
+// never filtered afterward, so a foreign principal's listings can never be
+// returned. One summary per (catalogue item, external listing id):
+// SOLD > DELISTED/EXPIRED_UNSOLD > LISTED (LISTED = a LISTED row with no
+// terminal event yet — the same rule listActiveListingsForChannel uses).
+export async function listListingStatesByOwner(client, { principalId, channel = 'ebay' }) {
+  const r = await client.query(
+    `SELECT oe.gk_asset_id, oe.external_listing_id, oe.outcome_type, oe.occurred_at, oe.ask_amount,
+            cil.collection_item_id
+     FROM data1_dev.outcome_event oe
+     JOIN data1_dev.current_owner co ON co.asset_id = oe.gk_asset_id AND co.owner_principal_id = $1
+     JOIN data1_dev.collection_item_link cil ON cil.gk_asset_id = oe.gk_asset_id
+     WHERE oe.channel = $2 AND oe.external_listing_id IS NOT NULL
+     ORDER BY oe.external_listing_id, oe.occurred_at, oe.id`,
+    [principalId, channel]
+  );
+  const groups = new Map();
+  for (const row of r.rows) {
+    const key = `${row.collection_item_id}|${row.external_listing_id}`;
+    const g = groups.get(key) || { rows: [], row };
+    g.rows.push(row);
+    groups.set(key, g);
+  }
+  const out = [];
+  for (const { rows, row } of groups.values()) {
+    const types = new Set(rows.map((x) => x.outcome_type));
+    if (!types.has('LISTED')) continue;
+    const listed = rows.find((x) => x.outcome_type === 'LISTED');
+    const state = types.has('SOLD') ? 'SOLD'
+      : types.has('DELISTED') ? 'DELISTED'
+      : types.has('EXPIRED_UNSOLD') ? 'EXPIRED_UNSOLD'
+      : 'LISTED';
+    out.push({
+      collectionItemId: row.collection_item_id,
+      gkAssetId: row.gk_asset_id,
+      channel,
+      externalListingId: row.external_listing_id,
+      state,
+      askAmount: listed.ask_amount == null ? null : Number(listed.ask_amount),
+      listedAt: new Date(listed.occurred_at).getTime(),
+    });
+  }
+  return out;
+}
+
 // GrailKey Automatic eBay Outcome Reconciler V1 — the read a
 // principal-authenticated HTTP handler needs (list every outcome_event
 // row for one listing, ownership-scoped) that no existing function

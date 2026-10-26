@@ -230,6 +230,20 @@ export async function listMyAssets({ principalId } = {}) {
   }
 }
 
+// GK-P0 LISTING RECONCILIATION — read-only, principal-scoped. Returns the
+// durable per-listing state derived from outcome_event so a refreshed,
+// emptied or second-device client can restore its listing association.
+export async function listMyListingStates({ principalId, channel = 'ebay' } = {}) {
+  requireFields({ principalId }, ['principalId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    return await repo.listListingStatesByOwner(client, { principalId, channel });
+  } finally {
+    client.release();
+  }
+}
+
 // U4.4 / Ruling 46, Case A — read-only, principal-scoped anti-join. See
 // repository.js's own comment for the exact query shape and why it is
 // bounded (never a full-table scan).
