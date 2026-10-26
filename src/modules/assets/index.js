@@ -44,6 +44,7 @@ export {
   listPhysicalOrphans,
   listMyListingStates,
   acquirePublicationMutex,
+  getPublicationIdentity,
   listMissingProjections,
   getLiveIdentityAssignment,
   recordIdentifierDefinition,

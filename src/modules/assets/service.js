@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto';
 import * as repo from './repository.js';
 import { acquireConnection } from './db.js';
 import { checkIdempotencyReplay, claimIdempotencyKey, computeRequestFingerprint } from './idempotency.js';
+import { derivePublicationIdentity } from '../../lib/ebayPublicationIdentity.js';
 import { AssetServiceError, NotFoundError, ConflictError, ValidationFailedError, AuthorizationFailedError, IdempotencyConflictError, PhysicalCopyDecisionRequiredError, PhysicalCopyCandidateCheckUnavailableError, ListingAttemptBlockedError, MediaCapacityExceededError } from './errors.js';
 import { OPERATOR_AUTHORITY_TYPE, RECONCILIATION_POLICY_VERSION, AMBIGUOUS_REVIEW_WINDOW_HOURS, assessListingAttemptGuard, reduceAttemptState, buildApprovalEvidence, evidenceScalars, buildGoverningGradeSnapshot, attemptCorrelation, evaluateOperatorReconciliation, reviewStatus, verifyAuthoritySnapshot, sameCents, toCents } from '../../lib/operatorAuthority.js';
 import { decisionGovernance } from '../../lib/decisionTrust.js';
@@ -2537,25 +2538,36 @@ export async function listAttemptsNeedingReview({ principalId, now } = {}) {
 // release(), by the bounded self-release timer, or -- if the process dies -- by Postgres when the connection drops.
 // It protects against SIMULTANEOUS publication; it is NOT a durable record of an ambiguous provider outcome (the
 // OPERATOR_MANUAL attempt ledger is that, and only for the Q41 path).
-export const PUBLICATION_MUTEX_MAX_HOLD_MS = 240000; // below the 300s function ceiling
-export async function acquirePublicationMutex({ principalId, gkAssetId, channel = 'ebay', maxHoldMs = PUBLICATION_MUTEX_MAX_HOLD_MS } = {}) {
+// Bound on how long one publication may hold the mutex. vercel.json pins api/list-ebay.js maxDuration to 120s, so a
+// live publication can never legitimately outlast this; the margin makes the timer a LEAK backstop only, never a
+// release during a running publication. A second, server-side backstop (idle_in_transaction_session_timeout, set
+// LOCAL to the lock transaction) frees the lock even if this process is frozen or its timers never fire.
+export const PUBLICATION_MUTEX_MAX_HOLD_MS = 150000;
+export const PUBLICATION_MUTEX_SERVER_BACKSTOP_MARGIN_MS = 30000;
+export async function acquirePublicationMutex({ principalId, gkAssetId, channel = 'ebay', maxHoldMs = Number(process.env.GK_PUBLICATION_MUTEX_MAX_HOLD_MS) || PUBLICATION_MUTEX_MAX_HOLD_MS } = {}) {
   requireFields({ principalId, gkAssetId }, ['principalId', 'gkAssetId']);
   requireEnum(channel, ['ebay'], 'channel');
   const client = await acquireConnection();
   let timer = null;
   let ended = false;
+  // If Postgres terminates this idle-in-transaction session (the server-side backstop) the client emits an error;
+  // swallow it so a backstop firing can never become an uncaught exception.
+  const onClientError = () => {};
+  client.on('error', onClientError);
   const end = async () => {
     if (ended) return;
     ended = true;
     if (timer) clearTimeout(timer);
     try { await client.query('ROLLBACK'); } catch { /* connection already gone: the lock is gone with it */ }
-    finally { client.release(); }
+    finally { client.removeListener('error', onClientError); client.release(); }
   };
   try {
     await assertPrincipalActive(client, principalId);
     await assertAssetExists(client, gkAssetId);
     await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
     await client.query('BEGIN');
+    const backstopMs = Math.max(1000, Math.floor(maxHoldMs + PUBLICATION_MUTEX_SERVER_BACKSTOP_MARGIN_MS));
+    await client.query(`SET LOCAL idle_in_transaction_session_timeout = ${backstopMs}`);
     const got = await repo.tryLockAssetPublication(client, { gkAssetId, channel });
     if (!got) { await end(); return { acquired: false, release: async () => {} }; }
     timer = setTimeout(() => { end().catch(() => {}); }, maxHoldMs);
@@ -2564,6 +2576,23 @@ export async function acquirePublicationMutex({ principalId, gkAssetId, channel 
   } catch (e) {
     await end();
     throw e;
+  }
+}
+
+// GK-P0 PROVIDER IDEMPOTENCY -- the durable, deterministic publication identity (Item.UUID + Item.SKU) for the
+// NEXT publication of an asset on a channel. See src/lib/ebayPublicationIdentity.js. Read-only; no schema.
+export async function getPublicationIdentity({ principalId, gkAssetId, channel = 'ebay' } = {}) {
+  requireFields({ principalId, gkAssetId }, ['principalId', 'gkAssetId']);
+  requireEnum(channel, ['ebay'], 'channel');
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertAssetExists(client, gkAssetId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    const generation = await repo.countTerminalListingsForChannel(client, { gkAssetId, channel });
+    return derivePublicationIdentity({ gkAssetId, channel, generation });
+  } finally {
+    client.release();
   }
 }
 

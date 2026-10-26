@@ -33,6 +33,7 @@ export const resolveOwnedAssetForListing = async () => { rec('resolveOwnedAssetF
 export const resolveCollectionItemLink = async () => { rec('resolveCollectionItemLink'); return undefined; };
 // GK-P0 READY-RACE: the publication mutex is a DB-level primitive; this DB-free harness always grants it (and it is not a WRITE).
 export const acquirePublicationMutex = async () => { rec('acquirePublicationMutex'); return { acquired: true, release: async () => {} }; };
+export const getPublicationIdentity = async () => { rec('getPublicationIdentity'); return { uuid: '0123456789ABCDEF0123456789ABCDEF', sku: 'GK-0123456789ABCDEF0123456789ABCDEF', generation: 0, scheme: 'stub' }; };
 
 // Writes / provider-side (every one of these must stay at ZERO on a refusal).
 export const authorizeOperatorManualListing = async () => { rec('WRITE:authorizeOperatorManualListing'); return { attemptId: 'a1b2c3d4-e5f6-4789-8abc-def012345678', providerCorrelation: { uuid: 'A1B2C3D4E5F647898ABCDEF012345678', sku: 'GK-A1B2C3D4E5F647898ABCDEF012345678' } }; };

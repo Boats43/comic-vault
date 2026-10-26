@@ -121,7 +121,9 @@ try {
   createdListings.push(res.body?.listingId);
   ok(res.statusCode === 200 && res.body.ok === true && adds() === 1, `an engine-READY listing still succeeds (${res.statusCode})`);
   ok(res.body.authority === undefined && (await ledgerRows(r1.gkAssetId)) === 0, 'it writes NO authority / attempt rows (the READY path is unchanged and has no ledger)');
-  ok(!lastAddBody.includes('<UUID>') && !lastAddBody.includes('<SKU>'), 'its AddFixedPriceItem carries no UUID/SKU correlation');
+  // GK-P0 PROVIDER IDEMPOTENCY (2026-10-26): superseded on purpose. The READY path now carries a DETERMINISTIC asset+channel+generation
+  // Item.UUID and SKU (src/lib/ebayPublicationIdentity.js) so a lost response / crash retry is a provider-side 488, never a second listing.
+  ok(/<UUID>[0-9A-F]{32}<\/UUID>/.test(lastAddBody) && /<SKU>GK-[0-9A-F]{32}<\/SKU>/.test(lastAddBody), 'its AddFixedPriceItem carries the deterministic 32-hex UUID and GK-<UUID> SKU (GK-P0)');
 
   console.log('\n-- SECURE CONTRACT: forged request-borne authority is rejected; only a server-issued, asset-bound receipt authorises --');
   const rf = await mint('forged', { receipt: false });

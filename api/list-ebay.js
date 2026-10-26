@@ -55,9 +55,10 @@ import { uploadImageViaMediaApi, MediaApiError, hasMediaScope } from "../src/lib
 // endpoint has no mandatory GrailKey auth today, and this dispatch does
 // not add one).
 import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
-import { acquirePublicationMutex, recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, resolveCollectionItemLink, getCanonicalCollectionItemIdForAsset, getOperatorActionForListing, getAssetMediaContentHashes, authorizeOperatorManualListing, recordMarketplaceAttemptPhase, ListingAttemptBlockedError, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
+import { acquirePublicationMutex, getPublicationIdentity, recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, resolveCollectionItemLink, getCanonicalCollectionItemIdForAsset, getOperatorActionForListing, getAssetMediaContentHashes, authorizeOperatorManualListing, recordMarketplaceAttemptPhase, ListingAttemptBlockedError, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
 import { sanitizeQ41Ack, buildAckWarnings, classifyAddItemResponse } from "../src/lib/operatorAuthority.js";
 import { attemptListedOutcome } from "../src/lib/marketplaceOutcomeBridge.js";
+import { parseDuplicateUuidError, parseListingIdentity, evaluateRecoveredListing } from "../src/lib/ebayPublicationIdentity.js";
 import { assertListingAuthorized, ListingPreflightFailedError } from "../src/lib/inventoryListingPreflight.js";
 // GK-P0 -- the OPERATOR-ONLY gate for every marketplace-mutating route (see src/lib/marketplaceOperatorGate.js).
 import { requireMarketplaceOperator } from "../src/lib/marketplaceOperatorGate.js";
@@ -584,6 +585,22 @@ const verifySellerAccount = async (headers) => {
 
   console.log(`[ebay] GetUser account/token validity check PASSED (site=${site || "?"}).`);
   return { userId, site };
+};
+
+// GK-P0 PROVIDER IDEMPOTENCY -- read-only GetItem used ONLY to authenticate a listing that a duplicate-UUID (488)
+// refusal points at. Returns the parsed identity, or throws on transport failure (caller treats that as unverified).
+const fetchListingIdentity = async (ebayItemId, headers) => {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ItemID>${xmlEscape(ebayItemId)}</ItemID>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetItemRequest>`;
+  const r = await fetch(EBAY_ENDPOINT, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "text/xml", "X-EBAY-API-CALL-NAME": "GetItem" },
+    body: xml,
+  });
+  return parseListingIdentity(await r.text());
 };
 
 const extractBearerToken = (req) => {
@@ -1260,6 +1277,17 @@ async function handleListEbay(req, res, ctx) {
       res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Inventory Authority check failed unexpectedly.' });
       return;
     }
+    // GK-P0 PROVIDER IDEMPOTENCY -- the durable Item.UUID/SKU for THIS logical publication: a pure function of
+    // (asset, channel, listing generation). Identical across crashes, lost responses and new HTTP requests; changes
+    // only after the previous listing is terminal. Fail closed: no identity, no provider call.
+    let publicationIdentity;
+    try {
+      publicationIdentity = await getPublicationIdentity({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId, channel: 'ebay' });
+    } catch (e) {
+      console.error('[ebay] publication identity could not be derived — aborting before any eBay call:', e?.code || e?.name, e?.message || e);
+      res.status(503).json({ error: 'PUBLICATION_IDENTITY_UNAVAILABLE', message: 'The durable publication identity could not be derived, so nothing was listed. Please retry.' });
+      return;
+    }
     // GK-284 -- DURABLE OPERATOR_MANUAL AUTHORITY. When the engine's own authority is NOT READY, the only
     // way to reach a marketplace write is the operator's exact-price acknowledgment (Q41). That approval is
     // recorded durably HERE -- after every local precondition (ownership, inventory, duplicate and attempt
@@ -1327,7 +1355,7 @@ async function handleListEbay(req, res, ctx) {
       bestOffer: item.bestOffer === true, // explicit opt-in only; default OFF
       specifics: buildItemSpecificsFromMetadata(toBuyerSafeListingFacts(item), aspectMeta, { isTPB: item.isTPB === true, isMagazine: item.isMagazine === true }),
       shippingService: null,
-      correlation: manualAttempt ? manualAttempt.providerCorrelation : null, // GK-284 / A3: Item.UUID + Item.SKU label
+      correlation: manualAttempt ? manualAttempt.providerCorrelation : publicationIdentity, // GK-284 / A3 (Q41: attempt-derived) | GK-P0 (READY: asset+channel+generation-derived): Item.UUID + Item.SKU
     };
 
     // GK-265 PHASE 3 — the authenticated, ownership-verified principal's own eBay User access token
@@ -1410,7 +1438,7 @@ async function handleListEbay(req, res, ctx) {
     // (and this handler's outer catch turns it into a 500) if the token
     // is invalid or the account cannot be confirmed — the real listing
     // call below never runs in that case.
-    await verifySellerAccount(singleHeaders);
+    const sellerAccount = await verifySellerAccount(singleHeaders);
 
     // Step 2: create the listing, including the hosted picture URLs.
     const xml = buildXml(item, pictureUrls, listingPlan);
@@ -1450,7 +1478,41 @@ async function handleListEbay(req, res, ctx) {
     const attemptClass = manualAttempt
       ? classifyAddItemResponse({ networkError: providerNetworkError, httpStatus: ebayRes ? ebayRes.status : null, responseXml })
       : null;
-    if (manualAttempt && attemptClass.kind === 'AMBIGUOUS') {
+    // GK-P0 PROVIDER IDEMPOTENCY -- error 488 "Duplicate UUID used." means a listing for THIS publication identity
+    // already exists at eBay (a lost response, a crash after the provider call, a retry). It is NOT proof by itself:
+    // the ItemID is taken from the documented structured ErrorParameters, then the listing is read back and must
+    // belong to the expected seller, carry this identity's SKU, and be Active. Only then is the ORIGINAL listing
+    // reconciled and persisted. Anything else is preserved as AMBIGUOUS and no second publication is attempted.
+    let recovered = null;
+    const duplicateUuid = (!providerNetworkError && responseXml && !extractTag(responseXml, 'ItemID')) ? parseDuplicateUuidError(responseXml) : { isDuplicateUuid: false };
+    if (duplicateUuid.isDuplicateUuid) {
+      let verdict;
+      if (!duplicateUuid.itemId) {
+        verdict = { verified: false, reason: duplicateUuid.reason };
+      } else {
+        let readBack = null;
+        try { readBack = await fetchListingIdentity(duplicateUuid.itemId, singleHeaders); }
+        catch (e) { console.error('[ebay] duplicate-UUID read-back (GetItem) failed:', e?.message || e); }
+        verdict = evaluateRecoveredListing({ expectedItemId: duplicateUuid.itemId, expectedSellerUserId: sellerAccount?.userId, expectedSku: listingPlan.correlation.sku, identity: readBack });
+      }
+      if (verdict.verified) {
+        recovered = { itemId: duplicateUuid.itemId, reason: verdict.reason };
+        console.warn(`[ebay] duplicate-UUID (488) RECOVERED: existing listing ${duplicateUuid.itemId} verified (${verdict.reason}) — no new listing created`);
+      } else {
+        console.error(`[ebay] duplicate-UUID (488) NOT verified (${verdict.reason}) — preserving AMBIGUOUS, refusing a blind second publication`);
+        await recordAttempt('AMBIGUOUS', { detail: { reason: `duplicate-uuid-unverified:${verdict.reason}`, httpStatus: ebayRes ? ebayRes.status : undefined, errorCodes: ['488'] } });
+        res.status(502).json({
+          error: 'LISTING_OUTCOME_UNKNOWN',
+          code: 'DUPLICATE_UUID_UNVERIFIED',
+          message: 'eBay reports a listing already exists for this publication, but it could not be verified as yours. Nothing new was listed. Check Seller Hub for the label below before trying again.',
+          reason: verdict.reason,
+          correlation: { sku: listingPlan.correlation.sku },
+          ...(manualAttempt ? { attemptId: manualAttempt.attemptId } : {}),
+        });
+        return;
+      }
+    }
+    if (manualAttempt && !recovered && attemptClass.kind === 'AMBIGUOUS') {
       // The provider may or may not have created the listing. Record that explicitly; a retry is BLOCKED
       // by the ledger until the attempt is reconciled with the marketplace.
       console.error(`[ebay] AddFixedPriceItem outcome UNKNOWN (${attemptClass.reason}) — attempt ${manualAttempt.attemptId} marked AMBIGUOUS; retry blocked until reconciled`);
@@ -1465,9 +1527,9 @@ async function handleListEbay(req, res, ctx) {
       return;
     }
 
-    const ack = extractTag(responseXml, "Ack");
-    const itemId = extractTag(responseXml, "ItemID");
-    const severity = extractTag(responseXml, "SeverityCode");
+    const ack = recovered ? "Success" : extractTag(responseXml, "Ack");
+    const itemId = recovered ? recovered.itemId : extractTag(responseXml, "ItemID");
+    const severity = recovered ? "Info" : extractTag(responseXml, "SeverityCode");
 
     // Success if eBay returned an ItemID, regardless of warnings.
     // Fail only when no ItemID came back (true Failure / PartialFailure with no item).
@@ -1539,6 +1601,7 @@ async function handleListEbay(req, res, ctx) {
       ...(manualAttempt ? { authority: { type: manualAttempt.authorityType, attemptId: manualAttempt.attemptId, authorityEventId: manualAttempt.authorityEventId, engineRecommendation: manualAttempt.engineRecommendation, approvedAmount: manualAttempt.approvedAmount } } : {}),
       pictureCount: pictureUrls.length,
       ack: ack || "Success",
+      ...(recovered ? { recovered: true, recoveredVia: 'duplicate-uuid-488', recoveryEvidence: recovered.reason } : {}),
     });
   } catch (err) {
     res.status(500).json({ error: err?.message || "Server error" });

@@ -1020,6 +1020,18 @@ export async function listAssetMediaContentHashes(client, { gkAssetId }) {
 // 40284 = attempt-ledger serialisation and 40291 = media capacity) taken with pg_try_advisory_xact_lock: it NEVER
 // waits. true = this transaction now owns the right to publish this asset on this channel until it ends;
 // false = another request holds it. Cross-instance by construction (the lock lives in Postgres, not in memory).
+// GK-P0 PROVIDER IDEMPOTENCY -- the listing GENERATION of an asset on a channel: how many distinct listings have
+// already reached a terminal outcome. Monotonic (the ledger is append-only in application code), so it is stable
+// across crashes and retries of one logical publication and increases only after a listing is terminal.
+export async function countTerminalListingsForChannel(client, { gkAssetId, channel }) {
+  const r = await client.query(
+    `SELECT count(DISTINCT external_listing_id)::int AS n FROM data1_dev.outcome_event
+     WHERE gk_asset_id = $1 AND channel = $2 AND external_listing_id IS NOT NULL AND outcome_type IN ('SOLD', 'DELISTED', 'EXPIRED_UNSOLD')`,
+    [gkAssetId, channel]
+  );
+  return r.rows[0].n;
+}
+
 export const PUBLICATION_MUTEX_LOCK_NAMESPACE = 40295;
 export async function tryLockAssetPublication(client, { gkAssetId, channel }) {
   const r = await client.query(`SELECT pg_try_advisory_xact_lock(hashtextextended($1::text, ${PUBLICATION_MUTEX_LOCK_NAMESPACE})) AS got`, [`${gkAssetId}|${channel}`]);
