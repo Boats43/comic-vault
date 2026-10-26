@@ -38,7 +38,8 @@
 // for SOLD (an ended-unsold listing is never re-opened for evaluation);
 // makes any eBay WRITE call (GET only, throughout).
 
-import { findOrderByLegacyItemId, getFinancialTransactionsForOrder, normalizeTransactionToComponents, evaluateOrderSaleEvidence } from './ebayFulfillmentFinances.js';
+import { searchOrdersForListing, fetchFinancialTransactionsForOrder, normalizeTransactionToComponents, evaluateOrderSaleEvidence } from './ebayFulfillmentFinances.js';
+import { classifyEconomics, buildEconomicsView } from './economicsView.js';
 import { recordOutcomeEvent, recordEconomicsComponent, getOutcomeEconomics, getOutcomeEventsForListing, getHistoricalValuationForDecision } from '../modules/assets/index.js';
 import { scorePrediction, resolveHistoricalAnchor } from './predictionErrorScoring.js';
 import { markSold as markInventorySold, ConflictError as InventoryConflictError } from '../modules/inventory/index.js';
@@ -47,18 +48,15 @@ export const DEFAULT_LOOKBACK_DAYS = 180;
 const TERMINAL_UNSOLD_TYPES = new Set(['DELISTED', 'EXPIRED_UNSOLD']);
 
 /**
- * classifyEconomicsCompleteness — never claims certainty a refund/credit
- * cannot still arrive; only distinguishes what has actually been recorded.
- *   PENDING — zero components beyond order_reference (gross unknown)
- *   PARTIAL — gross known, fees not yet
- *   KNOWN   — gross AND fees both known (the strongest state this system
- *             claims; shipping/refund/credit may still post later)
+ * classifyEconomicsCompleteness -- OUTCOME #1 FIRST SALE: delegates to src/lib/economicsView.js (the one place that decides
+ * KNOWN vs UNKNOWN). Never claims certainty that a refund/credit cannot still arrive.
+ *   PENDING    -- no gross recorded yet
+ *   INCOMPLETE -- gross known; fees and/or postage still UNKNOWN (no net is produced)
+ *   COMPLETE   -- gross, fees and postage all KNOWN (an explicit verified $0 counts as KNOWN)
+ * (Formerly PENDING / PARTIAL / KNOWN, where KNOWN meant only gross+fees and the net silently read an absent postage as $0.)
  */
 export function classifyEconomicsCompleteness(economics) {
-  if (!economics?.hasAnyComponent) return 'PENDING';
-  const types = new Set((economics.components || []).map((c) => c.component_type));
-  if (types.has('gross') && types.has('fees')) return 'KNOWN';
-  return 'PARTIAL';
+  return classifyEconomics(economics).status;
 }
 
 /**
@@ -73,18 +71,18 @@ export async function ingestFinancialTransactionsForOutcome({ principalId, outco
   const before = await getOutcomeEconomics({ principalId, outcomeEventId });
   const alreadyHasGross = before.components.some((c) => c.component_type === 'gross');
 
-  let transactions;
-  try {
-    transactions = await getFinancialTransactionsForOrder({ accessToken, orderId });
-  } catch (e) {
-    return { written: 0, skippedGross: 0, transactionsSeen: 0, error: e.message };
-  }
+  // Bounded, de-duplicated by the provider's transactionId. An incomplete read still ingests what eBay really returned
+  // (those rows are genuine) but is reported, so economics are never presented as final off a partial list.
+  const fetched = await fetchFinancialTransactionsForOrder({ accessToken, orderId });
+  const transactions = fetched.transactions;
 
   let written = 0;
   let skippedGross = 0;
   for (const txn of transactions) {
     for (const c of normalizeTransactionToComponents(txn)) {
       if (c.componentType === 'gross' && alreadyHasGross) { skippedGross += 1; continue; }
+      // Every component carries a key derived from eBay's own transactionId, so a repeated run over the same
+      // transactions replays (recordEconomicsComponent's GK-163 law) instead of duplicating a fee, refund or label.
       await recordEconomicsComponent({
         principalId, outcomeEventId, componentType: c.componentType, amount: c.amount, currency: c.currency,
         source: 'api-sourced', sourceReference: c.sourceReference, externalOrderId: c.externalOrderId,
@@ -93,7 +91,11 @@ export async function ingestFinancialTransactionsForOutcome({ principalId, outco
       written += 1;
     }
   }
-  return { written, skippedGross, transactionsSeen: transactions.length };
+  return {
+    written, skippedGross, transactionsSeen: transactions.length,
+    financesComplete: fetched.complete,
+    ...(fetched.complete ? {} : { error: fetched.reason, incomplete: true }),
+  };
 }
 
 /**
@@ -146,7 +148,7 @@ export async function scoreOutcomePrediction({ principalId, gkAssetId, listedRow
   // system forbids. realizedGross itself is always trustworthy once
   // economicsStatus is not 'PENDING' — a real gross component exists by
   // construction.
-  const realizedNet = economicsStatus === 'KNOWN' ? economics.realizedNet : null;
+  const realizedNet = economicsStatus === 'COMPLETE' ? economics.realizedNet : null;
   const scored = scorePrediction({
     predictedValue: resolved.predictedValue,
     askAmount,
@@ -227,7 +229,7 @@ export async function reconcileEbayOutcome({ principalId, gkAssetId, externalLis
     const economicsStatus = classifyEconomicsCompleteness(economics);
     const predictionError = await scoreOutcomePrediction({ principalId, gkAssetId, listedRow, soldOccurredAt: soldRow.occurred_at, economics, economicsStatus });
     const inventory = await attemptInventoryMarkSold({ principalId, gkAssetId, channel: soldRow.channel, orderId });
-    return { status: 'ALREADY_SOLD_ENRICHED', outcomeEventId: soldRow.id, orderId, ...ingestResult, economicsStatus, economics, predictionError, inventory };
+    return { status: 'ALREADY_SOLD_ENRICHED', outcomeEventId: soldRow.id, orderId, soldAt: new Date(soldRow.occurred_at).getTime(), ...ingestResult, economicsStatus, economics, economicsView: buildEconomicsView(economics), predictionError, inventory };
   }
 
   const terminalUnsold = events.find((e) => TERMINAL_UNSOLD_TYPES.has(e.outcome_type));
@@ -241,30 +243,35 @@ export async function reconcileEbayOutcome({ principalId, gkAssetId, externalLis
   const sinceIso = windowStart.toISOString();
   const untilIso = untilDate.toISOString();
 
-  let order;
-  try {
-    order = await findOrderByLegacyItemId({ accessToken, legacyItemId: externalListingId, sinceIso, untilIso });
-  } catch (e) {
-    return { status: 'ORDER_LOOKUP_FAILED', reason: e.message };
+  // OUTCOME #1 FIRST SALE -- bounded, paginated, exact-ItemID order search. A search that could not be completed is a
+  // verification FAILURE (retryable), never "no order yet".
+  const search = await searchOrdersForListing({ accessToken, legacyItemId: externalListingId, sinceIso, untilIso });
+  const searchInfo = { pagesFetched: search.pagesFetched, ordersScanned: search.ordersScanned, total: search.total, complete: search.complete };
+  if (search.failed && search.matches.length === 0) {
+    return { status: 'ORDER_LOOKUP_FAILED', retryable: true, reason: search.reason, search: searchInfo };
+  }
+  if (!search.complete && search.matches.length === 0) {
+    return { status: 'ORDER_SEARCH_INCOMPLETE', retryable: true, reason: search.reason, search: searchInfo, window: { sinceIso, untilIso } };
   }
 
-  const evidence = evaluateOrderSaleEvidence(order);
-  if (evidence.verdict === 'NO_ORDER') {
-    return { status: 'NO_ORDER_YET', reason: evidence.reason, window: { sinceIso, untilIso } };
+  const picked = selectQualifyingOrder(search.matches);
+  if (picked.kind === 'NO_ORDER') {
+    return { status: 'NO_ORDER_YET', reason: 'no Fulfillment order names this eBay ItemID in the searched window', window: { sinceIso, untilIso }, search: searchInfo };
   }
-  if (evidence.verdict === 'CANCELLED') {
-    return { status: 'CANCELLED_NOT_SOLD', reason: evidence.reason, orderId: order.orderId };
+  if (picked.kind === 'CANCELLED') {
+    return { status: 'CANCELLED_NOT_SOLD', reason: picked.evidence.reason, orderId: picked.order.orderId, search: searchInfo };
   }
-  if (evidence.verdict === 'AMBIGUOUS') {
-    return { status: 'AMBIGUOUS_NOT_SOLD', reason: evidence.reason, orderId: order.orderId };
+  if (picked.kind === 'AMBIGUOUS') {
+    return { status: 'AMBIGUOUS_NOT_SOLD', reason: picked.evidence.reason, orderId: picked.order.orderId, search: searchInfo };
+  }
+  if (picked.kind === 'MULTIPLE_PAID') {
+    return { status: 'MULTIPLE_PAID_ORDERS', reason: 'more than one paid order names this one-of-one listing -- manual review, nothing recorded', orderIds: picked.orderIds, search: searchInfo };
   }
 
   // CONFIRMED_SALE
+  const order = picked.order;
   const occurredAt = order.creationDate ? new Date(order.creationDate) : new Date();
-  // outcome_event.days_to_sale is an INT column — round, never pass a
-  // float (Postgres rejects it outright; caught live by this dispatch's
-  // own proof, the same latent shape exists unrounded in
-  // scripts/observe-outcome1-listing.mjs, fixed there too, see its header).
+  // outcome_event.days_to_sale is an INT column -- round, never pass a float.
   const daysToSale = Math.round((occurredAt.getTime() - listedAt.getTime()) / (24 * 60 * 60 * 1000));
   const grossFromOrder = order.pricingSummary?.total?.value != null ? parseFloat(order.pricingSummary.total.value) : null;
 
@@ -291,7 +298,24 @@ export async function reconcileEbayOutcome({ principalId, gkAssetId, externalLis
   const inventory = await attemptInventoryMarkSold({ principalId, gkAssetId, channel: listedRow.channel, orderId: order.orderId });
 
   return {
-    status: 'SOLD_CONFIRMED', outcomeEventId: soldResult.outcomeEventId, orderId: order.orderId,
-    ...ingestResult, economicsStatus, economics, predictionError, inventory,
+    status: 'SOLD_CONFIRMED', outcomeEventId: soldResult.outcomeEventId, orderId: order.orderId, soldAt: occurredAt.getTime(), search: searchInfo,
+    ...ingestResult, economicsStatus, economics, economicsView: buildEconomicsView(economics), predictionError, inventory,
   };
+}
+
+/**
+ * selectQualifyingOrder -- pure. Given every order whose line items name THIS listing's ItemID, decide which (if any) is
+ * the sale. Exactly one CONFIRMED_SALE (paid, not cancelled) qualifies. Two or more paid orders for a one-of-one listing
+ * are never silently resolved. With no paid order: an ambiguous-payment order is reported before a cancelled one.
+ */
+export function selectQualifyingOrder(matches) {
+  const evaluated = (Array.isArray(matches) ? matches : []).map((order) => ({ order, evidence: evaluateOrderSaleEvidence(order) }));
+  const confirmed = evaluated.filter((e) => e.evidence.verdict === 'CONFIRMED_SALE');
+  if (confirmed.length === 1) return { kind: 'CONFIRMED_SALE', order: confirmed[0].order, evidence: confirmed[0].evidence };
+  if (confirmed.length > 1) return { kind: 'MULTIPLE_PAID', orderIds: confirmed.map((e) => e.order.orderId) };
+  const ambiguous = evaluated.find((e) => e.evidence.verdict === 'AMBIGUOUS');
+  if (ambiguous) return { kind: 'AMBIGUOUS', order: ambiguous.order, evidence: ambiguous.evidence };
+  const cancelled = evaluated.find((e) => e.evidence.verdict === 'CANCELLED');
+  if (cancelled) return { kind: 'CANCELLED', order: cancelled.order, evidence: cancelled.evidence };
+  return { kind: 'NO_ORDER' };
 }

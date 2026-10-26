@@ -43,6 +43,7 @@
 // only; every writer below passes it through as `occurredAt ?? null` —
 // never substitutes "now" or infers it from recorded_at.
 
+import { computeRealizedNet, classifyEconomics } from '../../lib/economicsView.js';
 import { NotFoundError, MediaCapacityExceededError } from './errors.js';
 
 const uuidv7 = async (client) => (await client.query('SELECT uuidv7() as id')).rows[0].id;
@@ -515,7 +516,7 @@ export async function listActiveListingsForChannel(client, { gkAssetId, channel 
 // terminal event yet — the same rule listActiveListingsForChannel uses).
 export async function listListingStatesByOwner(client, { principalId, channel = 'ebay' }) {
   const r = await client.query(
-    `SELECT oe.gk_asset_id, oe.external_listing_id, oe.outcome_type, oe.occurred_at, oe.ask_amount,
+    `SELECT oe.id AS outcome_id, oe.gk_asset_id, oe.external_listing_id, oe.outcome_type, oe.occurred_at, oe.ask_amount,
             cil.collection_item_id
      FROM data1_dev.outcome_event oe
      JOIN data1_dev.current_owner co ON co.asset_id = oe.gk_asset_id AND co.owner_principal_id = $1
@@ -540,7 +541,9 @@ export async function listListingStatesByOwner(client, { principalId, channel = 
       : types.has('DELISTED') ? 'DELISTED'
       : types.has('EXPIRED_UNSOLD') ? 'EXPIRED_UNSOLD'
       : 'LISTED';
+    const soldRow = rows.find((x) => x.outcome_type === 'SOLD');
     out.push({
+      ...(state === 'SOLD' && soldRow ? { soldOutcomeEventId: soldRow.outcome_id, soldAt: new Date(soldRow.occurred_at).getTime() } : {}),
       collectionItemId: row.collection_item_id,
       gkAssetId: row.gk_asset_id,
       channel,
@@ -590,36 +593,40 @@ export async function listEconomicsComponents(client, outcomeEventId) {
   return r.rows;
 }
 
-// getRealizedEconomics — the ONLY place realized net is ever computed.
-// Pure derivation from persisted components, every time, never a stored
-// field read back. sign convention: gross and credit ADD, fees/shipping/
-// refund SUBTRACT — callers store fees/shipping/refund as positive
-// magnitudes by convention (the table itself does not enforce a sign,
-// proven deliberately permissive in the migration-contract test).
+// getRealizedEconomics — the ONLY place realized net is ever computed (via src/lib/economicsView.js).
+// Pure derivation from persisted components, every time, never a stored field read back.
+// sign convention: gross and credit ADD, fees/shipping/refund SUBTRACT — callers store fees/shipping/refund as positive
+// magnitudes by convention (the table itself does not enforce a sign).
+//
+// OUTCOME #1 FIRST SALE (2026-10-26) -- UNKNOWN IS NOT ZERO. This used to COALESCE every absent component to 0 and sum,
+// so a known gross with an unarrived fee produced realizedNet = gross. Now: a component TYPE with no row is UNKNOWN (null,
+// present[type] === false); a row with amount 0.00 is a verified zero (present, 0). realizedNet is null unless gross, fees
+// and shipping are all present (src/lib/economicsView.js). No schema change: presence is a row count over the same table.
 export async function getRealizedEconomics(client, outcomeEventId) {
   const r = await client.query(
-    `SELECT
-       COALESCE(SUM(amount) FILTER (WHERE component_type = 'gross'), 0)   AS gross,
-       COALESCE(SUM(amount) FILTER (WHERE component_type = 'fees'), 0)    AS fees,
-       COALESCE(SUM(amount) FILTER (WHERE component_type = 'shipping'), 0) AS shipping,
-       COALESCE(SUM(amount) FILTER (WHERE component_type = 'refund'), 0)  AS refund,
-       COALESCE(SUM(amount) FILTER (WHERE component_type = 'credit'), 0)  AS credit,
-       count(*) FILTER (WHERE component_type = 'gross') AS gross_row_count
-     FROM data1_dev.outcome_economics_component WHERE outcome_event_id = $1`,
+    `SELECT component_type, count(*)::int AS n, SUM(amount) AS total
+     FROM data1_dev.outcome_economics_component
+     WHERE outcome_event_id = $1 AND amount IS NOT NULL AND component_type IN ('gross','fees','shipping','refund','credit')
+     GROUP BY component_type`,
     [outcomeEventId]
   );
-  const row = r.rows[0];
-  const gross = Number(row.gross), fees = Number(row.fees), shipping = Number(row.shipping),
-    refund = Number(row.refund), credit = Number(row.credit);
+  const present = { gross: false, fees: false, shipping: false, refund: false, credit: false };
+  const totals = { gross: null, fees: null, shipping: null, refund: null, credit: null };
+  for (const row of r.rows) {
+    present[row.component_type] = Number(row.n) > 0;
+    totals[row.component_type] = Number(row.n) > 0 ? Number(row.total) : null;
+  }
   const orderRef = await client.query(
     `SELECT external_order_id FROM data1_dev.outcome_economics_component
      WHERE outcome_event_id = $1 AND external_order_id IS NOT NULL ORDER BY occurred_at LIMIT 1`,
     [outcomeEventId]
   );
   return {
-    hasAnyComponent: Number(row.gross_row_count) > 0,
-    gross, fees, shipping, refund, credit,
-    realizedNet: gross - fees - shipping - refund + credit,
+    hasAnyComponent: present.gross,
+    present,
+    ...totals,
+    realizedNet: computeRealizedNet(totals, present),
+    missing: classifyEconomics({ hasAnyComponent: present.gross, present, components: [], ...totals }).missing,
     externalOrderId: orderRef.rows[0]?.external_order_id ?? null,
   };
 }

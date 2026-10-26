@@ -218,7 +218,7 @@ Prediction error REFUSED (GK-276) — the anchored valuation's provenance is ${p
       // Only a real, both-gross-and-fees-known 'KNOWN' economics state
       // may report a net — otherwise a still-missing fee would silently
       // COALESCE to $0 inside economics.realizedNet, a fabrication.
-      realizedNet: economicsStatus === 'KNOWN' ? economics.realizedNet : null,
+      realizedNet: economicsStatus === 'COMPLETE' ? economics.realizedNet : null,
       listedAt: listedRow.occurred_at,
       realizedAt: soldRow.occurred_at,
       isCensored: false,

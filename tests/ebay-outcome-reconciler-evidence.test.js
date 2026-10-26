@@ -107,16 +107,20 @@ test('only order_reference recorded -> PENDING (no gross yet)', () => {
   assertEqual(classifyEconomicsCompleteness({ hasAnyComponent: false, components: [{ component_type: 'order_reference' }] }), 'PENDING');
 });
 
-test('gross recorded, fees not yet -> PARTIAL', () => {
-  assertEqual(classifyEconomicsCompleteness({ hasAnyComponent: true, components: [{ component_type: 'gross' }] }), 'PARTIAL');
+test('gross recorded, fees not yet -> INCOMPLETE', () => {
+  assertEqual(classifyEconomicsCompleteness({ hasAnyComponent: true, components: [{ component_type: 'gross' }] }), 'INCOMPLETE');
 });
 
-test('gross AND fees both recorded -> KNOWN', () => {
-  assertEqual(classifyEconomicsCompleteness({ hasAnyComponent: true, components: [{ component_type: 'gross' }, { component_type: 'fees' }] }), 'KNOWN');
+test('gross AND fees but NO postage -> still INCOMPLETE (postage is required for a net; never read as $0)', () => {
+  assertEqual(classifyEconomicsCompleteness({ hasAnyComponent: true, components: [{ component_type: 'gross' }, { component_type: 'fees' }] }), 'INCOMPLETE');
 });
 
-test('gross, fees, AND a later refund -> still KNOWN (refund does not downgrade completeness)', () => {
-  assertEqual(classifyEconomicsCompleteness({ hasAnyComponent: true, components: [{ component_type: 'gross' }, { component_type: 'fees' }, { component_type: 'refund' }] }), 'KNOWN');
+test('gross, fees AND postage recorded -> COMPLETE', () => {
+  assertEqual(classifyEconomicsCompleteness({ hasAnyComponent: true, components: [{ component_type: 'gross' }, { component_type: 'fees' }, { component_type: 'shipping' }] }), 'COMPLETE');
+});
+
+test('gross, fees, postage, AND a later refund -> still COMPLETE (a refund does not downgrade completeness)', () => {
+  assertEqual(classifyEconomicsCompleteness({ hasAnyComponent: true, components: [{ component_type: 'gross' }, { component_type: 'fees' }, { component_type: 'shipping' }, { component_type: 'refund' }] }), 'COMPLETE');
 });
 
 test('null/undefined economics object fails safely to PENDING, never throws', () => {

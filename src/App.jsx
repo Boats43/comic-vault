@@ -1,5 +1,7 @@
 import { Component, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { isItemListed, getItemEbayUrl, normalizeListingStatus, applyProviderStatus, reconcileCatalogueWithDurableListings } from "./lib/listingState.js";
+import { interpretSaleCheck, formatKnownAmount, buildPostageRequest, VERIFY_ERROR_MESSAGE } from "./lib/saleCheck.js";
+import { buildEconomicsView } from "./lib/economicsView.js";
 import {
   getAllComics,
   putComic,
@@ -4127,6 +4129,8 @@ export function CollectionDetail({
   onDelete,
   onList,
   onSyncEbay,
+  onCheckForSale,
+  onLoadSaleEconomics,
   onRefreshMarket,
   onReIdentify,
   onManualCorrect,
@@ -4172,6 +4176,13 @@ export function CollectionDetail({
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState(null);
   const [syncSuccess, setSyncSuccess] = useState(null);
+  // OUTCOME #1 FIRST SALE -- Check for Sale / verified-sale economics / off-eBay postage entry (all transient UI state).
+  const [saleChecking, setSaleChecking] = useState(false);
+  const [saleResult, setSaleResult] = useState(null);
+  const [postageAmount, setPostageAmount] = useState("");
+  const [postageRef, setPostageRef] = useState("");
+  const [postageBusy, setPostageBusy] = useState(false);
+  const [postageMsg, setPostageMsg] = useState(null);
   const [expandedPhoto, setExpandedPhoto] = useState(null);
   const [ppInput, setPpInput] = useState(item.purchasePrice != null ? String(item.purchasePrice) : "");
   const [listPrice, setListPrice] = useState(() => getAuthorityPrice(item)); // v0-E: use decision.price when available
@@ -4564,6 +4575,49 @@ export function CollectionDetail({
       setSyncing(false);
     }
   };
+
+  // OUTCOME #1 FIRST SALE -- "Check for Sale": one authenticated call to the existing reconciler. The card changes ONLY when
+  // the reconciler verified a paid eBay order (src/lib/saleCheck.js returns patch === null for every other outcome).
+  const handleCheckForSale = async () => {
+    if (!onCheckForSale || saleChecking) return;
+    setSaleChecking(true);
+    setSaleResult(null);
+    try {
+      setSaleResult(await onCheckForSale(item));
+    } catch {
+      setSaleResult({ kind: "VERIFY_ERROR", tone: "error", message: VERIFY_ERROR_MESSAGE, retryable: true });
+    } finally {
+      setSaleChecking(false);
+    }
+  };
+  const handleRecordPostage = async () => {
+    const built = buildPostageRequest({ outcomeEventId: item.soldOutcomeEventId, orderId: item.soldOrderId, amount: postageAmount, reference: postageRef });
+    if (built.error) { setPostageMsg({ tone: "error", text: built.error }); return; }
+    setPostageBusy(true);
+    setPostageMsg(null);
+    try {
+      const res = await authFetch("/api/outcome-economics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(built.body) });
+      if (!res) throw new Error("Sign in again to record postage.");
+      if (!res.ok) {
+        const b = await res.json().catch(() => null);
+        throw new Error(res.status === 409 ? "That receipt is already recorded with a different amount." : (b?.error || "Could not record postage."));
+      }
+      setPostageAmount("");
+      setPostageRef("");
+      setPostageMsg({ tone: "ok", text: "Postage recorded." });
+      if (onLoadSaleEconomics) await onLoadSaleEconomics(item);
+    } catch (err) {
+      setPostageMsg({ tone: "error", text: err.message || "Could not record postage." });
+    } finally {
+      setPostageBusy(false);
+    }
+  };
+  // A device that only knows the sale from the durable ledger (second device / emptied storage) loads the economics itself.
+  useEffect(() => {
+    if (item?.status === "sold" && item?.soldOutcomeEventId && !item?.economicsView && onLoadSaleEconomics) {
+      onLoadSaleEconomics(item).catch(() => {});
+    }
+  }, [item?.id, item?.status, item?.soldOutcomeEventId]);
 
   // U4 (Generic Asset Mode, A3) — every hook above has already run
   // unconditionally, so this early return is a plain conditional render,
@@ -7924,6 +7978,54 @@ export function CollectionDetail({
                 })()}
               </div>
             )}
+            <div data-testid="verified-sale" style={{ marginTop: 10, fontSize: 12, textAlign: "left" }}>
+              {item.soldOutcomeEventId ? (
+                <div style={{ color: "#22c55e" }}>✓ Verified paid eBay order{item.soldOrderId ? ` ${item.soldOrderId}` : ""}</div>
+              ) : (
+                <div style={{ color: "#f59e0b" }}>Sold per eBay listing status — not yet verified against a paid order</div>
+              )}
+              {item.economicsView && (
+                <div data-testid="sale-economics" style={{ marginTop: 6, color: "#cbd5e1" }}>
+                  <div style={{ fontWeight: 600 }}>Economics: {item.economicsView.status}</div>
+                  {item.economicsView.lines.map((ln) => (
+                    <div key={ln.key} style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span>{ln.label}</span>
+                      <span style={{ color: ln.status === "KNOWN" ? "#e2e8f0" : "#94a3b8" }}>{formatKnownAmount(ln)}</span>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 600, marginTop: 4 }}>
+                    <span>Net proceeds (before acquisition cost)</span>
+                    <span>{formatKnownAmount(item.economicsView.netProceeds)}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", color: "#94a3b8" }}>
+                    <span>Profit</span><span>Unknown — acquisition cost not recorded</span>
+                  </div>
+                  {item.economicsView.status !== "COMPLETE" && (
+                    <div style={{ color: "#94a3b8", marginTop: 2 }}>Still unknown: {item.economicsView.missing.join(", ")}</div>
+                  )}
+                </div>
+              )}
+              {item.soldOutcomeEventId && item.economicsView?.canRecordPostage && (
+                <div data-testid="postage-form" style={{ marginTop: 8 }}>
+                  <div style={{ color: "#cbd5e1", marginBottom: 4 }}>Record off-eBay postage you actually paid</div>
+                  <input type="number" min="0" step="0.01" inputMode="decimal" placeholder="Postage $" value={postageAmount}
+                    onChange={(e) => setPostageAmount(e.target.value)} style={{ width: "100%", marginBottom: 4 }} />
+                  <input type="text" placeholder="Receipt / tracking reference (required)" value={postageRef}
+                    onChange={(e) => setPostageRef(e.target.value)} style={{ width: "100%", marginBottom: 4 }} />
+                  <button className="reset-btn" onClick={handleRecordPostage} disabled={postageBusy} style={{ width: "100%" }}>
+                    {postageBusy ? "Recording..." : "Record postage"}
+                  </button>
+                  {postageMsg && <div style={{ marginTop: 4, color: postageMsg.tone === "ok" ? "#22c55e" : "#ef4444" }}>{postageMsg.text}</div>}
+                </div>
+              )}
+              <button className="reset-btn" onClick={handleCheckForSale} disabled={saleChecking} data-testid="check-for-sale"
+                style={{ marginTop: 8, width: "100%" }}>
+                {saleChecking ? "Checking eBay..." : item.soldOutcomeEventId ? "🔄 Refresh sale & fees" : "💰 Verify sale with eBay order"}
+              </button>
+              {saleResult && (
+                <div data-testid="sale-check-result" style={{ marginTop: 6, color: saleResult.tone === "error" ? "#ef4444" : "#cbd5e1" }}>{saleResult.message}</div>
+              )}
+            </div>
             {item.ebayUrl && (
               <a
                 href={item.ebayUrl}
@@ -7964,6 +8066,30 @@ export function CollectionDetail({
             >
               {syncing ? "Checking eBay..." : "🔄 Sync eBay Status"}
             </button>
+            <button
+              className="reset-btn"
+              onClick={handleCheckForSale}
+              disabled={saleChecking}
+              data-testid="check-for-sale"
+              style={{
+                marginTop: 8,
+                width: "100%",
+                background: saleChecking ? "rgba(255,255,255,0.05)" : "rgba(234,179,8,0.15)",
+                color: saleChecking ? "#888" : "#eab308",
+                border: "1px solid rgba(234,179,8,0.3)",
+              }}
+            >
+              {saleChecking ? "Checking eBay orders..." : "💰 Check for Sale"}
+            </button>
+            {saleResult && (
+              <div data-testid="sale-check-result" style={{
+                marginTop: 8, padding: 8, borderRadius: 6, fontSize: 12, textAlign: "center",
+                background: saleResult.tone === "error" ? "rgba(239,68,68,0.15)" : saleResult.tone === "ok" ? "rgba(34,197,94,0.15)" : "rgba(148,163,184,0.15)",
+                color: saleResult.tone === "error" ? "#ef4444" : saleResult.tone === "ok" ? "#22c55e" : "#cbd5e1",
+              }}>
+                {saleResult.message}
+              </div>
+            )}
             {syncSuccess && (
               <div style={{
                 marginTop: 8,
@@ -11436,7 +11562,7 @@ export default function App() {
           // fields rather than erasing them on every login.
           const existingLocal = existingById.get(item.id);
           const keepListing = (!item.attributes?.ebayItemId && existingLocal?.ebayItemId)
-            ? Object.fromEntries(['status', 'ebayItemId', 'ebayUrl', 'listedAt', 'endedAt', 'soldPrice', 'soldAt', 'buyerFeedback', 'ebayProviderStatus', 'ebayProviderCheckedAt']
+            ? Object.fromEntries(['status', 'ebayItemId', 'ebayUrl', 'listedAt', 'endedAt', 'soldPrice', 'soldAt', 'buyerFeedback', 'ebayProviderStatus', 'ebayProviderCheckedAt', 'soldOutcomeEventId', 'soldOrderId', 'saleVerifiedAt', 'economicsView']
                 .filter((k) => existingLocal[k] !== undefined).map((k) => [k, existingLocal[k]]))
             : {};
           await putComic({
@@ -13852,6 +13978,51 @@ export default function App() {
     return { ebayItemId, ebayUrl, count: items.length };
   }, []);
 
+  // OUTCOME #1 FIRST SALE -- applies a patch to ONE catalogue card (local state + IndexedDB only; never pushed to the server).
+  const applyItemPatch = useCallback((itemId, patch) => {
+    setCatalogue((prev) => prev.map((x) => {
+      if (x.id !== itemId) return x;
+      const updated = { ...x, ...patch };
+      putComic(updated).catch(() => {});
+      return normalizeItem(updated);
+    }));
+    setSelectedItem((cur) => (cur && cur.id === itemId ? normalizeItem({ ...cur, ...patch }) : cur));
+  }, []);
+
+  // "Check for Sale": resolve the owned physical asset through the authenticated graph (ownership-checked server-side),
+  // then call the existing reconciler. Only a verified paid order yields a patch; every other result leaves the card untouched.
+  const checkForSale = useCallback(async (item) => {
+    if (!item?.ebayItemId) return interpretSaleCheck(0, null);
+    const gr = await authFetch(`/api/assets?collectionItemId=${encodeURIComponent(item.id)}`);
+    if (!gr) return interpretSaleCheck(401, null);
+    if (!gr.ok) return interpretSaleCheck(gr.status, null);
+    const graph = await gr.json().catch(() => null);
+    const gkAssetId = graph?.asset?.asset?.id;
+    if (!gkAssetId) return interpretSaleCheck(404, null);
+    const res = await authFetch("/api/ebay-outcome-reconciler", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gkAssetId, externalListingId: String(item.ebayItemId) }),
+    });
+    if (!res) return interpretSaleCheck(401, null);
+    const body = await res.json().catch(() => null);
+    const view = interpretSaleCheck(res.status, body);
+    if (view.patch) applyItemPatch(item.id, view.patch);
+    return view;
+  }, [applyItemPatch]);
+
+  // Read-only: load the recorded components of a verified sale and derive the KNOWN/UNKNOWN view.
+  const loadSaleEconomics = useCallback(async (item) => {
+    if (!item?.soldOutcomeEventId) return null;
+    const res = await authFetch(`/api/outcome-economics?outcomeEventId=${encodeURIComponent(item.soldOutcomeEventId)}`);
+    if (!res || !res.ok) return null;
+    const economics = await res.json().catch(() => null);
+    if (!economics) return null;
+    const economicsView = buildEconomicsView(economics);
+    applyItemPatch(item.id, { economicsView, ...(economics.externalOrderId ? { soldOrderId: economics.externalOrderId } : {}) });
+    return economicsView;
+  }, [applyItemPatch]);
+
   const syncEbayStatus = useCallback(async (item) => {
     if (!item.ebayItemId) {
       throw new Error("No eBay Item ID — cannot sync status");
@@ -16232,6 +16403,8 @@ export default function App() {
             }}
             onList={listOnEbay}
             onSyncEbay={syncEbayStatus}
+            onCheckForSale={checkForSale}
+            onLoadSaleEconomics={loadSaleEconomics}
             onRefreshMarket={refreshMarketData}
             onReIdentify={reIdentifyBook}
             onManualCorrect={submitManualCorrection}

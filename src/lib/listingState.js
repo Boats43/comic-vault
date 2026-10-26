@@ -96,6 +96,8 @@ export function patchFromDurableListing(item, listing) {
     if (!isItemListed(item) || item.status === 'active') patch.status = LISTED;
   } else if (listing.state === 'SOLD') {
     if (item.status !== SOLD) patch.status = SOLD;
+    if (listing.soldOutcomeEventId && item.soldOutcomeEventId !== listing.soldOutcomeEventId) patch.soldOutcomeEventId = listing.soldOutcomeEventId;
+    if (listing.soldAt && !item.soldAt) patch.soldAt = listing.soldAt;
     if (!sameListing) patch.ebayItemId = id;
     if (!item.ebayUrl && url) patch.ebayUrl = url;
   } else if (listing.state === 'DELISTED' || listing.state === 'EXPIRED_UNSOLD') {

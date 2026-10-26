@@ -31,7 +31,18 @@
 // "absent" as UNKNOWN, not as "confirmed zero."
 
 const FULFILLMENT_BASE = 'https://api.ebay.com/sell/fulfillment/v1';
-const FINANCES_BASE = 'https://api.ebay.com/sell/finances/v1';
+// OUTCOME #1 FIRST SALE (2026-10-26): eBay documents the Finances API on the apiz host
+// (developer.ebay.com Finances API getTransactions: GET https://apiz.ebay.com/sell/finances/v1/transaction); the
+// previous api.ebay.com host was never confirmed against a live call. Fulfillment stays on api.ebay.com.
+export const FINANCES_BASE = 'https://apiz.ebay.com/sell/finances/v1';
+
+// Documented paging: getOrders limit default 50, max 200, offset-based, response carries total/next; getTransactions
+// limit default 20, max 1000. Every loop below is BOUNDED (page cap), de-duplicated by the provider's own ids, and stops
+// on a page that adds nothing new instead of looping.
+export const FULFILLMENT_PAGE_LIMIT = 200;
+export const MAX_ORDER_PAGES = 25;
+export const FINANCES_PAGE_LIMIT = 200;
+export const MAX_TRANSACTION_PAGES = 10;
 
 async function ebayGet(url, accessToken) {
   const res = await fetch(url, {
@@ -40,40 +51,113 @@ async function ebayGet(url, accessToken) {
   const json = await res.json().catch(() => null);
   if (!res.ok) {
     const msg = json?.errors?.[0]?.message || res.statusText || 'unknown error';
-    throw new Error(`eBay API GET ${url} failed (HTTP ${res.status}): ${msg}`);
+    throw new Error(`eBay API GET ${url.split('?')[0]} failed (HTTP ${res.status}): ${msg}`);
   }
   return json;
 }
 
 /**
- * findOrderByLegacyItemId — the Fulfillment API has no documented "by
- * ItemID" filter, so this lists orders in a creation-date window (real,
- * documented `creationdate:[from..to]` filter) and searches the returned
- * orders' lineItems for a matching legacyItemId client-side. Returns the
- * real, unmodified eBay order object, or null (NOT an error) if no match
- * falls inside the given window — a real order may simply not exist yet,
- * or the window may need widening; the caller decides which.
+ * searchOrdersForListing -- bounded, paginated Fulfillment order search for ONE eBay listing.
+ *
+ * MATCH RULE: an order qualifies as a candidate ONLY when one of its lineItems has legacyItemId EXACTLY equal to the
+ * listing's ItemID. Title, SKU, price, buyer, similar comics are never consulted -- another order for the same comic
+ * title is not this listing's order.
+ *
+ * COMPLETENESS IS EXPLICIT. `complete: true` means the provider's own paging said the window was exhausted. A failed page,
+ * the page cap, or a no-progress page yields `complete: false` with a reason; the caller must NEVER read an incomplete
+ * search that found nothing as "no order" (NO_ORDER_YET) -- it is a verification failure.
+ *
+ * @returns {{ matches: object[], complete: boolean, failed: boolean, reason: string|null, pagesFetched: number, ordersScanned: number, total: number|null }}
  */
-export async function findOrderByLegacyItemId({ accessToken, legacyItemId, sinceIso, untilIso, limit = 50 }) {
-  const filter = `creationdate:[${sinceIso}..${untilIso}]`;
-  const url = `${FULFILLMENT_BASE}/order?filter=${encodeURIComponent(filter)}&limit=${limit}`;
-  const json = await ebayGet(url, accessToken);
-  const orders = Array.isArray(json?.orders) ? json.orders : [];
-  for (const order of orders) {
-    const lineItems = Array.isArray(order.lineItems) ? order.lineItems : [];
-    if (lineItems.some((li) => li.legacyItemId === legacyItemId)) {
-      return order;
+export async function searchOrdersForListing({ accessToken, legacyItemId, sinceIso, untilIso, limit = FULFILLMENT_PAGE_LIMIT, maxPages = MAX_ORDER_PAGES } = {}) {
+  const wanted = String(legacyItemId ?? '').trim();
+  const out = { matches: [], complete: false, failed: false, reason: null, pagesFetched: 0, ordersScanned: 0, total: null };
+  if (!wanted) return { ...out, failed: true, reason: 'no legacyItemId supplied' };
+  const filter = encodeURIComponent(`creationdate:[${sinceIso}..${untilIso}]`);
+  const seen = new Set();
+  const matchedIds = new Set();
+  let offset = 0;
+  for (;;) {
+    if (out.pagesFetched >= maxPages) return { ...out, reason: `page cap (${maxPages}) reached before the order window was exhausted` };
+    let json;
+    try {
+      json = await ebayGet(`${FULFILLMENT_BASE}/order?filter=${filter}&limit=${limit}&offset=${offset}`, accessToken);
+    } catch (e) {
+      return { ...out, failed: true, reason: `order page ${out.pagesFetched + 1} failed: ${e.message}` };
     }
+    out.pagesFetched += 1;
+    const orders = Array.isArray(json?.orders) ? json.orders : [];
+    const t = Number(json?.total);
+    if (json?.total != null && Number.isFinite(t)) out.total = t;
+    let fresh = 0;
+    for (const order of orders) {
+      const id = order && order.orderId;
+      if (!id || seen.has(id)) continue; // an order with no id can be neither evidence nor de-duplicated
+      seen.add(id); fresh += 1; out.ordersScanned += 1;
+      const lineItems = Array.isArray(order.lineItems) ? order.lineItems : [];
+      if (lineItems.some((li) => String(li?.legacyItemId ?? '').trim() === wanted) && !matchedIds.has(id)) {
+        matchedIds.add(id); out.matches.push(order);
+      }
+    }
+    const exhausted = orders.length === 0
+      || (out.total != null && offset + orders.length >= out.total)
+      || (out.total == null && !json?.next && orders.length < limit);
+    if (exhausted) return { ...out, complete: true };
+    if (fresh === 0) return { ...out, reason: 'pagination made no progress (a page of already-seen orders) -- stopped instead of looping' };
+    offset += orders.length; // advance by what the provider actually returned
   }
-  return null;
 }
 
-/** getFinancialTransactionsForOrder — real Finances API call for one real orderId. */
-export async function getFinancialTransactionsForOrder({ accessToken, orderId, limit = 50 }) {
-  const filter = `orderId:{${orderId}}`;
-  const url = `${FINANCES_BASE}/transaction?filter=${encodeURIComponent(filter)}&limit=${limit}`;
-  const json = await ebayGet(url, accessToken);
-  return Array.isArray(json?.transactions) ? json.transactions : [];
+/**
+ * findOrderByLegacyItemId -- legacy single-order wrapper (scripts/ingest-outcome1-financials.mjs). Returns the first
+ * matching order or null, but THROWS when the search was incomplete and found nothing, so no caller can mistake a failed
+ * search for "no order".
+ */
+export async function findOrderByLegacyItemId(args) {
+  const r = await searchOrdersForListing(args);
+  if (r.matches.length === 0 && !r.complete) throw new Error(`order search incomplete: ${r.reason}`);
+  return r.matches[0] ?? null;
+}
+
+/**
+ * fetchFinancialTransactionsForOrder -- bounded, paginated Finances read for one real orderId, de-duplicated by the
+ * provider's transactionId. `complete:false` means the transaction list may be missing rows (economics must then stay
+ * pending/incomplete, never be presented as final).
+ */
+export async function fetchFinancialTransactionsForOrder({ accessToken, orderId, limit = FINANCES_PAGE_LIMIT, maxPages = MAX_TRANSACTION_PAGES } = {}) {
+  const out = { transactions: [], complete: false, reason: null, pagesFetched: 0 };
+  const filter = encodeURIComponent(`orderId:{${orderId}}`);
+  const seen = new Set();
+  let offset = 0;
+  for (;;) {
+    if (out.pagesFetched >= maxPages) return { ...out, reason: `page cap (${maxPages}) reached before the transactions were exhausted` };
+    let json;
+    try {
+      json = await ebayGet(`${FINANCES_BASE}/transaction?filter=${filter}&limit=${limit}&offset=${offset}`, accessToken);
+    } catch (e) {
+      return { ...out, reason: `transaction page ${out.pagesFetched + 1} failed: ${e.message}` };
+    }
+    out.pagesFetched += 1;
+    const txns = Array.isArray(json?.transactions) ? json.transactions : [];
+    const total = Number.isFinite(Number(json?.total)) && json?.total != null ? Number(json.total) : null;
+    let fresh = 0;
+    for (const txn of txns) {
+      const id = txn && txn.transactionId;
+      if (!id || seen.has(id)) continue;
+      seen.add(id); fresh += 1; out.transactions.push(txn);
+    }
+    const exhausted = txns.length === 0 || (total != null && offset + txns.length >= total) || (total == null && !json?.next && txns.length < limit);
+    if (exhausted) return { ...out, complete: true };
+    if (fresh === 0) return { ...out, reason: 'transaction pagination made no progress -- stopped instead of looping' };
+    offset += txns.length;
+  }
+}
+
+/** getFinancialTransactionsForOrder -- legacy wrapper; throws when the list may be incomplete. */
+export async function getFinancialTransactionsForOrder(args) {
+  const r = await fetchFinancialTransactionsForOrder(args);
+  if (!r.complete) throw new Error(`transactions incomplete: ${r.reason}`);
+  return r.transactions;
 }
 
 /**
@@ -114,13 +198,17 @@ export function normalizeTransactionToComponents(txn) {
       sourceReference: `eBay Finances transaction ${txn.transactionId} (REFUND)`,
     });
   }
-  if ((type === 'SHIPPING_LABEL' || type === 'NON_SALE_CHARGE') && txn.amount?.value != null) {
+  // POSTAGE = eBay-purchased shipping LABEL transactions only. NON_SALE_CHARGE (ad/subscription-style charges not tied to
+  // a sale) was previously mapped to shipping: that would have booked a non-postage charge as postage, so it is no longer.
+  // A label whose bookingEntry is CREDIT is a label REFUND coming back to the seller, never a cost.
+  if (type === 'SHIPPING_LABEL' && txn.amount?.value != null) {
+    const isLabelRefund = txn.bookingEntry === 'CREDIT';
     candidates.push({
-      componentType: 'shipping',
+      componentType: isLabelRefund ? 'credit' : 'shipping',
       amount: Math.abs(parseFloat(txn.amount.value)),
       currency: txn.amount.currency || 'USD',
-      subKey: 'shipping-label-amount',
-      sourceReference: `eBay Finances transaction ${txn.transactionId} (${type})`,
+      subKey: isLabelRefund ? 'shipping-label-refund-credit' : 'shipping-label-amount',
+      sourceReference: `eBay Finances transaction ${txn.transactionId} (SHIPPING_LABEL${isLabelRefund ? ' refund' : ''})`,
     });
   }
   if (type === 'CREDIT' && txn.amount?.value != null) {

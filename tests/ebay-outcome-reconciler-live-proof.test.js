@@ -92,6 +92,11 @@ function saleTxn({ id, orderId, amount, feeAmount, date }) {
 function refundTxn({ id, orderId, amount, date }) {
   return { transactionId: id, transactionType: 'REFUND', orderId, transactionDate: date || '2026-10-05T00:00:00.000Z', amount: { value: String(amount), currency: 'USD' } };
 }
+// OUTCOME #1 FIRST SALE: a net needs gross AND fees AND postage KNOWN. These fixtures add a genuine eBay SHIPPING_LABEL
+// debit so the numbers below are real nets; a sale WITHOUT one is asserted separately to have NO net (UNKNOWN, never $0).
+function labelTxn({ id, orderId, amount, date }) {
+  return { transactionId: id, transactionType: 'SHIPPING_LABEL', bookingEntry: 'DEBIT', orderId, transactionDate: date || '2026-10-02T00:00:00.000Z', amount: { value: String(amount), currency: 'USD' } };
+}
 function fixtureOrder({ orderId, itemId, paymentStatus = 'PAID', cancelState = 'NONE_REQUESTED', total }) {
   return {
     orderId, creationDate: '2026-10-01T00:00:00.000Z',
@@ -169,15 +174,16 @@ try {
     validSaleOrderId = `O-VALID-${crypto.randomUUID()}`;
     scenario = {
       order: fixtureOrder({ orderId: validSaleOrderId, itemId, paymentStatus: 'PAID', total: 75 }),
-      transactions: [saleTxn({ id: `T-SALE-${crypto.randomUUID()}`, orderId: validSaleOrderId, amount: 75, feeAmount: 9.32 })],
+      transactions: [saleTxn({ id: `T-SALE-${crypto.randomUUID()}`, orderId: validSaleOrderId, amount: 75, feeAmount: 9.32 }), labelTxn({ id: `T-LABEL-${crypto.randomUUID()}`, orderId: validSaleOrderId, amount: 5 })],
     };
     const r = await reconcileEbayOutcome({ principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID, externalListingId: itemId, accessToken: 'fake-token' });
     assertTrue(r.status === 'SOLD_CONFIRMED', `real PAID order with a matching real transaction -> SOLD_CONFIRMED (got ${r.status})`);
     assertTrue(r.orderId === validSaleOrderId, 'the real order id is linked on the SOLD outcome');
-    assertTrue(r.economicsStatus === 'KNOWN', `gross + fees both recorded -> economicsStatus KNOWN (got ${r.economicsStatus})`);
+    assertTrue(r.economicsStatus === 'COMPLETE', `gross + fees + postage all recorded -> economicsStatus COMPLETE (got ${r.economicsStatus})`);
     assertTrue(Math.abs(r.economics.gross - 75) < 0.001, `real gross recorded ($75, got $${r.economics.gross})`);
     assertTrue(Math.abs(r.economics.fees - 9.32) < 0.001, `real fee recorded ($9.32, got $${r.economics.fees})`);
-    assertTrue(Math.abs(r.economics.realizedNet - (75 - 9.32)) < 0.001, `realizedNet = gross - fees (got $${r.economics.realizedNet})`);
+    assertTrue(Math.abs(r.economics.realizedNet - (75 - 9.32 - 5)) < 0.001, `realizedNet = gross - fees - postage (got $${r.economics.realizedNet})`);
+    assertTrue(r.economicsView?.netProceeds?.status === 'KNOWN' && r.economicsView?.profit?.status === 'UNKNOWN', 'net proceeds are KNOWN but PROFIT stays UNKNOWN (acquisition cost is not recorded)');
     assertTrue(r.predictionError?.status === 'SCORED', `PredictionError is SCORED once economics are KNOWN (got ${r.predictionError?.status})`);
     assertTrue(r.predictionError?.predictedValue === 61.41, 'original predicted value ($61.41) preserved, never rewritten');
     validSaleOutcomeEventId = r.outcomeEventId;
@@ -224,7 +230,7 @@ try {
     const r = await reconcileEbayOutcome({ principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID, externalListingId: itemId, accessToken: 'fake-token' });
     assertTrue(r.status === 'SOLD_CONFIRMED', `sale confirmed even with zero Finances transactions yet (got ${r.status})`);
     assertTrue(r.economicsStatus === 'PENDING', `zero components beyond order_reference -> economicsStatus PENDING (got ${r.economicsStatus})`);
-    assertTrue(r.economics.gross === 0 && !r.economics.hasAnyComponent, 'gross is NOT fabricated as a real $0 fact — hasAnyComponent=false discloses it is genuinely unknown');
+    assertTrue(r.economics.gross === null && r.economics.realizedNet === null && !r.economics.hasAnyComponent, 'gross is NOT fabricated as a real $0 fact — it is UNKNOWN (null), and so is the net');
     assertTrue(r.predictionError?.status === 'ECONOMICS_PENDING', `PredictionError reports the distinct ECONOMICS_PENDING state, never CENSORED (got ${r.predictionError?.status})`);
   }
 
@@ -238,7 +244,8 @@ try {
     const orderId = `O-PARTIAL-${crypto.randomUUID()}`;
     scenario = { order: fixtureOrder({ orderId, itemId, paymentStatus: 'PAID' }), transactions: [saleTxn({ id: `T-P1-${crypto.randomUUID()}`, orderId, amount: 40 })] };
     const r = await reconcileEbayOutcome({ principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID, externalListingId: itemId, accessToken: 'fake-token' });
-    assertTrue(r.economicsStatus === 'PARTIAL', `gross known, fees not -> PARTIAL (got ${r.economicsStatus})`);
+    assertTrue(r.economicsStatus === 'INCOMPLETE', `gross known, fees not -> INCOMPLETE (got ${r.economicsStatus})`);
+    assertTrue(r.economics.fees === null && r.economics.shipping === null && r.economics.realizedNet === null, 'unarrived fees and postage are UNKNOWN (null), and no net is produced');
     assertTrue(r.predictionError?.status === 'SCORED', 'gross alone is enough for a SCORED prediction (grossSignedError meaningful)');
     assertTrue(r.predictionError?.netSignedError == null, 'netSignedError stays null while fees are still unknown — never fabricated from a $0 fee default');
   }
@@ -252,21 +259,21 @@ try {
     await createTransientListedRow(itemId, 60);
     const orderId = `O-LATEREFUND-${crypto.randomUUID()}`;
     const saleId = `T-LR-SALE-${crypto.randomUUID()}`;
-    scenario = { order: fixtureOrder({ orderId, itemId, paymentStatus: 'PAID' }), transactions: [saleTxn({ id: saleId, orderId, amount: 60, feeAmount: 7 })] };
+    scenario = { order: fixtureOrder({ orderId, itemId, paymentStatus: 'PAID' }), transactions: [saleTxn({ id: saleId, orderId, amount: 60, feeAmount: 7 }), labelTxn({ id: `T-LBL-${saleId}`, orderId, amount: 5 })] };
     const first = await reconcileEbayOutcome({ principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID, externalListingId: itemId, accessToken: 'fake-token' });
-    assertTrue(first.status === 'SOLD_CONFIRMED' && first.economicsStatus === 'KNOWN', 'first pass: sale confirmed, gross+fees known');
+    assertTrue(first.status === 'SOLD_CONFIRMED' && first.economicsStatus === 'COMPLETE', 'first pass: sale confirmed, gross+fees+postage known');
 
     // A later poll: same SALE txn (must not duplicate) PLUS a new REFUND txn.
     scenario = {
       order: fixtureOrder({ orderId, itemId, paymentStatus: 'PARTIALLY_REFUNDED' }),
-      transactions: [saleTxn({ id: saleId, orderId, amount: 60, feeAmount: 7 }), refundTxn({ id: `T-LR-REFUND-${crypto.randomUUID()}`, orderId, amount: 15 })],
+      transactions: [saleTxn({ id: saleId, orderId, amount: 60, feeAmount: 7 }), labelTxn({ id: `T-LBL-${saleId}`, orderId, amount: 5 }), refundTxn({ id: `T-LR-REFUND-${crypto.randomUUID()}`, orderId, amount: 15 })],
     };
     const second = await reconcileEbayOutcome({ principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID, externalListingId: itemId, accessToken: 'fake-token' });
     assertTrue(second.status === 'ALREADY_SOLD_ENRICHED', `second poll enriches the SAME SOLD outcome (got ${second.status})`);
     assertTrue(second.outcomeEventId === first.outcomeEventId, 'no second SOLD row created for the refund');
     assertTrue(second.skippedGross === 1, 'the re-seen SALE transaction is correctly skipped as already-recorded gross, not duplicated');
     assertTrue(Math.abs(second.economics.refund - 15) < 0.001, `the real refund ($15) is now recorded (got $${second.economics.refund})`);
-    assertTrue(Math.abs(second.economics.realizedNet - (60 - 7 - 15)) < 0.001, `realizedNet correctly reflects gross-fees-refund (got $${second.economics.realizedNet})`);
+    assertTrue(Math.abs(second.economics.realizedNet - (60 - 7 - 5 - 15)) < 0.001, `realizedNet correctly reflects gross-fees-postage-refund (got $${second.economics.realizedNet})`);
   }
 
   // ===================================================================
@@ -281,18 +288,18 @@ try {
     await createTransientListedRow(itemId, 75);
     const orderId = `O-PARTREF-${crypto.randomUUID()}`;
     const saleId = `T-PR-SALE-${crypto.randomUUID()}`;
-    scenario = { order: fixtureOrder({ orderId, itemId, paymentStatus: 'PAID' }), transactions: [saleTxn({ id: saleId, orderId, amount: 75, feeAmount: 9 })] };
+    scenario = { order: fixtureOrder({ orderId, itemId, paymentStatus: 'PAID' }), transactions: [saleTxn({ id: saleId, orderId, amount: 75, feeAmount: 9 }), labelTxn({ id: `T-LBL-${saleId}`, orderId, amount: 5 })] };
     const first = await reconcileEbayOutcome({ principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID, externalListingId: itemId, accessToken: 'fake-token' });
 
     scenario = {
       order: fixtureOrder({ orderId, itemId, paymentStatus: 'PARTIALLY_REFUNDED' }),
-      transactions: [saleTxn({ id: saleId, orderId, amount: 75, feeAmount: 9 }), refundTxn({ id: `T-PR-REFUND-${crypto.randomUUID()}`, orderId, amount: 20 })],
+      transactions: [saleTxn({ id: saleId, orderId, amount: 75, feeAmount: 9 }), labelTxn({ id: `T-LBL-${saleId}`, orderId, amount: 5 }), refundTxn({ id: `T-PR-REFUND-${crypto.randomUUID()}`, orderId, amount: 20 })],
     };
     const enriched = await reconcileEbayOutcome({ principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID, externalListingId: itemId, accessToken: 'fake-token' });
     partialNet = enriched.economics.realizedNet;
     assertTrue(Math.abs(enriched.economics.gross - 75) < 0.001, 'partial-refund scenario: gross remains the real $75, never reduced/zeroed by the refund itself');
     assertTrue(Math.abs(enriched.economics.refund - 20) < 0.001, 'partial-refund scenario: exactly the real $20 refund is recorded, not the full $75');
-    assertTrue(Math.abs(partialNet - (75 - 9 - 20)) < 0.001, `partial-refund realizedNet = gross - fees - refund = $46 (got $${partialNet})`);
+    assertTrue(Math.abs(partialNet - (75 - 9 - 5 - 20)) < 0.001, `partial-refund realizedNet = gross - fees - postage - refund = $41 (got $${partialNet})`);
     assertTrue(partialNet > 0, 'a partial refund of LESS than gross must never imply a full reversal — net stays positive');
 
     // Idempotent re-ingestion of the SAME partial refund.
@@ -307,12 +314,12 @@ try {
     await createTransientListedRow(itemId, 75);
     const orderId = `O-FULLREF-${crypto.randomUUID()}`;
     const saleId = `T-FR-SALE-${crypto.randomUUID()}`;
-    scenario = { order: fixtureOrder({ orderId, itemId, paymentStatus: 'PAID' }), transactions: [saleTxn({ id: saleId, orderId, amount: 75, feeAmount: 9 })] };
+    scenario = { order: fixtureOrder({ orderId, itemId, paymentStatus: 'PAID' }), transactions: [saleTxn({ id: saleId, orderId, amount: 75, feeAmount: 9 }), labelTxn({ id: `T-LBL-${saleId}`, orderId, amount: 5 })] };
     await reconcileEbayOutcome({ principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID, externalListingId: itemId, accessToken: 'fake-token' });
 
     scenario = {
       order: fixtureOrder({ orderId, itemId, paymentStatus: 'FULLY_REFUNDED' }),
-      transactions: [saleTxn({ id: saleId, orderId, amount: 75, feeAmount: 9 }), refundTxn({ id: `T-FR-REFUND-${crypto.randomUUID()}`, orderId, amount: 75 })],
+      transactions: [saleTxn({ id: saleId, orderId, amount: 75, feeAmount: 9 }), labelTxn({ id: `T-LBL-${saleId}`, orderId, amount: 5 }), refundTxn({ id: `T-FR-REFUND-${crypto.randomUUID()}`, orderId, amount: 75 })],
     };
     const enriched = await reconcileEbayOutcome({ principalId: TEST_PRINCIPAL_ID, gkAssetId: TEST_ASSET_ID, externalListingId: itemId, accessToken: 'fake-token' });
     fullNet = enriched.economics.realizedNet;

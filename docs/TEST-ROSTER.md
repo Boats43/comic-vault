@@ -7,11 +7,12 @@
 ## Current stamp
 | Count | At | What changed |
 |---|---|---|
-| **498** | `f6e5d28` (Production `main`, 2026-10-26; measured with `git ls-tree`) | +5 over `2bac0db`: `tests/gkp0-listing-state.test.js`, `tests/gkp0-listing-live.test.js`, `tests/gkp0-provider-identity.test.js`, `tests/gkp0-failure-injection-live.test.js`, `tests/gkp0-neon-lock-cert.test.js` |
+| **500** | branch `outcome1-first-sale` (local, not pushed; measured with `git ls-tree`) | +2 over `f6e5d28`: `tests/o1-first-sale-pure.test.js`, `tests/o1-first-sale-live.test.js` |
 
 ## History since the last fully measured sweep (each count measured from the git tree)
 | Count | At | What changed | Sweep result |
 |---|---|---|---|
+| 498 | `f6e5d28` (Production `main`, 2026-10-26; measured with `git ls-tree`) | +5 over `2bac0db`: `tests/gkp0-listing-state.test.js`, `tests/gkp0-listing-live.test.js`, `tests/gkp0-provider-identity.test.js`, `tests/gkp0-failure-injection-live.test.js`, `tests/gkp0-neon-lock-cert.test.js` | | not swept |
 | 493 | `2bac0db` (C1, Production before the P0 release; measured) | C1 added `tests/c1-publication-receipt-gate.test.js` | not swept |
 | 491 | the Gate B pricing repair WIP branch (`wip/gate-b-pricing-2026-10-21`) | +7 over `ba19141` (4 listed below, plus `tests/gate-b-ratio-notation.test.js`, `tests/gate-b-pricing-persistence-readback.test.js`, `tests/gate-b-stale-price-merge-sites.test.js`): `tests/gate-b-variant-evidence.test.js`, `tests/gate-b-pricing-bundle-merge.test.js`, `tests/gate-b-enrich-variant-refusal-smoke.test.js`, `tests/gated-run.test.js` | | not swept |
 | 482 | `ba19141` | +1 `tests/sweep-runner-ledger-guard.test.js` | not swept |
