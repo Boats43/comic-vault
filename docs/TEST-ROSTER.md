@@ -7,11 +7,13 @@
 ## Current stamp
 | Count | At | What changed |
 |---|---|---|
-| **491** | the Gate B pricing repair WIP branch (`wip/gate-b-pricing-2026-10-21`) | +7 over `ba19141` (4 listed below, plus `tests/gate-b-ratio-notation.test.js`, `tests/gate-b-pricing-persistence-readback.test.js`, `tests/gate-b-stale-price-merge-sites.test.js`): `tests/gate-b-variant-evidence.test.js`, `tests/gate-b-pricing-bundle-merge.test.js`, `tests/gate-b-enrich-variant-refusal-smoke.test.js`, `tests/gated-run.test.js` |
+| **498** | `f6e5d28` (Production `main`, 2026-10-26; measured with `git ls-tree`) | +5 over `2bac0db`: `tests/gkp0-listing-state.test.js`, `tests/gkp0-listing-live.test.js`, `tests/gkp0-provider-identity.test.js`, `tests/gkp0-failure-injection-live.test.js`, `tests/gkp0-neon-lock-cert.test.js` |
 
 ## History since the last fully measured sweep (each count measured from the git tree)
 | Count | At | What changed | Sweep result |
 |---|---|---|---|
+| 493 | `2bac0db` (C1, Production before the P0 release; measured) | C1 added `tests/c1-publication-receipt-gate.test.js` | not swept |
+| 491 | the Gate B pricing repair WIP branch (`wip/gate-b-pricing-2026-10-21`) | +7 over `ba19141` (4 listed below, plus `tests/gate-b-ratio-notation.test.js`, `tests/gate-b-pricing-persistence-readback.test.js`, `tests/gate-b-stale-price-merge-sites.test.js`): `tests/gate-b-variant-evidence.test.js`, `tests/gate-b-pricing-bundle-merge.test.js`, `tests/gate-b-enrich-variant-refusal-smoke.test.js`, `tests/gated-run.test.js` | | not swept |
 | 482 | `ba19141` | +1 `tests/sweep-runner-ledger-guard.test.js` | not swept |
 | 481 | `83e95af`, `6822a6e`, `5624e4d`, `18e56eb` | `83e95af` added `tests/d4-race-invariants-negative-controls.test.js` and `tests/sweep-runner-evidence-contract.test.js` (+2); the other commits added no test files | targeted run only (`docs/certification/targeted/83e95af-b7a-2026-10-20/`) |
 | 479 | `596f868` | baseline | **428 PASS / 51 FAIL / 0 TIMEOUT / 0 ENV_ERROR / 0 INTERRUPTED / 0 NOT_RUN**, recovered and reconciled (`docs/certification/runs/596f8686c0d6-2026-10-20-full-sweep/`) |
