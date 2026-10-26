@@ -22,7 +22,7 @@
 // enrich 2 (comps + PriceCharting, conditional model verify), comps 1,
 // chat 1, manage 1. A normal scan = grade + enrich = 5 units.
 //
-// DEFAULTS (env-overridable): principal 300 units/day (~60 scans), operator
+// DEFAULTS (env-overridable): principal 50 units/day (~10 scans, APP-SEC-01 public-beta limit), operator
 // 5000, global 6000. Operator principals are named explicitly in
 // SPEND_GUARD_OPERATOR_PRINCIPAL_IDS (comma-separated principal ids) — never
 // inferred from a request field. research-market keeps its own separate
@@ -73,7 +73,7 @@ export const SPEND_UNITS = Object.freeze({
 });
 
 export const SPEND_DEFAULTS = Object.freeze({
-  PRINCIPAL_DAILY_UNITS: 300,
+  PRINCIPAL_DAILY_UNITS: 50,
   OPERATOR_DAILY_UNITS: 5000,
   GLOBAL_DAILY_UNITS: 6000,
   NONOPERATOR_DAILY_UNITS: 1000,
