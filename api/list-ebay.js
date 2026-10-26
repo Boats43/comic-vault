@@ -55,7 +55,7 @@ import { uploadImageViaMediaApi, MediaApiError, hasMediaScope } from "../src/lib
 // endpoint has no mandatory GrailKey auth today, and this dispatch does
 // not add one).
 import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
-import { recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, resolveCollectionItemLink, getCanonicalCollectionItemIdForAsset, getOperatorActionForListing, getAssetMediaContentHashes, authorizeOperatorManualListing, recordMarketplaceAttemptPhase, ListingAttemptBlockedError, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
+import { acquirePublicationMutex, recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, resolveCollectionItemLink, getCanonicalCollectionItemIdForAsset, getOperatorActionForListing, getAssetMediaContentHashes, authorizeOperatorManualListing, recordMarketplaceAttemptPhase, ListingAttemptBlockedError, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
 import { sanitizeQ41Ack, buildAckWarnings, classifyAddItemResponse } from "../src/lib/operatorAuthority.js";
 import { attemptListedOutcome } from "../src/lib/marketplaceOutcomeBridge.js";
 import { assertListingAuthorized, ListingPreflightFailedError } from "../src/lib/inventoryListingPreflight.js";
@@ -622,7 +622,18 @@ const respondEbayTokenError = (res, e, context) => {
 // The handler calls these exact same builders.
 export const __dryRunBuildListingXml = (item, pictureUrls, plan) => buildXml(item, pictureUrls, plan);
 
+// GK-P0 READY-RACE -- every exit path of the real handler (return, throw) passes through here, so a publication
+// mutex taken inside is ALWAYS released. The handler body below is unchanged apart from taking it.
 export default async function handler(req, res) {
+  const ctx = { publicationMutex: null };
+  try {
+    return await handleListEbay(req, res, ctx);
+  } finally {
+    if (ctx.publicationMutex) { try { await ctx.publicationMutex.release(); } catch { /* never masks the response */ } }
+  }
+}
+
+async function handleListEbay(req, res, ctx) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
     return;
@@ -1221,6 +1232,34 @@ export default async function handler(req, res) {
       return;
     }
     // GATE-B-COHERENCE-END
+    // GK-P0 READY-RACE -- PUBLICATION MUTEX. Every local gate above is a READ; two simultaneous requests for one asset
+    // could both pass them. The Q41 path was already serialised by the attempt ledger (per-asset lock + AUTHORIZED row),
+    // but the READY path writes no ledger row and had nothing. Take a Postgres-level mutex for (asset, channel) here --
+    // after every gate, before the first provider write -- for BOTH paths (a client can steer a request onto the Q41
+    // path via priorLockCodes, so a READY and a Q41 request can race each other). Try-lock: a loser is refused at once
+    // with zero provider calls. The duplicate / sold / inventory preflight is then RE-RUN under the mutex, so a request
+    // that waited behind a completed publication sees its LISTED outcome and is refused as a duplicate.
+    try {
+      ctx.publicationMutex = await acquirePublicationMutex({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId, channel: 'ebay' });
+    } catch (e) {
+      console.error('[ebay] publication mutex could not be taken — aborting before any eBay call:', e?.code || e?.name, e?.message || e);
+      res.status(503).json({ error: 'PUBLICATION_LOCK_UNAVAILABLE', message: 'The publication lock could not be taken, so nothing was listed. Please retry.' });
+      return;
+    }
+    if (!ctx.publicationMutex.acquired) {
+      ctx.publicationMutex = null;
+      console.error('[ebay] PUBLICATION_IN_PROGRESS — another publication for this asset holds the mutex; aborting before any eBay call');
+      res.status(409).json({ error: 'PUBLICATION_IN_PROGRESS', message: 'A publication for this asset is already in progress, so nothing was listed. Check its status before trying again.' });
+      return;
+    }
+    try {
+      await assertListingAuthorized({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId, channel: 'ebay', outcomeIdempotencyKey: item.outcomeIdempotencyKey || null });
+    } catch (e) {
+      console.error('[ebay] under-mutex preflight FAILED — aborting before any eBay call:', e?.message || e);
+      if (e instanceof ListingPreflightFailedError) { res.status(409).json({ error: e.code, message: e.message }); return; }
+      res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Inventory Authority check failed unexpectedly.' });
+      return;
+    }
     // GK-284 -- DURABLE OPERATOR_MANUAL AUTHORITY. When the engine's own authority is NOT READY, the only
     // way to reach a marketplace write is the operator's exact-price acknowledgment (Q41). That approval is
     // recorded durably HERE -- after every local precondition (ownership, inventory, duplicate and attempt

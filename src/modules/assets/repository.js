@@ -1016,6 +1016,16 @@ export async function listAssetMediaContentHashes(client, { gkAssetId }) {
 // ───────────────────────── GK-284 (0040): operator authority + marketplace attempt ledger ─────────────────────────
 // operator_authority_event is append-only (DB-enforced). No update/delete function exists here.
 
+// GK-P0 READY-RACE -- the PUBLICATION MUTEX. A transaction-scoped advisory lock (own namespace, distinct from
+// 40284 = attempt-ledger serialisation and 40291 = media capacity) taken with pg_try_advisory_xact_lock: it NEVER
+// waits. true = this transaction now owns the right to publish this asset on this channel until it ends;
+// false = another request holds it. Cross-instance by construction (the lock lives in Postgres, not in memory).
+export const PUBLICATION_MUTEX_LOCK_NAMESPACE = 40295;
+export async function tryLockAssetPublication(client, { gkAssetId, channel }) {
+  const r = await client.query(`SELECT pg_try_advisory_xact_lock(hashtextextended($1::text, ${PUBLICATION_MUTEX_LOCK_NAMESPACE})) AS got`, [`${gkAssetId}|${channel}`]);
+  return r.rows[0].got === true;
+}
+
 export async function lockAssetAttempts(client, gkAssetId) {
   // Serialises authorize/submit/reconcile for ONE asset inside the caller's transaction.
   await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1::text, 40284))`, [gkAssetId]);

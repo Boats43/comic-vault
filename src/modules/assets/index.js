@@ -43,6 +43,7 @@ export {
   getAssetMediaContentHashes,
   listPhysicalOrphans,
   listMyListingStates,
+  acquirePublicationMutex,
   listMissingProjections,
   getLiveIdentityAssignment,
   recordIdentifierDefinition,

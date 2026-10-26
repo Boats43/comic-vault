@@ -2531,6 +2531,42 @@ export async function listAttemptsNeedingReview({ principalId, now } = {}) {
   }
 }
 
+// GK-P0 READY-RACE -- acquirePublicationMutex: at most ONE in-flight publication per (asset, channel), across every
+// serverless instance. Holds ONE open transaction (nothing is ever written in it) whose advisory lock is the mutex;
+// release() ends it. Never waits: a second request gets { acquired:false } immediately. The lock is released by
+// release(), by the bounded self-release timer, or -- if the process dies -- by Postgres when the connection drops.
+// It protects against SIMULTANEOUS publication; it is NOT a durable record of an ambiguous provider outcome (the
+// OPERATOR_MANUAL attempt ledger is that, and only for the Q41 path).
+export const PUBLICATION_MUTEX_MAX_HOLD_MS = 240000; // below the 300s function ceiling
+export async function acquirePublicationMutex({ principalId, gkAssetId, channel = 'ebay', maxHoldMs = PUBLICATION_MUTEX_MAX_HOLD_MS } = {}) {
+  requireFields({ principalId, gkAssetId }, ['principalId', 'gkAssetId']);
+  requireEnum(channel, ['ebay'], 'channel');
+  const client = await acquireConnection();
+  let timer = null;
+  let ended = false;
+  const end = async () => {
+    if (ended) return;
+    ended = true;
+    if (timer) clearTimeout(timer);
+    try { await client.query('ROLLBACK'); } catch { /* connection already gone: the lock is gone with it */ }
+    finally { client.release(); }
+  };
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertAssetExists(client, gkAssetId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    await client.query('BEGIN');
+    const got = await repo.tryLockAssetPublication(client, { gkAssetId, channel });
+    if (!got) { await end(); return { acquired: false, release: async () => {} }; }
+    timer = setTimeout(() => { end().catch(() => {}); }, maxHoldMs);
+    if (timer.unref) timer.unref();
+    return { acquired: true, release: end };
+  } catch (e) {
+    await end();
+    throw e;
+  }
+}
+
 export async function getListingAttemptGuard({ principalId, gkAssetId, channel = 'ebay' } = {}) {
   requireFields({ principalId, gkAssetId }, ['principalId', 'gkAssetId']);
   const client = await acquireConnection();

@@ -122,6 +122,19 @@ console.log('\n-- source assertions (fail, never skip) --');
   const list = read('api/list-ebay.js');
   ok(/DUPLICATE_ACTIVE_LISTING|assertListingAuthorized/.test(list), 'api/list-ebay.js still runs the duplicate preflight');
   ok(!/listings === '1'|listMyListingStates/.test(list), 'api/list-ebay.js (publication) is not modified by the reconcile read');
+  // READY-RACE: the publication mutex is wired in the right place on every path.
+  const iAcq = list.indexOf('acquirePublicationMutex({ principalId: grailkeyPrincipalId');
+  const iAuth = list.indexOf('authorizeOperatorManualListing({');
+  const iAdd = list.indexOf('AddFixedPriceItem', iAcq);
+  const iMeta = list.indexOf('getAspectMetadata(CATEGORY_ID)');
+  const iReceipt = list.indexOf("authSources.receipt !== 'VERIFIED'");
+  ok(iAcq > 0 && iReceipt > 0 && iReceipt < iAcq, 'the mutex is taken AFTER the C1 receipt gate (a refused request never takes it)');
+  ok(iAcq < iAuth && iAcq < iMeta && iAcq < iAdd, 'the mutex is taken BEFORE the attempt-ledger write, the metadata fetches and every provider write');
+  ok(/PUBLICATION_IN_PROGRESS/.test(list) && /pg_try_advisory_xact_lock/.test(read('src/modules/assets/repository.js')), 'a loser is refused immediately via a NON-waiting try-lock');
+  ok(/export default async function handler\(req, res\) \{[\s\S]{0,260}finally \{[\s\S]{0,160}publicationMutex\.release\(\)/.test(list), 'every exit path of the handler releases the mutex (try/finally wrapper)');
+  const iRecheck = list.indexOf('under-mutex preflight FAILED');
+  ok(iRecheck > iAcq && iRecheck < iAuth, 'the duplicate/sold/inventory preflight is RE-RUN under the mutex');
+  ok(!/40284/.test(read('src/modules/assets/repository.js').split('tryLockAssetPublication')[1].split('lockAssetAttempts')[0]), 'the publication mutex uses its own lock namespace, distinct from the attempt-ledger lock (no self-deadlock)');
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

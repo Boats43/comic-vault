@@ -44,6 +44,7 @@ function mockRes() {
 // ── eBay mock: the ONLY network surface. ──
 const fetchCalls = [];
 let addDelayMs = 0;
+let addBehavior = 'success'; // success | failure
 let itemCounter = 0;
 const nextItemId = () => `${Date.now()}${++itemCounter}`.slice(-12);
 mockState.mediaImageUrl = 'https://i.ebayimg.com/hosted/gkp0-picture.jpg';
@@ -62,6 +63,7 @@ global.fetch = async (url, opts = {}) => {
   if (callName === 'GetUser') return { status: 200, text: async () => '<?xml version="1.0"?><GetUserResponse><Ack>Success</Ack><User><UserID>gkp0-seller</UserID><Site>US</Site></User></GetUserResponse>' };
   if (callName === 'AddFixedPriceItem') {
     if (addDelayMs) await new Promise((r) => setTimeout(r, addDelayMs));
+    if (addBehavior === 'failure') return { status: 200, text: async () => '<AddFixedPriceItemResponse><Ack>Failure</Ack><Errors><SeverityCode>Error</SeverityCode><ErrorCode>21919136</ErrorCode><ShortMessage>definitive test refusal</ShortMessage></Errors></AddFixedPriceItemResponse>' };
     return { status: 200, text: async () => `<AddFixedPriceItemResponse><Ack>Success</Ack><ItemID>${nextItemId()}</ItemID></AddFixedPriceItemResponse>` };
   }
   throw new Error(`test fetch mock: unexpected eBay call "${callName}"`);
@@ -119,6 +121,7 @@ function listReq(principalId, asset, o = {}) {
     title: 'CLIENT TITLE (ignored)', publisher: 'x', year: '1990', price: '$25.00', grade: 'VF',
     gkAssetId: asset.gkAssetId, decisionEventId: asset.decisionEventId, operatorActionEventId: asset.operatorActionEventId, images: [TINY_PNG_DATA_URL],
     ...(o.ready ? {} : { q41Override: { priceOverridden: true, manualPrice: 25, lockClassAcknowledged: 'insufficiency', locks: ['no-sold-evidence'], state: 'REVIEW', decision: 'RESEARCH' } }),
+    ...(o.ready && o.q41 ? { q41Override: { priceOverridden: true, manualPrice: 25, lockClassAcknowledged: 'insufficiency', locks: ['no-sold-evidence'], state: 'REVIEW', decision: 'RESEARCH' }, priorLockCodes: ['market-standing-no-sold-evidence'] } : {}),
     ...(o.ready ? { rawComps: { count: 8 }, soldComps: 5, soldCompDiagnostics: { rawCount: 6, verifiedCount: 5, newestDaysAgo: 10 }, pricingSource: 'verified_sold', matchConfidence: { tier: 'HIGH', score: 95 }, identityConfident: true, decision: { action: 'LIST_NOW' } } : {}),
   };
   return { method: 'POST', headers: { authorization: `Bearer ${token}` }, body };
@@ -198,27 +201,97 @@ try {
   ok(addCalls() === 1, `exactly ONE provider publication under a race (${addCalls()})`);
   ok(st[0] === 200 && st[1] === 409, `one 200 and one 409 (${JSON.stringify(st)})`);
 
-  // ═══ B: concurrency, READY path (no Q41, no attempt ledger) ═══
+  // ═══ B: concurrency, READY path (no Q41, no attempt ledger) -- the baseline race ═══
   console.log('\n-- B: TWO CONCURRENT requests, same asset, READY path (no Q41) --');
   const probeAsset = await mint(PA, 'ready-probe', READY_AUTHORITY);
+  fetchCalls.length = 0;
   const probe = await publish(PA, probeAsset, { ready: true });
-  const readyConstructed = probe.statusCode === 200;
+  ok(probe.statusCode === 200, `a READY-shaped fixture publishes through the real receipt gate (${probe.statusCode} ${probe.body?.error || ''} ${probe.body?.refusalReason || ''})`);
   if (probe.body?.listingId) created.push({ principalId: PA, gkAssetId: probeAsset.gkAssetId, listingId: probe.body.listingId });
-  console.log(`  READY fixture constructible: ${readyConstructed} (probe status ${probe.statusCode} ${probe.body?.error || ''} ${probe.body?.refusalReason || ''})`);
-  if (readyConstructed) {
-    const probeLedger = await ledger(probeAsset.gkAssetId);
-    ok(probeLedger.length === 0, `READY path writes NO attempt-ledger rows (${JSON.stringify(probeLedger)}) -- the path takes no per-asset lock`);
+  ok((await ledger(probeAsset.gkAssetId)).length === 0, 'the READY path writes no attempt-ledger row (so the ledger lock never covered it)');
+  {
     const asset3 = await mint(PA, 'race-ready', READY_AUTHORITY);
     fetchCalls.length = 0; addDelayMs = 300;
     const [q1, q2] = await Promise.all([publish(PA, asset3, { ready: true }), publish(PA, asset3, { ready: true })]);
     addDelayMs = 0;
     for (const r of [q1, q2]) if (r.body?.listingId) created.push({ principalId: PA, gkAssetId: asset3.gkAssetId, listingId: r.body.listingId });
     const st2 = [q1.statusCode, q2.statusCode].sort();
-    console.log(`  observed (READY race): statuses=${JSON.stringify(st2)} errors=${JSON.stringify([q1.body?.error, q2.body?.error])} AddFixedPriceItem=${addCalls()}`);
-    // A MEASUREMENT of current behaviour, reported either way; not asserted green.
-    console.log(`  >>> READY-path race verdict: ${addCalls() === 1 ? 'SAFE (one publication)' : addCalls() >= 2 ? 'UNSAFE -- DUPLICATE PUBLICATION UNDER RACE (' + addCalls() + ' provider calls)' : 'no publication'}`);
-  } else {
-    console.log('  READY-path race NOT measured: a READY-shaped fixture could not be constructed through the real receipt gate.');
+    const loser = [q1, q2].find((r) => r.statusCode !== 200);
+    console.log(`  observed (READY race): statuses=${JSON.stringify(st2)} loser=${loser?.body?.error} AddFixedPriceItem=${addCalls()}`);
+    ok(addCalls() === 1, `READY race: exactly ONE provider publication (${addCalls()})`);
+    ok(st2[0] === 200 && st2[1] === 409 && loser?.body?.error === 'PUBLICATION_IN_PROGRESS', `READY race: one 200 and one 409 PUBLICATION_IN_PROGRESS (${JSON.stringify(st2)} ${loser?.body?.error})`);
+    const uploadsByLoser = fetchCalls.filter((c) => c.type === 'trading' && c.callName === 'GetUser').length;
+    ok(uploadsByLoser <= 1, `the refused request made no GetUser / provider call of its own (GetUser calls: ${uploadsByLoser})`);
+
+    // lock released after success: a later sequential request is a DUPLICATE, not "in progress"
+    fetchCalls.length = 0;
+    const after = await publish(PA, asset3, { ready: true });
+    ok(after.statusCode === 409 && after.body?.error === 'DUPLICATE_ACTIVE_LISTING' && fetchCalls.length === 0, `after the winner finishes the mutex is free: next request -> DUPLICATE_ACTIVE_LISTING, zero provider calls (${after.body?.error})`);
+  }
+
+  // ═══ B: MIXED race -- READY request vs a request steered onto the Q41 path ═══
+  console.log('\n-- B: MIXED concurrent race: one READY request + one Q41-steered request, same asset --');
+  {
+    const asset4 = await mint(PA, 'race-mixed', READY_AUTHORITY);
+    fetchCalls.length = 0; addDelayMs = 300;
+    const [m1, m2] = await Promise.all([publish(PA, asset4, { ready: true }), publish(PA, asset4, { ready: true, q41: true })]);
+    addDelayMs = 0;
+    for (const r of [m1, m2]) if (r.body?.listingId) created.push({ principalId: PA, gkAssetId: asset4.gkAssetId, listingId: r.body.listingId });
+    const st3 = [m1.statusCode, m2.statusCode].sort();
+    console.log(`  observed (MIXED race): statuses=${JSON.stringify(st3)} errors=${JSON.stringify([m1.body?.error, m2.body?.error])} AddFixedPriceItem=${addCalls()}`);
+    ok(addCalls() === 1, `MIXED race: exactly ONE provider publication (${addCalls()})`);
+    ok(st3[0] === 200 && st3[1] === 409, `MIXED race: one 200 and one 409 (${JSON.stringify(st3)})`);
+  }
+
+  // ═══ B: different assets never block each other ═══
+  console.log('\n-- B: concurrent publications of DIFFERENT assets are independent --');
+  {
+    const x = await mint(PA, 'indep-x', READY_AUTHORITY);
+    const y = await mint(PA, 'indep-y', READY_AUTHORITY);
+    fetchCalls.length = 0; addDelayMs = 200;
+    const [rx, ry] = await Promise.all([publish(PA, x, { ready: true }), publish(PA, y, { ready: true })]);
+    addDelayMs = 0;
+    for (const [r, as] of [[rx, x], [ry, y]]) if (r.body?.listingId) created.push({ principalId: PA, gkAssetId: as.gkAssetId, listingId: r.body.listingId });
+    ok(rx.statusCode === 200 && ry.statusCode === 200 && addCalls() === 2, `two different assets both publish (${rx.statusCode}/${ry.statusCode}, adds=${addCalls()})`);
+  }
+
+  // ═══ B: the mutex is released on a provider failure (error path) ═══
+  console.log('\n-- B: mutex released on the error path (definitive provider refusal, then retry) --');
+  {
+    const z = await mint(PA, 'fail-then-ok', READY_AUTHORITY);
+    addBehavior = 'failure'; fetchCalls.length = 0;
+    const f1 = await publish(PA, z, { ready: true });
+    addBehavior = 'success';
+    ok(f1.statusCode >= 400 && f1.body?.error !== 'PUBLICATION_IN_PROGRESS', `definitive provider failure -> refused, not stuck (${f1.statusCode} ${f1.body?.error})`);
+    fetchCalls.length = 0;
+    const f2 = await publish(PA, z, { ready: true });
+    if (f2.body?.listingId) created.push({ principalId: PA, gkAssetId: z.gkAssetId, listingId: f2.body.listingId });
+    ok(f2.statusCode === 200 && f2.body?.error !== 'PUBLICATION_IN_PROGRESS', `the next request is NOT blocked by the failed one (${f2.statusCode} ${f2.body?.error || ''})`);
+  }
+
+  // ═══ unit: the mutex primitive ═══
+  console.log('\n-- mutex primitive: exclusivity, release, self-release timer, ownership --');
+  {
+    const u = await mint(PA, 'mutex-unit', NOT_READY_AUTHORITY);
+    const m1 = await A.acquirePublicationMutex({ principalId: PA, gkAssetId: u.gkAssetId });
+    const m2 = await A.acquirePublicationMutex({ principalId: PA, gkAssetId: u.gkAssetId });
+    ok(m1.acquired === true && m2.acquired === false, 'first acquires, second is refused immediately (no waiting)');
+    await m2.release();
+    ok((await A.acquirePublicationMutex({ principalId: PA, gkAssetId: u.gkAssetId })).acquired === false, 'a refused release() does not free the holder\'s lock');
+    await m1.release();
+    const m3 = await A.acquirePublicationMutex({ principalId: PA, gkAssetId: u.gkAssetId });
+    ok(m3.acquired === true, 'after the holder releases, the mutex can be taken again');
+    await m3.release(); await m3.release(); // idempotent release
+    const t1 = await A.acquirePublicationMutex({ principalId: PA, gkAssetId: u.gkAssetId, maxHoldMs: 150 });
+    await new Promise((r) => setTimeout(r, 500));
+    const t2 = await A.acquirePublicationMutex({ principalId: PA, gkAssetId: u.gkAssetId });
+    ok(t1.acquired === true && t2.acquired === true, 'the bounded self-release timer frees a hung holder\'s lock');
+    await t2.release();
+    let foreignErr = null;
+    try { await A.acquirePublicationMutex({ principalId: PB, gkAssetId: u.gkAssetId }); } catch (e) { foreignErr = e; }
+    ok(foreignErr && /AuthorizationFailed|not own|owner/i.test(`${foreignErr.name} ${foreignErr.message}`), `a principal that does not own the asset cannot take its mutex (${foreignErr?.name})`);
+    const held = await db.query(`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND classid::bigint <> 0 AND granted`);
+    console.log(`  (info) advisory locks currently granted in this database: ${held.rows[0].n}`);
   }
 } finally {
   for (const c of created) {
