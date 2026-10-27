@@ -33,6 +33,7 @@
 import { decisionTrustStanding, decisionTrustLabel, decisionGovernance } from "../lib/decisionTrust.js";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { authFetch, isAuthenticated, getPrincipalScope } from "../lib/grailkeySession.js";
+import { recordListAction } from "../lib/operatorListAction.js";
 import {
   getPendingIdempotencyKey,
   getOrCreatePendingIdempotencyKey,
@@ -428,57 +429,19 @@ export default function GrailKeyOperatorPanel({ collectionItemId, item, photos, 
 
   async function submitAction(actionCode) {
     if (!latestDecision || submitting) return;
-    // Persisted BEFORE the request is sent — a reload or ambiguous failure
-    // between this line and the response still leaves the same key on disk,
-    // ready to be reused by the next attempt of this exact (asset, decision,
-    // action) tuple. See src/lib/operatorActionIdempotency.js for the full
-    // lifecycle rule this implements.
-    const pending = getOrCreatePendingIdempotencyKey({ principalScope, gkAssetId, decisionEventId, actionCode });
+    // The request, the pending-idempotency-key lifecycle (persisted BEFORE the request, retained on an ambiguous outcome, retired on a
+    // definitive answer) and the Outcome #1 price recording all live in src/lib/operatorListAction.js, shared with the one-action
+    // Approve & List orchestrator. A LIST records the operator's APPROVED list price (the Q41-acknowledged price) durably so the later
+    // marketplace write can be bound to it exactly.
     setSubmitting(actionCode);
     setActionError(null);
     setAmbiguousNotice(null);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const res = await authFetch("/api/operator-action", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // Outcome #1 — a LIST records the operator's APPROVED list price (the Q41-acknowledged price)
-        // durably on the action, so the later marketplace write can be bound to it exactly.
-        body: JSON.stringify({
-          gkAssetId, decisionEventId, actionCode, idempotencyKey: pending.idempotencyKey,
-          ...(actionCode === "LIST" && Number(item?.q41Ack?.price) > 0 ? { actionValueAmount: Number(item.q41Ack.price).toFixed(2), actionValueCurrency: "USD" } : {}),
-        }),
-        signal: controller.signal,
-      });
-      if (!res) {
-        // No request was ever transmitted (not signed in) — nothing to be
-        // ambiguous about, so the just-created local key is retired.
-        retirePendingIdempotencyKey({ principalScope, gkAssetId, decisionEventId, actionCode });
-        setActionError("Not signed in.");
-        return;
-      }
-      if (!isDefinitiveResponseStatus(res.status)) {
-        // e.g. a bare 5xx — the server did not tell us, authoritatively,
-        // what happened. Retain the pending key; the same click, later, is
-        // the correct and safe way to resolve this.
-        setAmbiguousNotice(`Response ${res.status} — outcome unknown. Click ${actionCode} again to safely retry.`);
-        return;
-      }
-      retirePendingIdempotencyKey({ principalScope, gkAssetId, decisionEventId, actionCode });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setActionError(body.error || `Request failed (${res.status})`);
-        return;
-      }
-      setLastResult({ actionCode, operatorActionEventId: body.operatorActionEventId });
-    } catch {
-      // Network error, abort, or the timeout above — no response was ever
-      // received. Retain the pending key (do not retire it).
-      setAmbiguousNotice(`Could not confirm the result — outcome unknown. Click ${actionCode} again to safely retry.`);
+      const r = await recordListAction({ authFetch, principalScope, gkAssetId, decisionEventId, price: item?.q41Ack?.price, actionCode });
+      if (r.ok) setLastResult({ actionCode, operatorActionEventId: r.operatorActionEventId });
+      else if (r.ambiguous) setAmbiguousNotice(r.message);
+      else setActionError(r.message);
     } finally {
-      clearTimeout(timeoutId);
       setSubmitting(null);
     }
   }

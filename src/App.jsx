@@ -91,6 +91,10 @@ import { mergePricingBundle } from "./lib/pricingBundleMerge.js";
 import { getDisplayPrice, getAuthorityPrice, getAdvisoryContractPrice, isIdentityDisplayGated, describeActiveEvidenceProvenance, isIdentityAuthorityInsufficient, getDisplayConditionEvidence, POLYBAG_FLAG_OBSERVATION_TEXT } from "./lib/displayAuthority.js";
 import { resolveAssetTypeConfident, isAssetTypeUncertain, canOfferOperatorComicConfirmation } from './lib/assetTypeStanding.js';
 import ListingPreviewPanel from './components/ListingPreviewPanel.jsx';
+import { Q41_KIND, buildQ41Payload, buildQ41Ack, buildQ41Override } from './lib/q41Authority.js';
+import ApproveAndListControl from './components/ApproveAndListControl.jsx';
+import { approveAndList } from './lib/approveAndList.js';
+import { recordListAction } from './lib/operatorListAction.js';
 
 // Same gate src/main.jsx uses to decide whether <ClerkProvider> is mounted
 // at all, and src/components/GrailKeyLoginGate.jsx uses to decide whether
@@ -4142,6 +4146,7 @@ export function CollectionDetail({
   onClearOperatorGrade,
   onConfirmAssetTypeComic,
   onSaveListingFields,
+  onApproveAndList,
   onAbortEnrich,
   onAddPhoto,
   onAddEvidence,
@@ -4390,12 +4395,8 @@ export function CollectionDetail({
         : { ...item };
       // Q41: acknowledged-override listings carry the audit payload so
       // [Q41-override] fires server-side on every acknowledged listing.
-      if (item.q41Ack?.payload && item.contract && !item.contract.listable) {
-        itemToList.q41Override = {
-          ...item.q41Ack.payload,
-          listedPrice: overridePrice > 0 ? overridePrice : getDisplayPrice(item),
-        };
-      }
+      const q41Override = buildQ41Override({ item, overridePrice, displayPrice: getDisplayPrice(item) });
+      if (q41Override) itemToList.q41Override = q41Override;
       await onList(itemToList);
     } catch (err) {
       setListError(err.message || "Failed to list");
@@ -8690,22 +8691,17 @@ export function CollectionDetail({
                             : "Set a manual list price above to enable acknowledgment."}
                         </div>
                       </div>
+                      {onApproveAndList && (
+                        <ApproveAndListControl item={item} price={manualPriceNum} onApproveAndList={(opts) => onApproveAndList(item, opts)} />
+                      )}
                       <button
                         className="reset-btn"
                         disabled={!canAck}
                         onClick={() => {
-                          const payload = {
-                            title: item.title,
-                            issue: item.issue || null,
-                            state: item.contract?.state || null,
-                            decision: item.contract?.decision?.action || null,
-                            manualPrice: manualPriceNum,
-                            priceOverridden: true,
-                            lockClassAcknowledged: 'insufficiency',
-                            locks: locks.map((l) => l.code),
-                          };
+                          // Q41 rules live in src/lib/q41Authority.js (shared with the one-action Approve & List orchestrator).
+                          const payload = buildQ41Payload({ kind: Q41_KIND.INSUFFICIENCY, item, price: manualPriceNum });
                           console.log('[Q41-override] acknowledged', JSON.stringify(payload));
-                          onUpdateField(item, 'q41Ack', { price: manualPriceNum, at: Date.now(), payload });
+                          onUpdateField(item, 'q41Ack', buildQ41Ack({ price: manualPriceNum, payload }));
                         }}
                         style={{ width: "100%", background: canAck ? "#b45309" : undefined, color: canAck ? "white" : undefined, opacity: canAck ? 1 : 0.5 }}
                       >
@@ -8902,22 +8898,16 @@ export function CollectionDetail({
                       🔍 {act} recommended — review the evidence, then acknowledge to list
                       {q41EffectivePrice > 0 ? ` at $${q41EffectivePrice.toFixed(2)}` : ''}.
                     </div>
+                    {onApproveAndList && (
+                        <ApproveAndListControl item={item} price={q41EffectivePrice} onApproveAndList={(opts) => onApproveAndList(item, opts)} />
+                      )}
                     <button
                       className="reset-btn"
                       disabled={!(q41EffectivePrice > 0) || correctionSubmitting}
                       onClick={() => {
-                        const payload = {
-                          title: item.title,
-                          issue: item.issue || null,
-                          state: item.contract?.state || null,
-                          decision: act,
-                          manualPrice: q41EffectivePrice,
-                          priceOverridden: !!item.priceOverridden,
-                          lockClassAcknowledged: 'research-not-listable',
-                          locks: [],
-                        };
+                        const payload = buildQ41Payload({ kind: Q41_KIND.RESEARCH_NOT_LISTABLE, item, price: q41EffectivePrice });
                         console.log('[Q41-override] acknowledged', JSON.stringify(payload));
-                        onUpdateField(item, 'q41Ack', { price: q41EffectivePrice, at: Date.now(), payload });
+                        onUpdateField(item, 'q41Ack', buildQ41Ack({ price: q41EffectivePrice, payload }));
                       }}
                       style={{ width: "100%", background: "#b45309", color: "white" }}
                     >
@@ -8951,6 +8941,10 @@ export function CollectionDetail({
                   : `🔒 List locked — verify data quality first`;
 
               return (
+                <>
+                {onApproveAndList && !listLocked && (
+                  <ApproveAndListControl item={item} price={parseFloat(listPrice) > 0 ? parseFloat(listPrice) : getDisplayPrice(item)} onApproveAndList={(opts) => onApproveAndList(item, opts)} />
+                )}
                 <button
                   className="reset-btn primary"
                   onClick={handleList}
@@ -8969,6 +8963,7 @@ export function CollectionDetail({
                         ? `📋 List on eBay — $${Number(listPrice).toFixed(2)}`
                         : `📋 List on eBay — No price available`}
                 </button>
+                </>
               );
             })()}
           </>
@@ -13949,7 +13944,12 @@ export default function App() {
       // "A valid GrailKey session is required to publish...") over the
       // bare error CODE (`GRAILKEY_AUTH_REQUIRED`), so a real failure
       // shows an actionable reason, not an opaque constant.
-      throw new Error(data.message || data.error || "Failed to create eBay listing");
+      // V1.1a: carry the HTTP status and the server's stable code on the error so the one-action Approve & List flow can tell a
+      // definitive refusal from an uncertain outcome (5xx / in-progress / ambiguous). The message is unchanged.
+      const listErr = new Error(data.message || data.error || "Failed to create eBay listing");
+      listErr.status = res.status;
+      listErr.code = data.error || null;
+      throw listErr;
     }
     // GK-94 (Directive X) — was `{...item, ...}`, spreading the CLOSED-OVER
     // pre-request item back into catalogue state; if a correction landed on
@@ -13972,6 +13972,7 @@ export default function App() {
     setSelectedItem((cur) => (cur && cur.id === item.id
       ? normalizeItem({ ...cur, status: "listed", ebayUrl, ebayItemId, listedAt })
       : cur));
+    return { listingId: ebayItemId, listingUrl: ebayUrl };
   }, []);
 
   const listBundleOnEbay = useCallback(async (items) => {
@@ -14618,6 +14619,49 @@ export default function App() {
     if (!result.valid) throw new Error(result.error);
     await refreshMarketData(item, { operatorGradeAction: 'SET', operatorGradeValue: rawInput });
   }, [refreshMarketData]);
+
+  // V1.1a -- ONE seller action. Wires the injected dependencies of src/lib/approveAndList.js to the real, unchanged server endpoints:
+  // /api/listing-preview (approve) -> Q41 acknowledgement (saved on the item) -> /api/operator-action (LIST at the exact price) ->
+  // the existing listOnEbay (/api/list-ebay). The server re-checks every gate; this function only creates the artifacts in order.
+  const approveAndListItem = useCallback(async (item, { price, confirmed, onStep }) => {
+    let graphPromise = null;
+    const loadGraph = () => {
+      if (!graphPromise) {
+        graphPromise = authFetch(`/api/assets?collectionItemId=${encodeURIComponent(item.id)}`)
+          .then(async (r) => { if (!r || !r.ok) return null; const b = await r.json().catch(() => null); const g = b?.asset; return g?.asset?.id ? g : null; })
+          .catch(() => null);
+      }
+      return graphPromise;
+    };
+    const deps = {
+      isListed: (it) => isItemListed(it),
+      getGraph: loadGraph,
+      approvePackage: async ({ price: p }) => {
+        const g = await loadGraph();
+        if (!g) return { ok: false, code: 'GRAPH_UNAVAILABLE', message: 'GrailKey could not read this asset. Nothing was published.' };
+        const res = await authFetch('/api/listing-preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'approve', gkAssetId: g.asset.id, price: p }) });
+        if (!res) return { ok: false, code: 'NOT_SIGNED_IN', message: 'Not signed in.' };
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.approval) return { ok: true, approval: data.approval, package: data.package };
+        return { ok: false, code: data.error || `HTTP_${res.status}`, message: data.message, blocking: (data.package?.unresolved || []).filter((u) => u.severity === 'blocking') };
+      },
+      acknowledgeQ41: async ({ ack }) => { await saveListingFields(item, { q41Ack: ack }); return { ...item, q41Ack: ack }; },
+      recordListAction: async ({ decisionEventId, price: p }) => {
+        const g = await loadGraph();
+        return recordListAction({ authFetch, principalScope: getPrincipalScope(), gkAssetId: g.asset.id, decisionEventId, price: p });
+      },
+      publish: async ({ approval, approvalPackage, q41Override, price: p }) => {
+        try {
+          const out = await listOnEbay({
+            ...item, price: `$${Number(p).toFixed(2)}`, q41Override, listingApproval: approval,
+            listingApprovalMediaIds: (approvalPackage?.photos?.selected || []).map((x) => x.mediaId),
+          });
+          return { ok: true, ...(out || {}) };
+        } catch (e) { return { ok: false, status: e?.status ?? null, code: e?.code ?? null, message: e?.message || String(e) }; }
+      },
+    };
+    return approveAndList({ item, price, confirmed, deps, onStep });
+  }, [listOnEbay, saveListingFields]);
 
   // GK-260 — CLEAR. Governing grade immediately returns to the current
   // automated `grade` (never mutated by this function either way).
@@ -16478,6 +16522,7 @@ const saveListingFields = useCallback(async (item, patch) => {
             onSetOperatorGrade={setItemOperatorGrade}
             onConfirmAssetTypeComic={confirmItemIsComic}
             onSaveListingFields={saveListingFields}
+            onApproveAndList={approveAndListItem}
             onClearOperatorGrade={clearItemOperatorGrade}
             onAbortEnrich={() => {
               if (cardEnrichAbortRef.current) {
