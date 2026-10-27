@@ -1020,6 +1020,16 @@ export async function listAssetMediaContentHashes(client, { gkAssetId }) {
   return res.rows.map((r) => r.content_hash);
 }
 
+// V1.1a - the asset's durable media rows with their physical view (FRONT/BACK/SPINE/PAGES/DETAIL, or NULL for legacy rows that
+// predate migration 0029). Read-only; no bytes. Oldest first so the original capture photo keeps its place.
+export async function listAssetMediaForListing(client, { gkAssetId }) {
+  const res = await client.query(
+    `SELECT id, media_type, content_hash, content_type, capture_view, occurred_at FROM data1_dev.media WHERE asset_id = $1 ORDER BY occurred_at ASC NULLS LAST, id ASC`,
+    [gkAssetId]
+  );
+  return res.rows.map((r) => ({ mediaId: r.id, mediaType: r.media_type, contentHash: r.content_hash, contentType: r.content_type ?? null, captureView: r.capture_view ?? null, capturedAt: r.occurred_at }));
+}
+
 // ───────────────────────── GK-284 (0040): operator authority + marketplace attempt ledger ─────────────────────────
 // operator_authority_event is append-only (DB-enforced). No update/delete function exists here.
 

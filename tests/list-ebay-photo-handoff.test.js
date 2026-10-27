@@ -21,7 +21,7 @@
 // Invoke: node tests/list-ebay-photo-handoff.test.js
 
 import { readFileSync } from 'node:fs';
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, createHash, randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -106,7 +106,23 @@ global.fetch = async (url, opts) => {
   throw new Error(`test fetch mock: unexpected call name "${callName}"`);
 };
 
-const handler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
+const rawHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
+const previewHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'listing-preview.js')).href)).default;
+const handler = async (req, res) => { await approveForTest(req); return rawHandler(req, res); };
+// V1.1a -- a publish requires the seller's server-signed APPROVAL of the exact listing package. Obtain it from the REAL
+// api/listing-preview.js "approve" action (same auth, same durable row + media, same eBay-metadata mock) -- never forged here.
+// A request may set `__noApproval = true` for the negative case.
+let lastApproveStatus = null;
+async function approveForTest(req) {
+  const b = req.body || {};
+  if (!b.gkAssetId || b.listingApproval || req.__noApproval) return;
+  const pm = String(b.price ?? b.priceHigh ?? b.priceLow ?? '').replace(/,/g, '').match(/[\d.]+/);
+  const res = mockRes();
+  await previewHandler({ method: 'POST', headers: req.headers, body: { action: 'approve', gkAssetId: b.gkAssetId, price: pm ? parseFloat(pm[0]) : null } }, res);
+  lastApproveStatus = res.statusCode;
+  if (res.statusCode === 200 && res.body?.approval) b.listingApproval = res.body.approval;
+}
+
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -230,7 +246,14 @@ for (const id of CREEPY_LINK_IDS) await createCollectionItem({ principalId: JIMM
     await receiptFx.installFixtureReceipts({
       client: fxClient, rowIds: CREEPY_LINK_IDS, principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID,
       contentHashes: await assetsForReceipts.getAssetMediaContentHashes({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID }),
-      attrs: { title: 'creepy', issue: '1', year: '1964', publisher: 'Warren Publishing' },
+      // V1.1a: Creepy also owns a real JPEG original; the seller's SELECTION pins the package to the PNG evidence photo these tests publish.
+      attrs: { title: 'creepy', issue: '1', year: '1964', publisher: 'Warren Publishing', listingDraft: await (async () => {
+        const rows = await assetsForReceipts.listAssetMediaForListing({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID });
+        const sha = createHash('sha256').update(Buffer.from(TINY_PNG_DATA_URL.split(',')[1], 'base64')).digest('hex');
+        const png = rows.find((r) => r.contentHash === sha);
+        if (!png) throw new Error('test setup: the PNG evidence photo is not a durable media row of Creepy');
+        return { selectedMediaIds: [png.mediaId] };
+      })() },
     });
   } finally { await fxClient.end(); }
 }

@@ -24,7 +24,7 @@
 // Invoke: node tests/list-ebay-outcome1-handler-smoke.test.js
 
 import { readFileSync } from 'node:fs';
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, createHash, randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
@@ -110,7 +110,23 @@ global.fetch = async (url, opts) => {
   throw new Error(`test fetch mock: unexpected call name "${callName}"`);
 };
 
-const handler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
+const rawHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
+const previewHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'listing-preview.js')).href)).default;
+const handler = async (req, res) => { await approveForTest(req); return rawHandler(req, res); };
+// V1.1a -- a publish requires the seller's server-signed APPROVAL of the exact listing package. Obtain it from the REAL
+// api/listing-preview.js "approve" action (same auth, same durable row + media, same eBay-metadata mock) -- never forged here.
+// A request may set `__noApproval = true` for the negative case.
+let lastApproveStatus = null;
+async function approveForTest(req) {
+  const b = req.body || {};
+  if (!b.gkAssetId || b.listingApproval || req.__noApproval) return;
+  const pm = String(b.price ?? b.priceHigh ?? b.priceLow ?? '').replace(/,/g, '').match(/[\d.]+/);
+  const res = mockRes();
+  await previewHandler({ method: 'POST', headers: req.headers, body: { action: 'approve', gkAssetId: b.gkAssetId, price: pm ? parseFloat(pm[0]) : null } }, res);
+  lastApproveStatus = res.statusCode;
+  if (res.statusCode === 200 && res.body?.approval) b.listingApproval = res.body.approval;
+}
+
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -243,10 +259,21 @@ console.log('  (test setup) transient governed canonical rows created for Creepy
 // own session secret) on the transient rows. Nothing about the gate is relaxed; negative tests below corrupt one dimension at a time.
 const receiptFx = await import(pathToFileURL(path.join(repoRoot, 'tests', 'helpers', 'c1ReceiptFixtures.mjs')).href);
 const __assetsForReceipts = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+// V1.1a: the Development Creepy asset also owns a real JPEG original; these suites publish the PNG evidence photo, so the seller's
+// SELECTION (listingDraft.selectedMediaIds) pins the package to exactly that durable photograph. (The explicit seller choice is the
+// feature; nothing is bypassed.)
+let TEST_DRAFT = null;
+{
+  const rows = await __assetsForReceipts.listAssetMediaForListing({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID });
+  const pngSha = createHash('sha256').update(Buffer.from(TINY_PNG_DATA_URL.split(',')[1], 'base64')).digest('hex');
+  const png = rows.find((r) => r.contentHash === pngSha);
+  if (!png) throw new Error('test setup: the PNG evidence photo is not a durable media row of Creepy');
+  TEST_DRAFT = { selectedMediaIds: [png.mediaId] };
+}
 const installReceipts = async (attrs, opts = {}) => receiptFx.installFixtureReceipts({
   client, rowIds: CREEPY_LINK_IDS, principalId: opts.principalId || JIMMY, gkAssetId: CREEPY_ASSET_ID,
   contentHashes: opts.contentHashes || await __assetsForReceipts.getAssetMediaContentHashes({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID }),
-  attrs, bind: opts.bind, response: opts.response, tamper: opts.tamper,
+  attrs: { ...attrs, listingDraft: opts.draft === undefined ? TEST_DRAFT : opts.draft }, bind: opts.bind, response: opts.response, tamper: opts.tamper,
 });
 await installReceipts(CREEPY_GOVERNED);
 console.log('  (test setup) genuine authority receipts installed on the transient canonical rows\n');
@@ -776,6 +803,103 @@ console.log('-- C1 PUBLICATION-RECEIPT GATE, LIVE (real handler + real Developme
   }
   // Restore the genuine receipts for anything that runs after this block.
   await installReceipts(CREEPY_GOVERNED);
+}
+
+console.log('-- V1.1a LISTING PACKAGE (real preview + real publish handlers, real Development rows): approval binds to the SAME package that publishes --\n');
+{
+  const OTHER_PRINCIPAL = '01a0283a-b1b6-7f90-9b41-000000000c1d';
+  const assetsMod = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+  const mediaRows = await assetsMod.listAssetMediaForListing({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID });
+  const jpeg = mediaRows.find((r) => r.contentType === 'image/jpeg');
+  const noEbayWrites = () => !fetchCalls.includes('GetUser') && !fetchCalls.includes('AddFixedPriceItem') && !fetchCalls.includes('UploadSiteHostedPictures') && mockState.mediaCalls.length === 0 && lastAddFixedPriceItemBody === '';
+  const callPreview = async (action, extra = {}, tok = token) => {
+    const r = mockRes();
+    await previewHandler({ method: 'POST', headers: { authorization: `Bearer ${tok}` }, body: { action, gkAssetId: CREEPY_ASSET_ID, price: 61.41, ...extra } }, r);
+    return r;
+  };
+  const publishWith = async (label, { bodyOver = {}, noApproval = false, approval } = {}) => {
+    fetchCalls.length = 0; mockState.mediaCalls.length = 0; addFixedPriceItemBehavior = 'success'; lastAddFixedPriceItemBody = '';
+    const key = `list-ebay-v11a-${label}-${Date.now()}`;
+    const res = mockRes();
+    const req = { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: baseItem({
+      gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID, outcomeIdempotencyKey: key, ...bodyOver }) };
+    if (approval !== undefined) req.body.listingApproval = approval;
+    if (noApproval) req.__noApproval = true;
+    await handler(req, res);
+    const row = await queryOutcomeEventByIdempotencyKey(client, key); if (row) await cleanup(client, key);
+    return { res, body: lastAddFixedPriceItemBody };
+  };
+
+  // 1. PREVIEW: the exact package, from durable rows only.
+  let r = await callPreview('preview');
+  const pk = r.body?.package;
+  assertTrue(r.statusCode === 200 && !!pk, `[V1.1a preview] 200 with a package (got ${r.statusCode})`);
+  assertTrue(pk?.title === 'Creepy #1 Warren Publishing 1964' && pk?.titleSource === 'governed', `[V1.1a preview] governed title (got "${pk?.title}")`);
+  assertTrue(pk?.photos?.selected?.length === 1 && pk.photos.selected[0].contentType === 'image/png' && pk.photos.candidates.length === mediaRows.length, '[V1.1a preview] exactly the seller-selected durable photograph publishes; every other durable photo stays a listed candidate');
+  assertTrue(pk?.photos?.missingViews?.join() === 'FRONT,BACK,SPINE,PAGES', '[V1.1a preview] no view is labelled, so every required view is reported missing (nothing manufactured)');
+  assertTrue(pk?.approvable === true && !!pk?.packageHash && pk?.price?.amount === 61.41, '[V1.1a preview] approvable, hashed, price bound');
+  assertTrue(/See photos for condition details/.test(pk?.descriptionHtml || '') && /Not photographed:/.test(pk?.descriptionHtml || ''), '[V1.1a preview] no operator grade => "See photos"; unphotographed views disclosed');
+  { const u = mockRes(); await previewHandler({ method: 'POST', headers: {}, body: { action: 'preview', gkAssetId: CREEPY_ASSET_ID } }, u); assertTrue(u.statusCode === 401, `[V1.1a preview] unauthenticated -> 401 (got ${u.statusCode})`); }
+  { const o = await callPreview('preview', {}, mintTestToken(OTHER_PRINCIPAL)); assertTrue(o.statusCode >= 400 && o.statusCode < 500 && !o.body?.package, `[V1.1a preview] another principal cannot preview this asset (got ${o.statusCode})`); }
+
+  // 2. NO APPROVAL / FORGED APPROVAL: refused before ANY eBay call.
+  let p = await publishWith('noapproval', { noApproval: true });
+  assertTrue(p.res.statusCode === 409 && p.res.body?.error === 'LISTING_PACKAGE_APPROVAL_REQUIRED' && p.res.body?.reason === 'absent' && noEbayWrites(), `[V1.1a approval] no approval -> 409 LISTING_PACKAGE_APPROVAL_REQUIRED, zero eBay calls (got ${p.res.statusCode} ${p.res.body?.reason})`);
+  const good = (await callPreview('approve')).body?.approval;
+  assertTrue(!!good, '[V1.1a approval] the real approve action signs the package');
+  p = await publishWith('forged', { noApproval: true, approval: { ...good, sig: good.sig.slice(0, -3) + (good.sig.endsWith('AAA') ? 'BBB' : 'AAA') } });
+  assertTrue(p.res.statusCode === 409 && p.res.body?.reason === 'invalid:bad-signature' && noEbayWrites(), `[V1.1a approval] forged signature refused (got ${p.res.body?.reason})`);
+  const { issueListingApproval } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'listingApproval.js')).href);
+  p = await publishWith('otherasset', { noApproval: true, approval: issueListingApproval({ principalId: JIMMY, gkAssetId: '01a0aaaa-0000-7000-8000-00000000beef', packageHash: pk.packageHash }) });
+  assertTrue(p.res.statusCode === 409 && p.res.body?.reason === 'asset-mismatch' && noEbayWrites(), `[V1.1a approval] an approval for another asset is refused (got ${p.res.body?.reason})`);
+
+  // 3. A VALID approval publishes; the package that publishes is the package that was approved.
+  p = await publishWith('approved', { noApproval: true, approval: good });
+  assertTrue(p.res.statusCode === 200 && p.res.body?.listingId === FAKE_ITEM_ID, `[V1.1a approval] the signed approval publishes (got ${p.res.statusCode} ${p.res.body?.error || ''} ${p.res.body?.reason || ''})`);
+  assertTrue(p.body.includes('<Title>Creepy #1 Warren Publishing 1964</Title>') && (p.body.match(/<PictureURL>/g) || []).length === 1, '[V1.1a approval] the approved title and exactly the approved single photograph reach AddFixedPriceItem');
+  assertTrue(p.body.includes('Not photographed:') && p.body.includes('SHIPPING'), '[V1.1a approval] the factual photo disclosure and the fixed shipping block both publish');
+
+  // 4. A SELLER CORRECTION invalidates the old approval, persists, and reaches the XML once re-approved.
+  await installReceipts(CREEPY_GOVERNED, { draft: { ...TEST_DRAFT, conditionNote: 'Light wear at the staples.' } });
+  p = await publishWith('stale', { noApproval: true, approval: good });
+  assertTrue(p.res.statusCode === 409 && p.res.body?.reason === 'stale-package' && noEbayWrites(), `[V1.1a correction] an approval for the PREVIOUS package is stale after a correction (got ${p.res.body?.reason})`);
+  const again = await callPreview('preview'); const again2 = await callPreview('preview');
+  assertTrue(again.body?.draft?.conditionNote === 'Light wear at the staples.' && again.body.package.packageHash === again2.body.package.packageHash, '[V1.1a correction] the saved correction persists on the durable row and the hash is stable across reads');
+  p = await publishWith('corrected'); // the harness auto-approves the NEW package through the real approve action
+  assertTrue(p.res.statusCode === 200 && p.body.includes('Seller note: Light wear at the staples.'), `[V1.1a correction] the corrected package publishes with the seller note (got ${p.res.statusCode})`);
+  assertTrue(!/flawless|mint condition|no defects/i.test(p.body), '[V1.1a correction] no unsupported condition claim in the outbound packet');
+
+  // 5. Seller TITLE override: used when valid, blocked when it contradicts the verified facts.
+  await installReceipts(CREEPY_GOVERNED, { draft: { ...TEST_DRAFT, titleOverride: 'Creepy #1 (1964) Warren Publishing Raw' } });
+  p = await publishWith('title');
+  assertTrue(p.res.statusCode === 200 && p.body.includes('<Title>Creepy #1 (1964) Warren Publishing Raw</Title>'), '[V1.1a title] a valid seller title publishes verbatim');
+  await installReceipts(CREEPY_GOVERNED, { draft: { ...TEST_DRAFT, titleOverride: 'Creepy Magazine Warren 1999' } });
+  r = await callPreview('approve');
+  assertTrue(r.statusCode === 409 && r.body?.error === 'LISTING_PACKAGE_NOT_APPROVABLE' && r.body.package.unresolved.some((u) => u.field === 'title' && u.severity === 'blocking'), '[V1.1a title] a title that drops the issue / changes the year cannot be approved');
+  p = await publishWith('badtitle');
+  assertTrue(p.res.statusCode === 409 && p.res.body?.error === 'LISTING_PACKAGE_APPROVAL_REQUIRED' && noEbayWrites(), '[V1.1a title] and cannot publish without an approval');
+
+  // 6. UNSUPPORTED CLAIMS block approval (and therefore publication).
+  await installReceipts(CREEPY_GOVERNED, { draft: { ...TEST_DRAFT, conditionNote: 'Flawless, signed, CGC 9.8 candidate' } });
+  r = await callPreview('approve');
+  assertTrue(r.statusCode === 409 && r.body.package.unsupportedClaims.length >= 3, `[V1.1a claims] flawless / signed / CGC claims block approval (got ${r.body?.package?.unsupportedClaims?.length})`);
+  p = await publishWith('claims');
+  assertTrue(p.res.statusCode === 409 && noEbayWrites(), '[V1.1a claims] nothing publishes');
+
+  // 7. PHOTO SET: approved = durable selection; sending different bytes is refused before any upload.
+  if (jpeg) {
+    await installReceipts(CREEPY_GOVERNED, { draft: { selectedMediaIds: [...TEST_DRAFT.selectedMediaIds, jpeg.mediaId] } });
+    r = await callPreview('approve');
+    assertTrue(r.statusCode === 200 && r.body.package.photos.selected.length === 2, '[V1.1a photos] a second durable photograph can be approved into the package');
+    p = await publishWith('photomismatch', { noApproval: true, approval: r.body.approval }); // the request still carries only the PNG
+    assertTrue(p.res.statusCode === 409 && p.res.body?.error === 'LISTING_PACKAGE_PHOTO_MISMATCH' && noEbayWrites(), `[V1.1a photos] sending fewer photographs than approved is refused before any upload (got ${p.res.body?.error})`);
+  }
+  // reference / foreign media can never enter the package
+  await installReceipts(CREEPY_GOVERNED, { draft: { selectedMediaIds: ['00000000-0000-7000-8000-00000000ffff'] } });
+  r = await callPreview('preview');
+  assertTrue(r.body?.package?.photos?.selected?.length === 0 && r.body.package.unresolved.some((u) => u.field === 'photos' && u.severity === 'blocking'), "[V1.1a photos] a media id that is not this asset's durable photo selects nothing (no substitution)");
+
+  await installReceipts(CREEPY_GOVERNED); // genuine receipts + the default PNG selection for everything after this block
 }
 
 // Restore Creepy to UNMANAGED, exactly as found before this test ran.

@@ -2266,6 +2266,20 @@ export async function getAssetMediaContentHashes({ principalId, gkAssetId } = {}
   }
 }
 
+// V1.1a - ownership-checked listing of the asset's durable media (id, hash, content type, physical view). No bytes.
+export async function listAssetMediaForListing({ principalId, gkAssetId } = {}) {
+  requireFields({ principalId, gkAssetId }, ['principalId', 'gkAssetId']);
+  const client = await acquireConnection();
+  try {
+    await assertPrincipalActive(client, principalId);
+    await assertAssetExists(client, gkAssetId);
+    await assertPrincipalOwnsAsset(client, principalId, gkAssetId);
+    return await repo.listAssetMediaForListing(client, { gkAssetId });
+  } finally {
+    client.release();
+  }
+}
+
 // ═════════════════════════════════════════════════════════════════════════════════════════════════
 // GK-284 -- durable OPERATOR_MANUAL authority + marketplace attempt ledger (0040).
 //

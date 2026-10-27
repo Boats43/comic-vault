@@ -100,7 +100,20 @@ const request = (over = {}) => ({
   },
 });
 
-async function run({ receipt, mediaHashes = [PNG_HASH], req = request(), listActionAmount = '15.42' } = {}) {
+// V1.1a -- publication also needs the seller's server-signed approval of the exact listing package. Built with the REAL package
+// builder + signer from the same inputs the handler will rebuild (governed row, durable media, price, eBay metadata mock).
+const { buildListingPackage } = await import(pathToFileURL(path.join(repoRoot, 'src/lib/listingPackage.js')).href);
+const { issueListingApproval } = await import(pathToFileURL(path.join(repoRoot, 'src/lib/listingApproval.js')).href);
+const { getAspectMetadata, getItemConditionPolicy } = await import(pathToFileURL(path.join(repoRoot, 'src/lib/ebayListingMetadata.js')).href);
+async function approvalFor({ receipt, mediaHashes, req }) {
+  const media = mediaHashes.map((h) => ({ mediaId: `m-${String(h).slice(0, 8)}`, mediaType: 'capture-photo', contentHash: h, contentType: 'image/png', captureView: null }));
+  const price = parseFloat(String(req.body.price).replace(/[^0-9.]/g, ''));
+  const pkg = buildListingPackage({ governed: baseRow(receipt), media, price, aspectMeta: await getAspectMetadata('259104'), conditionPolicy: await getItemConditionPolicy('259104') });
+  return issueListingApproval({ principalId: OWNER, gkAssetId: req.body.gkAssetId, packageHash: pkg.packageHash });
+}
+
+async function run({ receipt, mediaHashes = [PNG_HASH], req = request(), listActionAmount = '15.42', noApproval = false } = {}) {
+  if (!noApproval && req.body.listingApproval === undefined) req.body.listingApproval = await approvalFor({ receipt, mediaHashes, req });
   globalThis.__C1.calls.length = 0;
   fetchLog.length = 0;
   mockState.mediaCalls.length = 0;

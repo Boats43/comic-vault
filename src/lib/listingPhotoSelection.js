@@ -58,6 +58,27 @@ export function selectFrontEvidenceMedia(graph) {
   return { ok: true, row: eligible[0] };
 }
 
+/**
+ * V1.1a: the asset's rows for the SELLER-APPROVED photo set, in the approved order. Every id must be a row of THIS asset (same
+ * eligibility as the FRONT selector); a single missing / foreign / non-image row fails the whole set -- never a silent subset.
+ * @returns {{ok:true,rows:object[]}|{ok:false,code:string,message:string}}
+ */
+export function selectApprovedEvidenceMedia(graph, mediaIds) {
+  const assetId = graph?.asset?.id;
+  const rows = Array.isArray(graph?.media) ? graph.media : [];
+  if (!assetId || !Array.isArray(mediaIds) || mediaIds.length === 0) return fail('NO_FRONT_EVIDENCE');
+  const byId = new Map(rows.filter((r) => r && typeof r.id === 'string').map((r) => [r.id, r]));
+  const out = [];
+  for (const id of mediaIds) {
+    const r = byId.get(id);
+    if (!r || (r.asset_id != null && r.asset_id !== assetId) || !IMAGE_TYPES.has(String(r.content_type || '').toLowerCase()) || !HEX64.test(String(r.content_hash || ''))) {
+      return { ok: false, code: 'APPROVED_PHOTO_UNAVAILABLE', message: 'An approved photograph is not available for this asset; re-open the listing package and approve again.' };
+    }
+    out.push(r);
+  }
+  return { ok: true, rows: out };
+}
+
 const defaultSha256 = async (bytes) => {
   const d = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, '0')).join('');

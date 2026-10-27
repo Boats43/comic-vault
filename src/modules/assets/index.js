@@ -41,6 +41,7 @@ export {
   getCanonicalCollectionItemIdForAsset,
   getOperatorActionForListing,
   getAssetMediaContentHashes,
+  listAssetMediaForListing,
   listPhysicalOrphans,
   listMyListingStates,
   acquirePublicationMutex,

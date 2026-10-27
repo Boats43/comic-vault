@@ -44,6 +44,8 @@ import { toBuyerSafeListingFacts, buildGovernedListingTitle, rawConditionDisclos
 import { getMyCollectionItem, NotFoundError as CollectionNotFoundError } from "../src/modules/collection/index.js";
 import { toCents, assertQ41PriceBinding, assertListActionPriceBinding, PriceBindingError } from "../src/lib/listingPriceBinding.js";
 import { getAspectMetadata, getItemConditionPolicy, buildItemSpecificsFromMetadata, resolveDomesticShippingService } from "../src/lib/ebayListingMetadata.js";
+import { buildListingPackage, appendShippingAndReturns } from "../src/lib/listingPackage.js";
+import { checkListingApproval } from "../src/lib/listingApproval.js";
 import { assertPublishPhotos, assertSourceImages, PhotoGuardError } from "../src/lib/listingPhotoGuard.js";
 import { uploadImageViaMediaApi, MediaApiError, hasMediaScope } from "../src/lib/ebayMediaApi.js";
 
@@ -55,6 +57,7 @@ import { uploadImageViaMediaApi, MediaApiError, hasMediaScope } from "../src/lib
 // endpoint has no mandatory GrailKey auth today, and this dispatch does
 // not add one).
 import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
+import { listAssetMediaForListing } from "../src/modules/assets/index.js";
 import { acquirePublicationMutex, getPublicationIdentity, recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, resolveCollectionItemLink, getCanonicalCollectionItemIdForAsset, getOperatorActionForListing, getAssetMediaContentHashes, authorizeOperatorManualListing, recordMarketplaceAttemptPhase, ListingAttemptBlockedError, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
 import { sanitizeQ41Ack, buildAckWarnings, classifyAddItemResponse } from "../src/lib/operatorAuthority.js";
 import { attemptListedOutcome } from "../src/lib/marketplaceOutcomeBridge.js";
@@ -371,8 +374,12 @@ const uploadSiteHostedPicture = async (base64Image, headers) => {
 // src/lib/ebayListingMetadata.js); there are NO hard-coded shipping tokens, condition ids or aspect enums here.
 const buildXml = (item, pictureUrls, plan) => {
   if (!plan?.shippingService?.token) throw new Error('No authoritatively resolved shipping service — cannot list');
-  const title = buildTitle(item);
-  const description = buildDescription(item, plan.shippingService.description);
+  // V1.1a: when a seller-approved listing package exists, its title and description body are what publish (the fixed shipping /
+  // returns block is appended here because the shipping service is resolved at publish time). Otherwise the legacy builders.
+  const title = plan.title != null ? plan.title : buildTitle(item);
+  const description = plan.descriptionBody != null
+    ? appendShippingAndReturns(plan.descriptionBody, plan.shippingService.description)
+    : buildDescription(item, plan.shippingService.description);
   const price = resolveOutgoingPrice(item);
   if (price == null || price <= 0) {
     throw new Error("No valid price on item — cannot list");
@@ -1212,7 +1219,7 @@ async function handleListEbay(req, res, ctx) {
     const shouldUploadMultiple =
       item.matchConfidence?.tier !== 'LOW' &&
       item.claudeCheck?.confidence !== 'LOW';
-    const imagesToUpload = shouldUploadMultiple
+    const imagesToUpload = (shouldUploadMultiple || item.listingApproval)
       ? (item.images || []).filter(Boolean).slice(0, 12)
       : [(item.images?.[0] || item.image || null)].filter(Boolean);
     let assetMediaHashes, sourcePhotos;
@@ -1357,6 +1364,49 @@ async function handleListEbay(req, res, ctx) {
       shippingService: null,
       correlation: manualAttempt ? manualAttempt.providerCorrelation : publicationIdentity, // GK-284 / A3 (Q41: attempt-derived) | GK-P0 (READY: asset+channel+generation-derived): Item.UUID + Item.SKU
     };
+
+    // V1.1a -- SELLER-APPROVED LISTING PACKAGE. The package is rebuilt HERE from the durable governed row, the durable media rows and the
+    // outgoing price (the same pure builder the preview uses). A generated package is not permission to publish: the request must carry
+    // the server-signed approval for EXACTLY this package (title, description body, specifics, ordered photo hashes, price), else
+    // nothing is uploaded and nothing is published. Any correction, new photo or price change invalidates a prior approval.
+    let listingPkg;
+    try {
+      const mediaRows = await listAssetMediaForListing({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId });
+      listingPkg = buildListingPackage({
+        governed: governedFacts, draft: governedFacts.listingDraft, media: mediaRows, price: outgoingPrice, pricingSource: authEv.pricingSource,
+        aspectMeta, conditionPolicy, isTPB: item.isTPB === true, isMagazine: item.isMagazine === true,
+      });
+    } catch (e) {
+      console.error('[ebay] listing package could not be built — aborting before any eBay write:', e?.message || e);
+      res.status(500).json({ error: 'INTERNAL_ERROR', message: 'The listing package could not be built; nothing was listed.' });
+      return;
+    }
+    {
+      const approvalCheck = checkListingApproval(item.listingApproval, {
+        principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId, currentPackageHash: listingPkg.approvable ? listingPkg.packageHash : null,
+      });
+      if (!approvalCheck.ok) {
+        console.error(`[ebay] LISTING_PACKAGE_APPROVAL_REQUIRED (${approvalCheck.reason}) — aborting before any eBay write`);
+        res.status(409).json({
+          error: 'LISTING_PACKAGE_APPROVAL_REQUIRED', reason: approvalCheck.reason,
+          message: 'Review and approve the listing package before publishing; nothing was listed.',
+          blocking: listingPkg.unresolved.filter((u) => u.severity === 'blocking'),
+        });
+        return;
+      }
+      // The photographs sent must be EXACTLY the approved, hash-bound set; publish them in the approved order (FRONT first).
+      const approvedOrder = listingPkg.photos.selected.map((p) => p.contentHash);
+      const sentByHash = new Map(sourcePhotos.map((p) => [p.sha256, p]));
+      if (sentByHash.size !== approvedOrder.length || !approvedOrder.every((h) => sentByHash.has(h))) {
+        console.error('[ebay] LISTING_PACKAGE_PHOTO_MISMATCH — photographs sent differ from the approved package; aborting before any eBay write');
+        res.status(409).json({ error: 'LISTING_PACKAGE_PHOTO_MISMATCH', message: 'The photographs sent do not match the approved package; nothing was listed.', approved: approvedOrder.length, sent: sentByHash.size });
+        return;
+      }
+      sourcePhotos = approvedOrder.map((h) => sentByHash.get(h));
+      listingPlan.title = listingPkg.title;
+      listingPlan.descriptionBody = listingPkg.descriptionBody;
+      listingPlan.specifics = listingPkg.specifics;
+    }
 
     // GK-265 PHASE 3 — the authenticated, ownership-verified principal's own eBay User access token
     // (src/lib/ebayPrincipalToken.js); no global fallback. Source media is already validated (>=1 owned photo).

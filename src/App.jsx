@@ -42,7 +42,7 @@ import { resolveGoverningGrade,resolveGoverningGradingFormat, validateOperatorGr
 import { governingTitleForMerge } from "./lib/operatorIdentityAuthority.js";
 import { reIdentifyControlState, reIdentifyDisclosure } from "./lib/reIdentifyControl.js";
 import { fetchServerPhotoAsDataUrl } from "./lib/serverPhotoForReidentify.js";
-import { selectFrontEvidenceMedia, fetchCertifiedListingPhoto } from "./lib/listingPhotoSelection.js";
+import { selectFrontEvidenceMedia, selectApprovedEvidenceMedia, fetchCertifiedListingPhoto } from "./lib/listingPhotoSelection.js";
 import { getCorrectableFields, buildCorrectedCatalogueItem, buildManualCorrectionPayload, replaceCatalogueItemById, MANUAL_CORRECTION_ALLOWED_FIELDS } from "./lib/manualCorrection.js";
 import { shouldSkipIdRequiredEnrich } from "./lib/identityGate.js";
 import { describeBlocker, describeWarning } from "./lib/decisionEngine.js";
@@ -90,6 +90,7 @@ import { deriveMarketCopy, NEUTRAL_MARKET_FOOTER } from "./lib/marketEvidence.js
 import { mergePricingBundle } from "./lib/pricingBundleMerge.js";
 import { getDisplayPrice, getAuthorityPrice, getAdvisoryContractPrice, isIdentityDisplayGated, describeActiveEvidenceProvenance, isIdentityAuthorityInsufficient, getDisplayConditionEvidence, POLYBAG_FLAG_OBSERVATION_TEXT } from "./lib/displayAuthority.js";
 import { resolveAssetTypeConfident, isAssetTypeUncertain, canOfferOperatorComicConfirmation } from './lib/assetTypeStanding.js';
+import ListingPreviewPanel from './components/ListingPreviewPanel.jsx';
 
 // Same gate src/main.jsx uses to decide whether <ClerkProvider> is mounted
 // at all, and src/components/GrailKeyLoginGate.jsx uses to decide whether
@@ -4140,6 +4141,7 @@ export function CollectionDetail({
   onSetOperatorGrade,
   onClearOperatorGrade,
   onConfirmAssetTypeComic,
+  onSaveListingFields,
   onAbortEnrich,
   onAddPhoto,
   onAddEvidence,
@@ -4350,10 +4352,13 @@ export function CollectionDetail({
   const isMegaKeyDivergent = item.megaKeyFloorDivergent === true;
 
   // Grade badge: CGC numeric if graded, raw grade if available, else RAW COPY.
+  // V1.1a: the header shows the GOVERNING grade (operator-confirmed when one exists) -- not the original AI estimate, which is
+  // preserved separately (listed card / grade panel). Never presented as a professional certification.
+  const __govHeader = resolveGoverningGrade(item);
   const gradeBadgeText =
     item.isGraded === true && item.numericGrade != null
       ? `CGC ${item.numericGrade}`
-      : item.grade || "RAW COPY";
+      : (__govHeader.source === 'operator' && __govHeader.grade ? `${__govHeader.grade} (operator)` : (item.grade || "RAW COPY"));
 
   // Ship 6.4 — Filter key-related bullets when polybag detected.
   // Vision generates conditionReport BEFORE polybag detection runs, so
@@ -4696,6 +4701,9 @@ export function CollectionDetail({
         )}
       </div>
 
+      {!isListed && onSaveListingFields && (
+        <ListingPreviewPanel item={item} price={parseFloat(listPrice) > 0 ? parseFloat(listPrice) : getDisplayPrice(item)} onSaveListingFields={onSaveListingFields} />
+      )}
       <GrailKeyOperatorPanel collectionItemId={item.id} item={item} photos={photos} onAddEvidence={onAddEvidence} onSameCopyRetired={onSameCopyRetired} />
 
       {/* GK-273 — Research the Market: operator-run escalation, shown only when the structured market result is insufficient. Read-only beside price authority. */}
@@ -4951,7 +4959,7 @@ export function CollectionDetail({
             </strong>
             {item.gradeMultiplier != null && item.gradeMultiplier !== 1 && (
               <span style={{ color: '#888' }}>
-                {' '}· ×{item.gradeMultiplier.toFixed(2)} {item.isGraded ? 'CGC' : 'raw'} {item.grade}
+                {' '}· ×{item.gradeMultiplier.toFixed(2)} {item.isGraded ? 'CGC' : 'raw'} {__govHeader.grade || item.grade}{__govHeader.source === 'operator' ? ' (operator grade)' : ''}
               </span>
             )}
           </div>
@@ -4966,7 +4974,7 @@ export function CollectionDetail({
         {item.publisher}
         {item.publisher && item.year ? " · " : ""}
         {item.year}
-        {item.grade && ` · ${gradeBadgeText}`}
+        {(item.grade || __govHeader.source === 'operator') && ` · ${gradeBadgeText}`}
       </div>
       {/* GK-236 (2026-09-20) — Bank Regression Fixture reachability fix.
           The button previously existed only on the transient post-scan
@@ -5082,7 +5090,12 @@ export function CollectionDetail({
       })()}
 
       {/* 2a. DECISION CARD — Decision-first layout */}
-      {item.decision?.action && (() => {
+      {item.decision?.action && isListed && (
+        <div data-testid="historical-research" className="muted small" style={{ marginBottom: 16, padding: "8px 12px", borderLeft: "2px solid rgba(255,255,255,0.15)" }}>
+          Historical research (before listing): {item.decision.action.replace(/_/g, ' ')}. Current status is the published eBay listing below; this is kept as evidence, not as a current instruction.
+        </div>
+      )}
+      {item.decision?.action && !isListed && (() => {
         const colors = getActionColor(item.decision);
         const marketSignal = getMarketSignal(item);
         const displayPrice = getDisplayPrice(item);
@@ -8065,6 +8078,12 @@ export function CollectionDetail({
             >
               {getItemEbayUrl(item)}
             </a>
+            <div data-testid="listed-facts" className="muted small" style={{ marginTop: 6, lineHeight: 1.5 }}>
+              {item.ebayItemId && <div>eBay ItemID {item.ebayItemId}</div>}
+              {parseFloat(item.listPrice) > 0 && <div>Authorized listing price {formatCurrency(parseFloat(item.listPrice))}</div>}
+              {__govHeader.source === 'operator' && __govHeader.grade && <div>Listing grade (operator-approved): {__govHeader.grade}</div>}
+              {item.grade && __govHeader.source === 'operator' && String(item.grade) !== String(__govHeader.grade) && <div>Original AI grade: {item.grade}</div>}
+            </div>
             <button
               className="reset-btn"
               onClick={handleSync}
@@ -9169,15 +9188,11 @@ export function CollectionDetail({
                 fontSize: 11,
                 color: '#888'
               }}>
-                {photos.count}/4 photos · {
-                  photos.front ? 'Front ✓' : 'Front missing'
-                } · {
-                  photos.back ? 'Back ✓' : 'Back missing'
-                } · {
-                  photos.spine ? 'Spine ✓' : 'Spine missing'
-                } · {
-                  photos.pages ? 'Pages ✓' : 'Pages missing'
-                }
+                Stored photos on this record: {photos.count} of 4 recommended · slots filled:{' '}
+                {[photos.front && '1', photos.back && '2', photos.spine && '3', photos.pages && '4'].filter(Boolean).join(', ') || 'none'}
+                <div style={{ marginTop: 4, fontSize: 10, opacity: 0.8 }}>
+                  Slots are positions, not verified views. Which physical views (front / back / spine / pages) are actually evidenced is shown in the Listing Package.
+                </div>
               </div>
             </div>
           );
@@ -13814,15 +13829,33 @@ export default function App() {
           // against the media row's hash before they leave the device (src/lib/listingPhotoSelection.js). The server photo
           // guard is unchanged and re-checks. A FRONT that cannot be retrieved/verified fails the listing closed here. An
           // asset with no FRONT row keeps the existing behavior (the server guard still decides) — never a silent substitute.
-          const front = selectFrontEvidenceMedia(graph);
-          if (front.ok) {
-            const got = await fetchCertifiedListingPhoto({
-              row: front.row,
-              fetchMedia: (mediaId) => authFetch(`/api/asset-media?mediaId=${encodeURIComponent(mediaId)}`),
-            });
-            if (!got.ok) throw new Error(got.message);
-            allPhotos = got.images;
-            coverPhoto = got.images[0];
+          // V1.1a: when the seller has APPROVED a listing package, publish exactly its photographs, in its order, each re-verified
+          // against its media row's hash before leaving the device. Otherwise the FRONT-only behaviour above is unchanged.
+          if (item.listingApproval && Array.isArray(item.listingApprovalMediaIds) && item.listingApprovalMediaIds.length) {
+            const sel = selectApprovedEvidenceMedia(graph, item.listingApprovalMediaIds);
+            if (!sel.ok) throw new Error(sel.message);
+            const approvedImages = [];
+            for (const row of sel.rows) {
+              const got = await fetchCertifiedListingPhoto({ row, fetchMedia: (mediaId) => authFetch(`/api/asset-media?mediaId=${encodeURIComponent(mediaId)}`) });
+              if (!got.ok) throw new Error(got.message);
+              approvedImages.push(...got.images);
+            }
+            if (approvedImages.reduce((n, d) => n + d.length, 0) > 4_200_000) {
+              throw new Error('The approved photographs are too large to send in one request (about 4.5 MB limit). Deselect a photograph in the listing package and approve again.');
+            }
+            allPhotos = approvedImages;
+            coverPhoto = approvedImages[0];
+          } else {
+            const front = selectFrontEvidenceMedia(graph);
+            if (front.ok) {
+              const got = await fetchCertifiedListingPhoto({
+                row: front.row,
+                fetchMedia: (mediaId) => authFetch(`/api/asset-media?mediaId=${encodeURIComponent(mediaId)}`),
+              });
+              if (!got.ok) throw new Error(got.message);
+              allPhotos = got.images;
+              coverPhoto = got.images[0];
+            }
           }
         }
       }
@@ -13840,6 +13873,7 @@ export default function App() {
       },
       body: JSON.stringify({
         q41Override: item.q41Override || null,
+        listingApproval: item.listingApproval || null, // V1.1a: the server-signed approval of the exact listing package (never a client verdict)
         collectionItemId: item.id || null, // lookup key only: lets the server answer PHYSICAL_ASSET_NOT_LINKED to the row's authenticated owner
         ...(grailkeyLinkage || {}),
         // U4/A4 — raw signal only, same convention as pricingSource/
@@ -14587,7 +14621,18 @@ export default function App() {
 
   // GK-260 — CLEAR. Governing grade immediately returns to the current
   // automated `grade` (never mutated by this function either way).
-const confirmItemIsComic = useCallback(async (item) => {
+const saveListingFields = useCallback(async (item, patch) => {
+    // V1.1a: persist the seller's listing corrections / signed approval on the item (local first, then server sync), awaiting the sync
+    // attempt so the caller can tell whether the durable copy exists before asking the server to approve.
+    const updated = { ...item, ...patch };
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(updated) : x)));
+    setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
+    const final = await persistCollectionItem(updated);
+    setCatalogue((prev) => prev.map((x) => (x.id === final.id ? { ...x, _syncStatus: final._syncStatus } : x)));
+    return final;
+  }, []);
+
+  const confirmItemIsComic = useCallback(async (item) => {
     await refreshMarketData(item, { assetTypeAction: 'CONFIRM_COMIC' });
   }, [refreshMarketData]);
 
@@ -16432,6 +16477,7 @@ const confirmItemIsComic = useCallback(async (item) => {
             onClearGradedOverride={clearGradedOverride}
             onSetOperatorGrade={setItemOperatorGrade}
             onConfirmAssetTypeComic={confirmItemIsComic}
+            onSaveListingFields={saveListingFields}
             onClearOperatorGrade={clearItemOperatorGrade}
             onAbortEnrich={() => {
               if (cardEnrichAbortRef.current) {

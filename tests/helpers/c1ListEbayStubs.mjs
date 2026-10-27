@@ -26,6 +26,8 @@ export const requireMarketplaceOperator = async (req) => { rec('requireMarketpla
 export const getMyCollectionItem = async ({ principalId, id }) => { rec('getMyCollectionItem'); return { id, attributes: C1.cfg.rowAttributes }; };
 export const getCanonicalCollectionItemIdForAsset = async () => { rec('getCanonicalCollectionItemIdForAsset'); return C1.cfg.canonicalRowId; };
 export const getAssetMediaContentHashes = async () => { rec('getAssetMediaContentHashes'); return C1.cfg.mediaHashes; };
+// V1.1a -- the asset's durable media rows (id, hash, content type, physical view). A read; no bytes. Derived from the same cfg hashes.
+export const listAssetMediaForListing = async () => { rec('listAssetMediaForListing'); return (C1.cfg.mediaHashes || []).map((h) => ({ mediaId: `m-${String(h).slice(0, 8)}`, mediaType: 'capture-photo', contentHash: h, contentType: 'image/png', captureView: null })); };
 export const validateOutcomeAttachment = async () => { rec('validateOutcomeAttachment'); };
 export const assertListingAuthorized = async () => { rec('assertListingAuthorized'); };
 export const getOperatorActionForListing = async () => { rec('getOperatorActionForListing'); return { actionValueAmount: C1.cfg.listActionAmount }; };

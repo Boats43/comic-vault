@@ -110,6 +110,7 @@ export async function bootstrap({ registryFile, crashAfterCreate = false } = {})
     imp('src/modules/inventory/index.js'), imp('src/modules/collection/index.js'), imp('src/lib/authorityReceipt.js'), imp('api/list-ebay.js'), imp('api/assets.js'),
   ]);
   const idMod = await imp('src/lib/ebayPublicationIdentity.js');
+  const previewMod = await imp('api/listing-preview.js');
   const db = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });
   await db.connect();
 
@@ -158,11 +159,23 @@ export async function bootstrap({ registryFile, crashAfterCreate = false } = {})
     res.json = (b) => { res.body = b; return res; };
     return res;
   }
-  async function publish(principalId, asset, o) { const res = mockRes(); await listMod.default(listRequest(principalId, asset, o), res); return res; }
+  // V1.1a -- a publish now requires the seller's server-signed APPROVAL of the exact listing package. The harness obtains it from the
+  // REAL api/listing-preview.js "approve" action (same auth, same durable row + media, same eBay-metadata mock) -- never forged.
+  // Pass `req.__noApproval = true` for the negative case.
+  const parsePrice = (p) => { const m = String(p ?? '').replace(/,/g, '').match(/[\d.]+/); return m ? parseFloat(m[0]) : null; };
+  async function approvalFor(req) {
+    const b = req.body || {};
+    if (!b.gkAssetId || b.listingApproval || req.__noApproval) return;
+    const res = mockRes();
+    await previewMod.default({ method: 'POST', headers: req.headers, body: { action: 'approve', gkAssetId: b.gkAssetId, price: parsePrice(b.price ?? b.priceHigh ?? b.priceLow) } }, res);
+    if (res.statusCode === 200 && res.body?.approval) b.listingApproval = res.body.approval;
+  }
+  const listHandler = async (req, res) => { await approvalFor(req); return listMod.default(req, res); };
+  async function publish(principalId, asset, o) { const res = mockRes(); await listHandler(listRequest(principalId, asset, o), res); return res; }
   const ledger = async (assetId) => (await db.query(`SELECT phase FROM data1_dev.operator_authority_event WHERE gk_asset_id = $1 ORDER BY recorded_at, id`, [assetId])).rows.map((x) => x.phase);
   const outcomes = async (assetId) => (await db.query(`SELECT outcome_type, external_listing_id FROM data1_dev.outcome_event WHERE gk_asset_id = $1 ORDER BY occurred_at, id`, [assetId])).rows;
   const closeListing = (principalId, gkAssetId, listingId) => A.recordOutcomeEvent({ principalId, gkAssetId, outcomeType: 'DELISTED', channel: 'ebay', externalListingId: listingId, idempotencyKey: `gkp0-close-${listingId}` });
 
   return { controls, reg, db, A, idMod, issueToken, newPrincipal, mint, publish, listRequest, mockRes, ledger, outcomes, closeListing,
-    listHandler: listMod.default, assetsHandler: assetsMod.default, NOT_READY_AUTHORITY, READY_AUTHORITY, nonce, registryFile };
+    listHandler, rawListHandler: listMod.default, previewHandler: previewMod.default, assetsHandler: assetsMod.default, NOT_READY_AUTHORITY, READY_AUTHORITY, nonce, registryFile };
 }
