@@ -146,7 +146,10 @@ function req(principalId, asset, o = {}) {
   };
   return { method: 'POST', headers: o.noToken ? {} : { authorization: `Bearer ${token}` }, body };
 }
-async function call(principalId, asset, o) { fetchCalls.length = 0; const res = mockRes(); await listHandler(req(principalId, asset, o), res); return res; }
+// V1.1a: a publish needs the seller's server-signed listing-package approval; obtain it from the REAL approve endpoint.
+const { makeApprover } = await import(pathToFileURL(path.join(repoRoot, 'tests', 'helpers', 'listingApprovalFixture.mjs')).href);
+const attachApproval = makeApprover({ repoRoot, mockRes, tag: 'gateb-approver' });
+async function call(principalId, asset, o) { fetchCalls.length = 0; const res = mockRes(); await listHandler(await attachApproval(req(principalId, asset, o)), res); return res; }
 async function ledger(assetId) { return (await db.query(`SELECT * FROM data1_dev.operator_authority_event WHERE gk_asset_id = $1 ORDER BY recorded_at, id`, [assetId])).rows; }
 const phasesOf = (rows) => rows.map((r) => r.phase);
 async function snap(table, col, assetId) { return JSON.stringify((await db.query(`SELECT * FROM data1_dev.${table} WHERE ${col} = $1 ORDER BY id`, [assetId])).rows); }
@@ -280,7 +283,7 @@ try {
     writeFileSync(NOCHECK_PATH, src);
     const noCheck = (await import(pathToFileURL(NOCHECK_PATH).href + `?v=${Date.now()}`)).default;
     const mixed2 = await mint(PA, 'mixed-nocheck', { bundle: hist, receiptPoolCount: hist.receiptPoolCount, listAmount: AMT });
-    fetchCalls.length = 0; const r2 = mockRes(); addBehavior = 'success'; await noCheck(req(PA, mixed2, { amount: AMT }), r2);
+    fetchCalls.length = 0; const r2 = mockRes(); addBehavior = 'success'; await noCheck(await attachApproval(req(PA, mixed2, { amount: AMT })), r2);
     createdListings.push(r2.body?.listingId);
     ok(r2.statusCode === 200 && addCalls() === 1, `T10 NEGATIVE CONTROL: with the guard removed the SAME mixed-generation row is listed (${r2.statusCode}, ${addCalls()} AddFixedPriceItem) -- the T1 test can fail`);
     ok(!(await authRow(mixed2.gkAssetId))?.evidence?.pricingBasis, 'T10 and no pricingBasis snapshot is stored without the guard path (the snapshot rides the same wiring)');

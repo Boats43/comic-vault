@@ -139,7 +139,9 @@ try {
   res = await run(full(stale));
   ok(res.statusCode === 403 && res.body?.refusalReason === 'AUTHORITY_RECEIPT_EVIDENCE_VERSION_STALE' && noEbay(), `receipt issued before a later photo -> ${res.body?.refusalReason}`);
   const good = await mint(PA, 'good', { receipt: 'bound' });
-  res = await run(full(good));
+  // V1.1a: the positive control also needs the seller's server-signed listing-package approval (from the REAL approve endpoint).
+  const { makeApprover } = await imp('tests', 'helpers', 'listingApprovalFixture.mjs');
+  res = await run(await makeApprover({ repoRoot, mockRes, tag: 'notlinked-approver' })(full(good)));
   ok(res.statusCode === 200 && fetchCalls.includes('AddFixedPriceItem'), `control: a linked, receipted, current-evidence asset still publishes (${res.statusCode}) -- the new checks are not an off-switch`);
 
   console.log('\n-- the refusals themselves wrote nothing --');

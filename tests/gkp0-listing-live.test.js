@@ -130,13 +130,14 @@ function listReq(principalId, asset, o = {}) {
 // api/listing-preview.js "approve" action (never forged). Each call looks like a distinct client (per principal+IP rate limiter).
 const previewHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'listing-preview.js')).href)).default;
 let previewSeq = 0;
+const approvalUsed = new Map(); // gkAssetId -> the approval that authorized the most recent publication request
 async function approveFor(req) {
   const b = req.body || {};
   if (!b.gkAssetId || b.listingApproval) return;
   const pm = String(b.price ?? '').replace(/,/g, '').match(/[\d.]+/);
   const r = mockRes();
   await previewHandler({ method: 'POST', headers: { ...req.headers, 'x-forwarded-for': `gkp0-live-preview-${++previewSeq}` }, body: { action: 'approve', gkAssetId: b.gkAssetId, price: pm ? parseFloat(pm[0]) : null } }, r);
-  if (r.statusCode === 200 && r.body?.approval) b.listingApproval = r.body.approval;
+  if (r.statusCode === 200 && r.body?.approval) { b.listingApproval = r.body.approval; approvalUsed.set(b.gkAssetId, r.body.approval); }
 }
 async function publish(principalId, asset, o) { const res = mockRes(); const req = listReq(principalId, asset, o); await approveFor(req); await listHandler(req, res); return res; }
 let ipSeq = 0;
@@ -193,6 +194,20 @@ try {
   ok(dup.statusCode === 409 && dup.body?.error === 'DUPLICATE_ACTIVE_LISTING', `second publish -> 409 DUPLICATE_ACTIVE_LISTING (${dup.statusCode} ${dup.body?.error})`);
   ok(!anyTrading() && fetchCalls.length === 0, `ZERO provider calls of any kind (${JSON.stringify(fetchCalls)})`);
   ok((await ledger(asset1.gkAssetId)).length === 3, 'no new attempt-ledger row was written by the refused duplicate');
+
+  // V1.1a: the SAME still-valid (unexpired, unchanged-package) approval that authorized the first listing, presented again.
+  // The approval is stateless, so the duplicate guard (not the approval) must be what refuses -- before any provider call.
+  {
+    const reusedReq = listReq(PA, asset1);
+    reusedReq.body.listingApproval = approvalUsed.get(asset1.gkAssetId);
+    ok(!!reusedReq.body.listingApproval, 'the approval that authorized the first publication is still held');
+    fetchCalls.length = 0;
+    const rr = mockRes();
+    await listHandler(reusedReq, rr);
+    ok(rr.statusCode === 409 && rr.body?.error === 'DUPLICATE_ACTIVE_LISTING', `[V1.1a reuse] the SAME valid approval cannot publish a duplicate: 409 DUPLICATE_ACTIVE_LISTING (${rr.statusCode} ${rr.body?.error})`);
+    ok(!anyTrading() && fetchCalls.length === 0, `[V1.1a reuse] ZERO provider calls (${JSON.stringify(fetchCalls)})`);
+    ok((await ledger(asset1.gkAssetId)).length === 3, '[V1.1a reuse] no new attempt-ledger row');
+  }
 
   // ═══ B: terminal event flips durable state ═══
   console.log('\n-- B: a terminal outcome is reflected in the durable read --');

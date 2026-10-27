@@ -923,22 +923,10 @@ console.log('-- V1.1a LISTING PACKAGE (real preview + real publish handlers, rea
   assertTrue(p.res.statusCode === 409 && p.res.body?.reason === 'stale-package' && noEbayWrites(), `[V1.1a negatives] a modified CONDITION (operator grade) makes it stale (got ${p.res.body?.reason})`);
   await installReceipts(CREEPY_GOVERNED);
 
-  // 9. DUPLICATE PUBLICATION: one approval, one listing. A second publish with the SAME still-valid approval is blocked by the
-  //    existing duplicate-listing preflight (the approval itself is stateless; the ledger is the duplicate guard).
-  {
-    const goodNow = (await callPreview('approve')).body?.approval;
-    fetchCalls.length = 0; mockState.mediaCalls.length = 0; addFixedPriceItemBehavior = 'success'; lastAddFixedPriceItemBody = '';
-    const k1 = `list-ebay-v11a-dup1-${Date.now()}`;
-    const first = mockRes();
-    await handler({ method: 'POST', __noApproval: true, headers: { authorization: `Bearer ${token}` }, body: baseItem({ gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID, outcomeIdempotencyKey: k1, listingApproval: goodNow }) }, first);
-    assertTrue(first.statusCode === 200, `[V1.1a duplicate] first publication succeeds (got ${first.statusCode})`);
-    fetchCalls.length = 0; mockState.mediaCalls.length = 0; lastAddFixedPriceItemBody = '';
-    const second = mockRes();
-    await handler({ method: 'POST', __noApproval: true, headers: { authorization: `Bearer ${token}` }, body: baseItem({ gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID, outcomeIdempotencyKey: `${k1}-b`, listingApproval: goodNow }) }, second);
-    assertTrue(second.statusCode === 409 && !fetchCalls.includes('AddFixedPriceItem') && lastAddFixedPriceItemBody === '', `[V1.1a duplicate] a second publication with the same valid approval is refused with ZERO AddFixedPriceItem calls (got ${second.statusCode} ${second.body?.error || ''})`);
-    await cleanup(client, k1); await cleanup(client, `${k1}-b`);
-    await client.query(`DELETE FROM data1_dev.outcome_event WHERE gk_asset_id = $1 AND external_listing_id = $2 AND outcome_type = 'LISTED' AND occurred_at > now() - interval '5 minutes'`, [CREEPY_ASSET_ID, FAKE_ITEM_ID]);
-  }
+  // 9. DUPLICATE PUBLICATION is NOT asserted in this suite: it pre-seeds a DELISTED outcome for its fake ItemID (so the same asset can be
+  //    re-listed run after run), and the duplicate guard treats any terminal row for an ItemID as "ended" -- so here the guard is off by
+  //    construction. The duplicate proof, including re-presenting the SAME valid approval, lives in tests/gkp0-listing-live.test.js
+  //    (fresh listing ids) and tests/gkp0-failure-injection-live.test.js.
 
   await installReceipts(CREEPY_GOVERNED); // genuine receipts + the default PNG selection for everything after this block
 }
