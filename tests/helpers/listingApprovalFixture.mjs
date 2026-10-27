@@ -21,7 +21,12 @@ export function makeApprover({ repoRoot, mockRes, tag = 'approver' }) {
     const res = mockRes();
     // each approval call looks like a distinct client so the endpoint's per-principal+IP limiter (30/10 min) is not tripped by a long suite
     await previewHandler({ method: 'POST', headers: { ...req.headers, 'x-forwarded-for': `${tag}-${++seq}` }, body: { action: 'approve', gkAssetId: b.gkAssetId, price: pm ? parseFloat(pm[0]) : null } }, res);
-    if (res.statusCode === 200 && res.body?.approval) b.listingApproval = res.body.approval;
+    if (res.statusCode === 200 && res.body?.approval) {
+      b.listingApproval = res.body.approval;
+      // V1.1a Phase 2: photos are resolved server-side from the approved ORDERED hashes; the client sends no bytes. (`__keepLegacyImages` opts a test into the rejection case.)
+      if (!('approvedPhotoHashes' in b)) b.approvedPhotoHashes = (res.body.package?.photos?.selected || []).map((x) => x.contentHash);
+      if (!req.__keepLegacyImages) { delete b.images; delete b.image; }
+    }
     return req;
   };
 }

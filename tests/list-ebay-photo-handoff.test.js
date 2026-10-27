@@ -121,7 +121,12 @@ async function approveForTest(req) {
   const res = mockRes();
   await previewHandler({ method: 'POST', headers: { ...req.headers, 'x-forwarded-for': `smoke-preview-${++previewSeq}` }, body: { action: 'approve', gkAssetId: b.gkAssetId, price: pm ? parseFloat(pm[0]) : null } }, res);
   lastApproveStatus = res.statusCode;
-  if (res.statusCode === 200 && res.body?.approval) b.listingApproval = res.body.approval;
+  if (res.statusCode === 200 && res.body?.approval) {
+    b.listingApproval = res.body.approval;
+    // V1.1a Phase 2: photos are resolved server-side from the approved ORDERED hashes. An explicit `approvedPhotoHashes` (even null) is kept as given.
+    if (!('approvedPhotoHashes' in b)) b.approvedPhotoHashes = (res.body.package?.photos?.selected || []).map((x) => x.contentHash);
+    if (!req.__keepLegacyImages) { delete b.images; delete b.image; }
+  }
 }
 
 
@@ -301,14 +306,14 @@ console.log('\n-- THE ORIGINAL BUG, reproduced exactly: only a singular `image` 
       image: TINY_PNG_DATA_URL, // the OLD, buggy client shape -- no `images` array
       matchConfidence: { tier: 'HIGH' },
     }),
+    __keepLegacyImages: true,
   };
   const res = mockRes();
   await handler(req, res);
 
   assertTrue(mockState.mediaCalls.length === 0 && !fetchCalls.includes('UploadSiteHostedPictures'), 'no eBay image upload (Media API or legacy) was ever called (item.images was empty -- the exact real root cause)');
-  assertTrue(res.statusCode === 400, `blocked before any eBay call -> 400 PUBLISH_BLOCKED_NO_PHOTO (got ${res.statusCode})`);
-  assertTrue(res.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO', 'error code = PUBLISH_BLOCKED_NO_PHOTO');
-  assertTrue(/PUBLISH BLOCKED — NO VALID EBAY PHOTO/.test(res.body?.message || ''), 'operator-facing message states PUBLISH BLOCKED — NO VALID EBAY PHOTO');
+  assertTrue(res.statusCode === 400, `blocked before any eBay call -> 400 (got ${res.statusCode})`);
+  assertTrue(res.body?.error === 'LEGACY_CLIENT_PHOTOS_REJECTED', `V1.1a Phase 2: client-supplied photo data is REJECTED outright (got ${res.body?.error})`);
   assertTrue(!fetchCalls.includes('GetUser') && !fetchCalls.includes('AddFixedPriceItem'), 'ZERO further eBay calls made (no seller verification, no AddFixedPriceItem attempt)');
 }
 
@@ -318,7 +323,7 @@ console.log('\n-- ZERO-PHOTO PRECALL GATE: no image field at all -> blocked befo
   const req = {
     method: 'POST',
     headers: authHeaders,
-    body: baseItem({ matchConfidence: { tier: 'HIGH' } }), // no image, no images
+    body: baseItem({ matchConfidence: { tier: 'HIGH' }, approvedPhotoHashes: null }), // no photo declaration at all
   };
   const res = mockRes();
   await handler(req, res);
@@ -364,23 +369,31 @@ console.log('\n== EBAY MEDIA API CUTOVER: ordering, zero-call refusals, failure 
   assertTrue(lastAddFixedPriceItemXml.includes(`<PictureURL>${FAKE_HOSTED_URL}</PictureURL>`), 'AddFixedPriceItem carries the EPS URL returned by the Media API lookup');
   await cleanupOutcome(dbClient, okKey);
 
-  // -- invalid SOURCE media => ZERO outbound calls of any kind (no OAuth refresh, no metadata, no Media API) --
-  const badSources = [
-    ['bytes are not the declared PNG', 'data:image/png;base64,' + Buffer.from('definitely not a png').toString('base64'), 'source-bytes-not-the-declared-format'],
-    ['not an image data URL (remote URL)', 'https://example.com/photo.jpg', 'source-not-an-image-data-url'],
-    ['unsupported format', 'data:image/svg+xml;base64,' + Buffer.from('<svg/>').toString('base64'), 'source-format-unsupported'],
-    ['empty payload', 'data:image/png;base64,', 'source-empty'],
-    ['valid PNG that is NOT this asset\'s photo', 'data:image/png;base64,' + Buffer.concat([pngBytes, Buffer.from('x')]).toString('base64'), 'media-not-for-this-asset'],
+  // -- V1.1a Phase 2: the client declares ONLY ordered hashes; the server resolves the photographs itself. Every invalid declaration
+  //    is refused with ZERO outbound calls of any kind (no OAuth refresh, no metadata, no Media API). --
+  const ownedSha = createHash('sha256').update(pngBytes).digest('hex');
+  const { listAssetMediaForListing: listMedia } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+  const otherOwned = (await listMedia({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID })).find((m) => m.contentHash !== ownedSha);
+  const declCases = [
+    ['no declaration at all', { approvedPhotoHashes: null }, 400, 'PUBLISH_BLOCKED_NO_PHOTO', 'approved-hashes-missing'],
+    ['empty declaration', { approvedPhotoHashes: [] }, 400, 'PUBLISH_BLOCKED_NO_PHOTO', 'approved-hashes-missing'],
+    ['malformed hash', { approvedPhotoHashes: ['not-a-hash'] }, 400, 'PUBLISH_BLOCKED_NO_PHOTO', 'approved-hash-malformed'],
+    ['duplicate hash', { approvedPhotoHashes: [ownedSha, ownedSha] }, 400, 'PUBLISH_BLOCKED_NO_PHOTO', 'approved-hash-duplicate'],
+    ['well-formed hash that is NOT a media row of this asset', { approvedPhotoHashes: ['0'.repeat(64)] }, 400, 'PUBLISH_BLOCKED_NO_PHOTO', 'media-not-for-this-asset'],
+    ['one owned + one foreign hash', { approvedPhotoHashes: [ownedSha, '1'.repeat(64)] }, 400, 'PUBLISH_BLOCKED_NO_PHOTO', 'media-not-for-this-asset'],
+    ['legacy client-supplied photo bytes (valid owned PNG)', { images: [TINY_PNG_DATA_URL] }, 400, 'LEGACY_CLIENT_PHOTOS_REJECTED', undefined, true],
+    ['legacy client photo bytes alongside a correct declaration', { images: [TINY_PNG_DATA_URL], approvedPhotoHashes: [ownedSha] }, 400, 'LEGACY_CLIENT_PHOTOS_REJECTED', undefined, true],
+    ['legacy singular `image` field', { image: TINY_PNG_DATA_URL }, 400, 'LEGACY_CLIENT_PHOTOS_REJECTED', undefined, true],
   ];
-  for (const [label, img, reason] of badSources) {
+  if (otherOwned) declCases.push(['owned but NOT approved (extra photo declared)', { approvedPhotoHashes: [ownedSha, otherOwned.contentHash] }, 409, 'LISTING_PACKAGE_PHOTO_MISMATCH']);
+  for (const [label, over, status, code, reason, keepLegacy] of declCases) {
     reset();
-    r = await run(baseItem({ images: [img], matchConfidence: { tier: 'HIGH' } }));
-    assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && r.body?.reason === reason, `invalid source (${label}) -> 400 PUBLISH_BLOCKED_NO_PHOTO/${reason} (got ${r.statusCode}/${r.body?.reason})`);
-    assertTrue(callLog.length === 0, `invalid source (${label}) -> ZERO outbound eBay calls of any kind (saw ${JSON.stringify(callLog)})`);
+    const res = mockRes();
+    await handler({ method: 'POST', headers: authHeaders, body: baseItem({ matchConfidence: { tier: 'HIGH' }, ...over }), ...(keepLegacy ? { __keepLegacyImages: true } : {}) }, res);
+    r = res;
+    assertTrue(r.statusCode === status && r.body?.error === code && (reason === undefined || r.body?.reason === reason), `declaration refused (${label}) -> ${status} ${code}${reason ? '/' + reason : ''} (got ${r.statusCode} ${r.body?.error}/${r.body?.reason})`);
+    assertTrue(callLog.length === 0, `declaration refused (${label}) -> ZERO outbound eBay calls of any kind (saw ${JSON.stringify(callLog)})`);
   }
-  reset();
-  r = await run(baseItem({ images: [TINY_PNG_DATA_URL, 'data:image/png;base64,' + Buffer.from('second photo is junk').toString('base64')], matchConfidence: { tier: 'HIGH' } }));
-  assertTrue(r.statusCode === 400 && callLog.length === 0, 'one valid + one invalid source photo -> whole publish refused with ZERO outbound calls');
 
   // -- Media API failure / malformed response => AddFixedPriceItem and GetUser are never reached --
   const matrix = [

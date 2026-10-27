@@ -27,7 +27,11 @@ export const getMyCollectionItem = async ({ principalId, id }) => { rec('getMyCo
 export const getCanonicalCollectionItemIdForAsset = async () => { rec('getCanonicalCollectionItemIdForAsset'); return C1.cfg.canonicalRowId; };
 export const getAssetMediaContentHashes = async () => { rec('getAssetMediaContentHashes'); return C1.cfg.mediaHashes; };
 // V1.1a -- the asset's durable media rows (id, hash, content type, physical view). A read; no bytes. Derived from the same cfg hashes.
-export const listAssetMediaForListing = async () => { rec('listAssetMediaForListing'); return (C1.cfg.mediaHashes || []).map((h) => ({ mediaId: `m-${String(h).slice(0, 8)}`, mediaType: 'capture-photo', contentHash: h, contentType: 'image/png', captureView: null })); };
+export const listAssetMediaForListing = async (a) => { rec('listAssetMediaForListing'); C1.lastAssetId = a?.gkAssetId; return (C1.cfg.mediaHashes || []).map((h) => ({ mediaId: `m-${String(h).slice(0, 8)}`, mediaType: 'capture-photo', contentHash: h, contentType: 'image/png', captureView: null })); };
+// V1.1a Phase 2 -- server-side photo resolution: owner-authorized media row + stored bytes. (This DB-free harness serves the 1x1 PNG for any row.)
+export const getMediaById = async ({ mediaId }) => { rec('getMediaById'); return { id: mediaId, asset_id: C1.lastAssetId, object_uri: `stub:${mediaId}` }; };
+const STUB_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+export const getBytes = async () => { rec('getBytes'); return STUB_PNG; };
 export const validateOutcomeAttachment = async () => { rec('validateOutcomeAttachment'); };
 export const assertListingAuthorized = async () => { rec('assertListingAuthorized'); };
 export const getOperatorActionForListing = async () => { rec('getOperatorActionForListing'); return { actionValueAmount: C1.cfg.listActionAmount }; };

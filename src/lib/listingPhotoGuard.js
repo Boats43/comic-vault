@@ -87,3 +87,32 @@ export function assertSourceImages({ images, assetMediaHashes }) {
     return { bytes, mimeType, sha256: sha };
   });
 }
+
+// ── V1.1a PHASE 2: SERVER-SIDE PHOTO RESOLUTION ──────────────────────────────────────────────────────────
+// The client no longer sends photo bytes. It declares the approved ORDERED content hashes; the server resolves each hash to a
+// durable media row of THIS asset (owner-checked by the caller's loaders), reads the stored bytes itself, re-hashes them and
+// requires: stored bytes == row content_hash == approved hash, a format the eBay Media API accepts, and matching magic bytes.
+// Returns [{ bytes, mimeType, sha256 }] in the approved order. Throws PhotoGuardError (PUBLISH_BLOCKED_NO_PHOTO) otherwise.
+const HEX64 = /^[0-9a-f]{64}$/;
+export async function resolveApprovedSourcePhotos({ approvedHashes, mediaRows, loadBytes, maxPhotos = 12, maxBytes = 3 * 1024 * 1024 }) {
+  if (!Array.isArray(approvedHashes) || approvedHashes.length === 0) throw new PhotoGuardError('approved-hashes-missing');
+  if (approvedHashes.length > maxPhotos) throw new PhotoGuardError('too-many-photos');
+  if (!approvedHashes.every((h) => typeof h === 'string' && HEX64.test(h))) throw new PhotoGuardError('approved-hash-malformed');
+  if (new Set(approvedHashes).size !== approvedHashes.length) throw new PhotoGuardError('approved-hash-duplicate');
+  const byHash = new Map((mediaRows || []).map((r) => [String(r.contentHash || '').toLowerCase(), r]));
+  const out = [];
+  for (const h of approvedHashes) {
+    const row = byHash.get(h);
+    if (!row) throw new PhotoGuardError('media-not-for-this-asset');
+    let bytes;
+    try { bytes = await loadBytes(row); } catch { throw new PhotoGuardError('stored-media-unreadable'); }
+    if (!bytes || !bytes.length) throw new PhotoGuardError('source-empty');
+    if (bytes.length > maxBytes) throw new PhotoGuardError('source-too-large');
+    if (sha256Hex(bytes) !== h) throw new PhotoGuardError('stored-bytes-hash-mismatch');
+    const mimeType = String(row.contentType || '').toLowerCase();
+    if (!MEDIA_API_MIMES.has(mimeType)) throw new PhotoGuardError('source-format-unsupported', mimeType);
+    if (!magicMatches(mimeType, bytes)) throw new PhotoGuardError('source-bytes-not-the-declared-format', mimeType);
+    out.push({ bytes, mimeType, sha256: h });
+  }
+  return out;
+}

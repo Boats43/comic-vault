@@ -125,7 +125,12 @@ async function approveForTest(req) {
   const res = mockRes();
   await previewHandler({ method: 'POST', headers: { ...req.headers, 'x-forwarded-for': `smoke-preview-${++previewSeq}` }, body: { action: 'approve', gkAssetId: b.gkAssetId, price: pm ? parseFloat(pm[0]) : null } }, res);
   lastApproveStatus = res.statusCode;
-  if (res.statusCode === 200 && res.body?.approval) b.listingApproval = res.body.approval;
+  if (res.statusCode === 200 && res.body?.approval) {
+    b.listingApproval = res.body.approval;
+    // V1.1a Phase 2: photos are resolved server-side from the approved ORDERED hashes; an explicit declaration (even null) is kept as given.
+    if (!('approvedPhotoHashes' in b)) b.approvedPhotoHashes = (res.body.package?.photos?.selected || []).map((x) => x.contentHash);
+    if (!req.__keepLegacyImages) { delete b.images; delete b.image; }
+  }
 }
 
 
@@ -181,7 +186,7 @@ function baseItem(overrides = {}) {
     // GK-208 — the zero-photo precall gate requires at least one usable
     // photo to reach AddFixedPriceItem at all; every scenario in this
     // file that's meant to reach that far needs one.
-    images: [TINY_PNG_DATA_URL],
+    approvedPhotoHashes: [createHash('sha256').update(Buffer.from(TINY_PNG_DATA_URL.split(',')[1], 'base64')).digest('hex')],
     ...overrides,
   };
 }
@@ -458,7 +463,7 @@ console.log('-- BUYER-FACING SANITATION (bundle): per-book internal reasoning ne
   addFixedPriceItemBehavior = 'success';
   lastAddFixedPriceItemBody = '';
   const mk = (title, issue, reason, extra = {}) => ({
-    title, issue, year: '1975', publisher: 'Test Pub', price: '$20.00', grade: 'VF', images: [TINY_PNG_DATA_URL],
+    title, issue, year: '1975', publisher: 'Test Pub', price: '$20.00', grade: 'VF', approvedPhotoHashes: [createHash('sha256').update(Buffer.from(TINY_PNG_DATA_URL.split(',')[1], 'base64')).digest('hex')],
     reason, claudeCheck: { flags: ['INTERNAL_FLAG_DIAG bundle'] }, keyIssue: 'No', ...extra,
   });
   const req = {
@@ -506,7 +511,7 @@ console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-
     gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID,
     outcomeIdempotencyKey: `list-ebay-packet-safety-${Date.now()}-${Math.random().toString(36).slice(2)}`, ...over,
   });
-  const run = async (body) => { fetchCalls.length = 0; mockState.mediaCalls.length = 0; lastAddFixedPriceItemBody = ''; const r = mockRes(); await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body }, r); return r; };
+  const run = async (body, opts = {}) => { fetchCalls.length = 0; mockState.mediaCalls.length = 0; lastAddFixedPriceItemBody = ''; const r = mockRes(); await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body, ...(opts.keepLegacy ? { __keepLegacyImages: true } : {}) }, r); return r; };
   const noEbayWrite = () => !fetchCalls.includes('AddFixedPriceItem');
 
   // --- PRICE (B/C: ack != packet) ---
@@ -559,7 +564,7 @@ console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-
   assertTrue(r.statusCode === 503 && r.body?.error === 'LISTING_METADATA_UNAVAILABLE' && noEbayWrite(), 'authoritative aspect/condition metadata unavailable -> 503 LISTING_METADATA_UNAVAILABLE (fail-closed)');
 
   // --- PHOTO last-mile (N/O/P/Q/R/S) ---
-  r = await run(base({ images: [], image: null }));
+  r = await run(base({ images: [], image: null, approvedPhotoHashes: null }));
   assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'N. missing photo -> PUBLISH_BLOCKED_NO_PHOTO');
   mockState.mediaImageUrl = 'https://i.ebayimg.example/PLACEHOLDER-picture.jpg';
   r = await run(base());
@@ -577,8 +582,10 @@ console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-
   assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'Q. non-image content-type -> PUBLISH_BLOCKED_NO_PHOTO');
   mockState.picture = 'ok';
   const otherPng = 'data:image/png;base64,' + Buffer.from('not-this-assets-photo-' + Date.now()).toString('base64');
-  r = await run(base({ images: [otherPng], image: otherPng }));
-  assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && noEbayWrite(), 'R. a photo that does NOT hash to a media row of this gkAssetId -> PUBLISH_BLOCKED_NO_PHOTO');
+  r = await run(base({ approvedPhotoHashes: [createHash('sha256').update(otherPng).digest('hex')] }));
+  assertTrue(r.statusCode === 400 && r.body?.error === 'PUBLISH_BLOCKED_NO_PHOTO' && r.body?.reason === 'media-not-for-this-asset' && noEbayWrite(), 'R. a declared hash that is NOT a media row of this gkAssetId -> PUBLISH_BLOCKED_NO_PHOTO');
+  r = await run(base({ images: [otherPng], image: otherPng }), { keepLegacy: true });
+  assertTrue(r.statusCode === 400 && r.body?.error === 'LEGACY_CLIENT_PHOTOS_REJECTED' && noEbayWrite(), 'R2. client-supplied photo bytes are rejected outright (no verification-bypassing legacy path)');
   r = await run(base());
   assertTrue(r.statusCode === 200 && lastAddFixedPriceItemBody.includes('<PictureURL>https://i.ebayimg.com/hosted/outcome1-smoke.jpg</PictureURL>'), 'S. a valid hosted image of THIS asset proceeds to AddFixedPriceItem');
   // eBay-write packet: exact price-bound, Best Offer opt-in works but is OFF by default

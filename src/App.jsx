@@ -13770,8 +13770,7 @@ export default function App() {
     // getComicPhotos(item) is the SAME array this file already uses
     // everywhere else (photo strip, packet generation) — sending it here
     // too, not inventing a new source of truth.
-    let allPhotos = getComicPhotos(item);
-    let coverPhoto = allPhotos[0] || null;
+    let approvedPhotoHashes = null;
     // Q41: acknowledged-override listings carry their audit payload to the
     // server so [Q41-override] appears in Vercel logs (client console does
     // not reach log capture).
@@ -13819,39 +13818,10 @@ export default function App() {
             operatorActionEventId: currentAction.id,
           };
           grailkeyBearerToken = getSession()?.token || null;
-          // OUTGOING PHOTO REPAIR (2026-10-16) — publish the asset's CERTIFIED durable FRONT evidence, not a catalogue
-          // display photo: the exact stored bytes come through the existing authenticated media pathway and are re-verified
-          // against the media row's hash before they leave the device (src/lib/listingPhotoSelection.js). The server photo
-          // guard is unchanged and re-checks. A FRONT that cannot be retrieved/verified fails the listing closed here. An
-          // asset with no FRONT row keeps the existing behavior (the server guard still decides) — never a silent substitute.
-          // V1.1a: when the seller has APPROVED a listing package, publish exactly its photographs, in its order, each re-verified
-          // against its media row's hash before leaving the device. Otherwise the FRONT-only behaviour above is unchanged.
-          if (item.listingApproval && Array.isArray(item.listingApprovalMediaIds) && item.listingApprovalMediaIds.length) {
-            const sel = selectApprovedEvidenceMedia(graph, item.listingApprovalMediaIds);
-            if (!sel.ok) throw new Error(sel.message);
-            const approvedImages = [];
-            for (const row of sel.rows) {
-              const got = await fetchCertifiedListingPhoto({ row, fetchMedia: (mediaId) => authFetch(`/api/asset-media?mediaId=${encodeURIComponent(mediaId)}`) });
-              if (!got.ok) throw new Error(got.message);
-              approvedImages.push(...got.images);
-            }
-            if (approvedImages.reduce((n, d) => n + d.length, 0) > 4_200_000) {
-              throw new Error('The approved photographs are too large to send in one request (about 4.5 MB limit). Deselect a photograph in the listing package and approve again.');
-            }
-            allPhotos = approvedImages;
-            coverPhoto = approvedImages[0];
-          } else {
-            const front = selectFrontEvidenceMedia(graph);
-            if (front.ok) {
-              const got = await fetchCertifiedListingPhoto({
-                row: front.row,
-                fetchMedia: (mediaId) => authFetch(`/api/asset-media?mediaId=${encodeURIComponent(mediaId)}`),
-              });
-              if (!got.ok) throw new Error(got.message);
-              allPhotos = got.images;
-              coverPhoto = got.images[0];
-            }
-          }
+          // V1.1a PHASE 2 -- photographs are resolved ON THE SERVER. The client sends only the ORDERED content hashes of the approved
+          // package; the server loads each stored photo through owner-scoped authorization, re-hashes it, and rejects anything missing,
+          // altered, reordered or not part of the approval. No photo bytes leave this device.
+          approvedPhotoHashes = Array.isArray(item.listingApprovalPhotoHashes) ? item.listingApprovalPhotoHashes : null;
         }
       }
       // A missing/non-ok graph response (not linked, 404, network error)
@@ -13884,8 +13854,7 @@ export default function App() {
         priceLow: item.priceLow,
         priceHigh: item.priceHigh,
         reason: item.reason,
-        image: coverPhoto,
-        images: allPhotos,
+        approvedPhotoHashes,
         // GrailKey Directive Z, C3 — raw evidence fields for the server's
         // OWN independent re-derivation (api/list-ebay.js), never a
         // pre-computed verdict. The server never reads actionAuthority/
@@ -14654,7 +14623,7 @@ export default function App() {
         try {
           const out = await listOnEbay({
             ...item, price: `$${Number(p).toFixed(2)}`, q41Override, listingApproval: approval,
-            listingApprovalMediaIds: (approvalPackage?.photos?.selected || []).map((x) => x.mediaId),
+            listingApprovalPhotoHashes: (approvalPackage?.photos?.selected || []).map((x) => x.contentHash),
           });
           return { ok: true, ...(out || {}) };
         } catch (e) { return { ok: false, status: e?.status ?? null, code: e?.code ?? null, message: e?.message || String(e) }; }

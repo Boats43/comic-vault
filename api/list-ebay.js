@@ -46,7 +46,7 @@ import { toCents, assertQ41PriceBinding, assertListActionPriceBinding, PriceBind
 import { getAspectMetadata, getItemConditionPolicy, buildItemSpecificsFromMetadata, resolveDomesticShippingService } from "../src/lib/ebayListingMetadata.js";
 import { buildListingPackage, appendShippingAndReturns } from "../src/lib/listingPackage.js";
 import { checkListingApproval } from "../src/lib/listingApproval.js";
-import { assertPublishPhotos, assertSourceImages, PhotoGuardError } from "../src/lib/listingPhotoGuard.js";
+import { assertPublishPhotos, resolveApprovedSourcePhotos, PhotoGuardError } from "../src/lib/listingPhotoGuard.js";
 import { uploadImageViaMediaApi, MediaApiError, hasMediaScope } from "../src/lib/ebayMediaApi.js";
 
 // Outcome #1 — OPTIONAL, ADDITIVE GrailKey linkage. Neither import below
@@ -57,7 +57,8 @@ import { uploadImageViaMediaApi, MediaApiError, hasMediaScope } from "../src/lib
 // endpoint has no mandatory GrailKey auth today, and this dispatch does
 // not add one).
 import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
-import { listAssetMediaForListing } from "../src/modules/assets/index.js";
+import { listAssetMediaForListing, getMediaById } from "../src/modules/assets/index.js";
+import * as media from "../src/modules/media/index.js";
 import { acquirePublicationMutex, getPublicationIdentity, recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, resolveCollectionItemLink, getCanonicalCollectionItemIdForAsset, getOperatorActionForListing, getAssetMediaContentHashes, authorizeOperatorManualListing, recordMarketplaceAttemptPhase, ListingAttemptBlockedError, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
 import { sanitizeQ41Ack, buildAckWarnings, classifyAddItemResponse } from "../src/lib/operatorAuthority.js";
 import { attemptListedOutcome } from "../src/lib/marketplaceOutcomeBridge.js";
@@ -1215,25 +1216,32 @@ async function handleListEbay(req, res, ctx) {
     // EBAY MEDIA API CUTOVER — SOURCE MEDIA VALIDATION, before ANY eBay network call (reads included).
     // Every photo must be a real image data URL, in a format the Media API accepts, whose bytes match its declared
     // format and hash to a media row of THIS gkAssetId. Invalid source => PUBLISH_BLOCKED_NO_PHOTO with ZERO eBay calls.
-    // T2-1: up to 12 images; only upload them all when confidence is not LOW.
-    const shouldUploadMultiple =
-      item.matchConfidence?.tier !== 'LOW' &&
-      item.claudeCheck?.confidence !== 'LOW';
-    const imagesToUpload = (shouldUploadMultiple || item.listingApproval)
-      ? (item.images || []).filter(Boolean).slice(0, 12)
-      : [(item.images?.[0] || item.image || null)].filter(Boolean);
-    let assetMediaHashes, sourcePhotos;
+    // V1.1a PHASE 2 -- legacy client-supplied photo bytes are REJECTED. The server resolves the photographs itself from the durable,
+    // owner-authorized media rows of this asset, keyed by the approved ORDERED content hashes the client declares.
+    if ((Array.isArray(item.images) && item.images.length > 0) || item.image) {
+      console.error('[ebay] LEGACY_CLIENT_PHOTOS_REJECTED -- aborting before any eBay call');
+      res.status(400).json({ error: 'LEGACY_CLIENT_PHOTOS_REJECTED', message: 'Photographs are resolved on the server from the approved package; client-supplied photo data is not accepted. Nothing was listed.' });
+      return;
+    }
+    let sourcePhotos;
     try {
-      assetMediaHashes = await getAssetMediaContentHashes({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId });
-      sourcePhotos = assertSourceImages({ images: imagesToUpload, assetMediaHashes });
+      const mediaRows = await listAssetMediaForListing({ principalId: grailkeyPrincipalId, gkAssetId: item.gkAssetId });
+      sourcePhotos = await resolveApprovedSourcePhotos({
+        approvedHashes: item.approvedPhotoHashes, mediaRows,
+        loadBytes: async (row) => {
+          const mediaRow = await getMediaById({ principalId: grailkeyPrincipalId, mediaId: row.mediaId }); // owner-authorized BEFORE storage is touched
+          if (!mediaRow?.object_uri || mediaRow.asset_id !== item.gkAssetId) throw new Error('media row not resolvable for this asset');
+          return media.getBytes({ objectUri: mediaRow.object_uri });
+        },
+      });
     } catch (e) {
       if (e instanceof PhotoGuardError) {
-        console.error(`[ebay] source media refused (${e.reason}) — aborting before any eBay call`);
+        console.error(`[ebay] source media refused (${e.reason}) -- aborting before any eBay call`);
         res.status(400).json({ error: 'PUBLISH_BLOCKED_NO_PHOTO', reason: e.reason, message: e.message });
         return;
       }
-      console.error('[ebay] source media validation failed unexpectedly — aborting before any eBay call:', e?.message || e);
-      res.status(400).json({ error: 'PUBLISH_BLOCKED_NO_PHOTO', reason: 'source-validation-error', message: 'PUBLISH BLOCKED — NO VALID EBAY PHOTO (the photo could not be verified against this asset).' });
+      console.error('[ebay] source media resolution failed unexpectedly -- aborting before any eBay call:', e?.message || e);
+      res.status(400).json({ error: 'PUBLISH_BLOCKED_NO_PHOTO', reason: 'source-validation-error', message: 'PUBLISH BLOCKED -- NO VALID EBAY PHOTO (the photo could not be verified against this asset).' });
       return;
     }
 
@@ -1394,15 +1402,15 @@ async function handleListEbay(req, res, ctx) {
         });
         return;
       }
-      // The photographs sent must be EXACTLY the approved, hash-bound set; publish them in the approved order (FRONT first).
+      // The photographs resolved must be EXACTLY the approved, hash-bound set IN THE APPROVED ORDER (FRONT first): a missing, extra,
+      // substituted or reordered declaration is refused, never silently corrected.
       const approvedOrder = listingPkg.photos.selected.map((p) => p.contentHash);
-      const sentByHash = new Map(sourcePhotos.map((p) => [p.sha256, p]));
-      if (sentByHash.size !== approvedOrder.length || !approvedOrder.every((h) => sentByHash.has(h))) {
-        console.error('[ebay] LISTING_PACKAGE_PHOTO_MISMATCH — photographs sent differ from the approved package; aborting before any eBay write');
-        res.status(409).json({ error: 'LISTING_PACKAGE_PHOTO_MISMATCH', message: 'The photographs sent do not match the approved package; nothing was listed.', approved: approvedOrder.length, sent: sentByHash.size });
+      const resolvedOrder = sourcePhotos.map((p) => p.sha256);
+      if (resolvedOrder.length !== approvedOrder.length || !approvedOrder.every((h, i) => resolvedOrder[i] === h)) {
+        console.error('[ebay] LISTING_PACKAGE_PHOTO_MISMATCH -- declared photographs differ from the approved package (set or order); aborting before any eBay write');
+        res.status(409).json({ error: 'LISTING_PACKAGE_PHOTO_MISMATCH', message: 'The photographs declared do not match the approved package (set or order); nothing was listed.', approved: approvedOrder.length, sent: resolvedOrder.length });
         return;
       }
-      sourcePhotos = approvedOrder.map((h) => sentByHash.get(h));
       listingPlan.title = listingPkg.title;
       listingPlan.descriptionBody = listingPkg.descriptionBody;
       listingPlan.specifics = listingPkg.specifics;
@@ -1471,7 +1479,7 @@ async function handleListEbay(req, res, ctx) {
     // (a) hash to a media row belonging to THIS gkAssetId, (b) be an https, approved-host,
     // non-placeholder URL, (c) be reachable and serve image/*. Anything else => PUBLISH_BLOCKED_NO_PHOTO.
     try {
-      await assertPublishPhotos({ sourceImages: uploadedPhotos, assetMediaHashes });
+      await assertPublishPhotos({ sourceImages: uploadedPhotos, assetMediaHashes: sourcePhotos.map((p) => p.sha256) });
     } catch (e) {
       if (e instanceof PhotoGuardError) {
         console.error(`[ebay] photo guard refused (${e.reason}) — aborting before AddFixedPriceItem`);

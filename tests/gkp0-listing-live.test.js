@@ -17,6 +17,7 @@ import { randomBytes } from 'node:crypto';
 import { Client } from 'pg';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { metaFetch, shippingResponse, mockState } from './helpers/ebayPacketMocks.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -119,7 +120,7 @@ function listReq(principalId, asset, o = {}) {
   const { token } = issueToken({ principalId });
   const body = {
     title: 'CLIENT TITLE (ignored)', publisher: 'x', year: '1990', price: '$25.00', grade: 'VF',
-    gkAssetId: asset.gkAssetId, decisionEventId: asset.decisionEventId, operatorActionEventId: asset.operatorActionEventId, images: [TINY_PNG_DATA_URL],
+    gkAssetId: asset.gkAssetId, decisionEventId: asset.decisionEventId, operatorActionEventId: asset.operatorActionEventId, approvedPhotoHashes: [createHash('sha256').update(Buffer.from(TINY_PNG_DATA_URL.split(',')[1], 'base64')).digest('hex')],
     ...(o.ready ? {} : { q41Override: { priceOverridden: true, manualPrice: 25, lockClassAcknowledged: 'insufficiency', locks: ['no-sold-evidence'], state: 'REVIEW', decision: 'RESEARCH' } }),
     ...(o.ready && o.q41 ? { q41Override: { priceOverridden: true, manualPrice: 25, lockClassAcknowledged: 'insufficiency', locks: ['no-sold-evidence'], state: 'REVIEW', decision: 'RESEARCH' }, priorLockCodes: ['market-standing-no-sold-evidence'] } : {}),
     ...(o.ready ? { rawComps: { count: 8 }, soldComps: 5, soldCompDiagnostics: { rawCount: 6, verifiedCount: 5, newestDaysAgo: 10 }, pricingSource: 'verified_sold', matchConfidence: { tier: 'HIGH', score: 95 }, identityConfident: true, decision: { action: 'LIST_NOW' } } : {}),

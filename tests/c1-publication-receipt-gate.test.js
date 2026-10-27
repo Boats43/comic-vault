@@ -94,7 +94,7 @@ const request = (over = {}) => ({
   method: 'POST',
   body: {
     title: 'Old Man Logan Mike Deodato', issue: '25', gkAssetId: ASSET, decisionEventId: 'd-1', operatorActionEventId: 'oa-1', outcomeIdempotencyKey: 'k-1',
-    price: '$15.42', images: [TINY_PNG_DATA_URL], matchConfidence: { tier: 'HIGH' },
+    price: '$15.42', approvedPhotoHashes: [PNG_HASH], matchConfidence: { tier: 'HIGH' },
     q41Override: { priceOverridden: true, manualPrice: 15.42 },
     ...over,
   },

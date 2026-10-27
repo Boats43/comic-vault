@@ -82,12 +82,12 @@ const start = app.indexOf('const listOnEbay = useCallback');
 const end = app.indexOf('apiFetch("/api/list-ebay"', start);
 const body = start > 0 && end > start ? app.slice(start, end) : '';
 ok(body.length > 1000, 'listOnEbay located');
-ok(/selectFrontEvidenceMedia\(graph\)/.test(body) && /fetchCertifiedListingPhoto\(/.test(body), 'the listing selects and retrieves the asset\'s FRONT evidence');
-ok(/authFetch\(`\/api\/asset-media\?mediaId=\$\{encodeURIComponent\(mediaId\)\}`\)/.test(body), 'bytes come only through the existing authenticated /api/asset-media route');
-ok(/if \(!got\.ok\) throw new Error\(got\.message\)/.test(body), 'a FRONT that cannot be retrieved or verified fails the listing closed (before any list call)');
+// V1.1a Phase 2: bytes no longer travel from the device. The listing declares the approved package's ordered content hashes and the
+// server resolves each photograph from the owner-authorized media row (tests/v11a-server-photo-resolution.test.js proves that path).
+ok(/approvedPhotoHashes\s*=\s*Array\.isArray\(item\.listingApprovalPhotoHashes\)/.test(body), 'the listing declares the approved package ordered content hashes');
+ok(!/authFetch\(`\/api\/asset-media/.test(body) && !/fetchCertifiedListingPhoto\(/.test(body), 'the client no longer retrieves or sends photo bytes');
 ok(!/asset-media-append|capture-scan|putComic\(|createPhysicalAsset/.test(body), 'no media is created or written by the listing path (no duplicate media)');
-ok(/images:\s*allPhotos/.test(app.slice(end, end + 4000)) && /image:\s*coverPhoto/.test(app.slice(end, end + 4000)), 'the request carries the certified photo as image/images');
-ok(/server photo[\s/]*guard is unchanged/.test(body), 'the change is documented as leaving the server guard unchanged');
+ok(/approvedPhotoHashes,/.test(app.slice(end, end + 4000)) && !/image:\s*coverPhoto/.test(app.slice(end, end + 4000)), 'the request carries the hashes, not image/images');
 
 console.log(`\n=== ${passed} passed, ${failed} failed ===\n`);
 process.exit(failed ? 1 : 0);

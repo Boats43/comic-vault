@@ -139,7 +139,7 @@ export async function bootstrap({ registryFile, crashAfterCreate = false } = {})
     const hashes = await A.getAssetMediaContentHashes({ principalId, gkAssetId });
     const authorityReceipt = rcpt.issueAuthorityReceipt({ principalId, binding: { collectionItemId: canonicalId, gkAssetId, evidenceVersion: rcpt.computeEvidenceVersion(hashes) }, response: { title: plainAttrs.title, issue: plainAttrs.issue, year: plainAttrs.year, ...authority } });
     await coll.updateCollectionItem({ principalId, id: canonicalId, assetCategory: 'comic', attributes: { ...plainAttrs, authorityReceipt } });
-    return { gkAssetId, decisionEventId, operatorActionEventId, principalId, canonicalId };
+    return { gkAssetId, decisionEventId, operatorActionEventId, principalId, canonicalId, photoHashes: hashes };
   }
   function listRequest(principalId, asset, o = {}) {
     const { token } = issueToken({ principalId });
@@ -147,7 +147,7 @@ export async function bootstrap({ registryFile, crashAfterCreate = false } = {})
     const readyBody = { rawComps: { count: 8 }, soldComps: 5, soldCompDiagnostics: { rawCount: 6, verifiedCount: 5, newestDaysAgo: 10 }, pricingSource: 'verified_sold', matchConfidence: { tier: 'HIGH', score: 95 }, identityConfident: true, decision: { action: 'LIST_NOW' } };
     return { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: {
       title: 'CLIENT TITLE (ignored)', publisher: 'x', year: '1990', price: '$25.00', grade: 'VF',
-      gkAssetId: asset.gkAssetId, decisionEventId: asset.decisionEventId, operatorActionEventId: asset.operatorActionEventId, images: [TINY_PNG_DATA_URL],
+      gkAssetId: asset.gkAssetId, decisionEventId: asset.decisionEventId, operatorActionEventId: asset.operatorActionEventId, approvedPhotoHashes: asset.photoHashes,
       ...(o.ready ? readyBody : { q41Override: q41 }),
       ...(o.ready && o.q41 ? { q41Override: q41, priorLockCodes: ['market-standing-no-sold-evidence'] } : {}),
     } };
@@ -169,7 +169,12 @@ export async function bootstrap({ registryFile, crashAfterCreate = false } = {})
     if (!b.gkAssetId || b.listingApproval || req.__noApproval) return;
     const res = mockRes();
     await previewMod.default({ method: 'POST', headers: { ...req.headers, 'x-forwarded-for': `gkp0-preview-${++previewSeq}` }, body: { action: 'approve', gkAssetId: b.gkAssetId, price: parsePrice(b.price ?? b.priceHigh ?? b.priceLow) } }, res);
-    if (res.statusCode === 200 && res.body?.approval) b.listingApproval = res.body.approval;
+    if (res.statusCode === 200 && res.body?.approval) {
+      b.listingApproval = res.body.approval;
+      // V1.1a Phase 2: photos are resolved server-side from the approved ORDERED hashes; the client sends no bytes. (`__keepLegacyImages` opts a test into the rejection case.)
+      if (!('approvedPhotoHashes' in b)) b.approvedPhotoHashes = (res.body.package?.photos?.selected || []).map((x) => x.contentHash);
+      if (!req.__keepLegacyImages) { delete b.images; delete b.image; }
+    }
   }
   const listHandler = async (req, res) => { await approvalFor(req); return listMod.default(req, res); };
   async function publish(principalId, asset, o) { const res = mockRes(); await listHandler(listRequest(principalId, asset, o), res); return res; }
