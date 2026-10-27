@@ -121,6 +121,10 @@ DATA-0E-FULL acquisition runs as one detached process, independent of any Claude
 
 **Runbook pointer:** root `C:\grailkey-data\data-0e-full\` · resume source of truth `acquisition-checkpoint.json` · logs `acquire.stdout.log`/`acquire.stderr.log` · watchdog: Scheduled Task "GrailKey-0E-Full-Watchdog" (trigger AtLogOn, resume-only, PID-guarded — **known caveat: the registration script has a cosmetic reporting bug and may print success unconditionally; script output alone is not proof registration succeeded**) · quota docs `docs/DATA-1-ACQUISITION-QUOTA-WINDOW.md`.
 
+### Automated Git Safety (P0 PROTOCOL - standing, ruled 2026-10-27, C3 stash incident)
+Automated sessions must never execute `git stash`, `git stash pop`, or other automated stash operations. Baseline regression comparisons must use a separate clean worktree created from the exact baseline commit. Never move unrelated uncommitted or stashed work into another active worktree. Preserve existing user stashes and files.
+**Evidence:** a baseline comparison ran `git stash` on an already-clean worktree, then `git stash pop` popped an UNRELATED user stash (GK-179/GK-184/GK-194 pre-work) into the active worktree, with conflicts and stray untracked files. Nothing was lost (the entry was kept), but it was a near miss.
+
 ### Directive preflight requirement (P0 PROTOCOL — standing, ruled 2026-08-11, GrailKey Directive 2026-08-11-B)
 **Any directive referencing a ticket ID (`GK-N`) or a structural fact about this repo must run a preflight check against `docs/TICKET-REGISTRY.md` before doing work.** The registry exists specifically so that lookup is a `grep`, not a re-investigation. Preflight shape: report HEAD SHA, working-tree-clean status, each referenced `GK-N`'s current status/aliases from the registry, and each referenced structural fact's stamped value below — before proceeding, not after.
 
