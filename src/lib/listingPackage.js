@@ -8,6 +8,11 @@
 //   outputs : title, condition mapping, item specifics, factual description, exact photo selection (+ missing views),
 //             price + evidence-class disclosure, unresolved fields, unsupported claims, and a packageHash that binds approval.
 //
+// APPROVAL BOUNDARY (what packageHash covers): category, title, condition id, the shipping-independent DESCRIPTION BODY (identity, variant,
+// condition disclosure / grade, seller note, photo-coverage disclosure), item specifics, the ORDERED photo content hashes, and the price.
+// It does NOT cover shipping service / cost, handling time, returns, Best Offer, or location: those are appended or set at publish time
+// (V1.1b must put seller-approved shipping and return policies into the final publication authorization).
+//
 // Law: describe ONLY supported facts. Never invent signatures, defects, restoration status, scarcity ratios, provenance or a
 // CGC/CBCS certification. Model-observed condition is shown to the seller but NEVER published unless the seller adopts it as
 // their own note. A generated package is not permission to publish: approval is a separate act bound to packageHash.
@@ -243,15 +248,17 @@ export function buildListingPackage({ governed, draft = null, media, price, pric
   const { evidenceClass, disclosure } = describePriceEvidence(pricingSource);
 
   const blocking = unresolved.filter((u) => u.severity === 'blocking');
+  // The eBay category is part of what is approved (a TPB / magazine flag moves the listing to another category).
+  const categoryId = isTPB ? '267' : (isMagazine ? '180' : '259104');
   const hashInput = {
-    v: PACKAGE_VERSION, title, conditionId: condition.ebayConditionId, descriptionBody,
+    v: PACKAGE_VERSION, categoryId, title, conditionId: condition.ebayConditionId, descriptionBody,
     specifics: specifics.map((s) => [s.name, s.value]), photos: photos.selected.map((p) => p.contentHash),
     priceCents: priceOk ? Math.round(amount * 100) : null,
   };
   const packageHash = aspectMeta && conditionPolicy ? createHash('sha256').update(stable(hashInput)).digest('hex') : null;
 
   return {
-    version: PACKAGE_VERSION, title, titleSource, governedTitle, condition, specifics, descriptionBody, descriptionHtml,
+    version: PACKAGE_VERSION, categoryId, title, titleSource, governedTitle, condition, specifics, descriptionBody, descriptionHtml,
     photos, price: { amount: priceOk ? amount : null, evidenceClass, disclosure },
     unresolved, unsupportedClaims, approvable: blocking.length === 0 && !!packageHash, packageHash,
     // Display-only: what the MODEL saw. Never published unless the seller adopts it into their own note.

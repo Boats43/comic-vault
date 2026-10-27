@@ -126,7 +126,19 @@ function listReq(principalId, asset, o = {}) {
   };
   return { method: 'POST', headers: { authorization: `Bearer ${token}` }, body };
 }
-async function publish(principalId, asset, o) { const res = mockRes(); await listHandler(listReq(principalId, asset, o), res); return res; }
+// V1.1a -- a publish requires the seller's server-signed APPROVAL of the exact listing package, obtained from the REAL
+// api/listing-preview.js "approve" action (never forged). Each call looks like a distinct client (per principal+IP rate limiter).
+const previewHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'listing-preview.js')).href)).default;
+let previewSeq = 0;
+async function approveFor(req) {
+  const b = req.body || {};
+  if (!b.gkAssetId || b.listingApproval) return;
+  const pm = String(b.price ?? '').replace(/,/g, '').match(/[\d.]+/);
+  const r = mockRes();
+  await previewHandler({ method: 'POST', headers: { ...req.headers, 'x-forwarded-for': `gkp0-live-preview-${++previewSeq}` }, body: { action: 'approve', gkAssetId: b.gkAssetId, price: pm ? parseFloat(pm[0]) : null } }, r);
+  if (r.statusCode === 200 && r.body?.approval) b.listingApproval = r.body.approval;
+}
+async function publish(principalId, asset, o) { const res = mockRes(); const req = listReq(principalId, asset, o); await approveFor(req); await listHandler(req, res); return res; }
 let ipSeq = 0;
 async function listingsFor(principalId, withToken = true) {
   const res = mockRes();

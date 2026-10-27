@@ -162,12 +162,13 @@ export async function bootstrap({ registryFile, crashAfterCreate = false } = {})
   // V1.1a -- a publish now requires the seller's server-signed APPROVAL of the exact listing package. The harness obtains it from the
   // REAL api/listing-preview.js "approve" action (same auth, same durable row + media, same eBay-metadata mock) -- never forged.
   // Pass `req.__noApproval = true` for the negative case.
+  let previewSeq = 0; // each approval call looks like a distinct client so the preview endpoint's per-principal+IP limiter (30/10min) is not tripped by a long suite
   const parsePrice = (p) => { const m = String(p ?? '').replace(/,/g, '').match(/[\d.]+/); return m ? parseFloat(m[0]) : null; };
   async function approvalFor(req) {
     const b = req.body || {};
     if (!b.gkAssetId || b.listingApproval || req.__noApproval) return;
     const res = mockRes();
-    await previewMod.default({ method: 'POST', headers: req.headers, body: { action: 'approve', gkAssetId: b.gkAssetId, price: parsePrice(b.price ?? b.priceHigh ?? b.priceLow) } }, res);
+    await previewMod.default({ method: 'POST', headers: { ...req.headers, 'x-forwarded-for': `gkp0-preview-${++previewSeq}` }, body: { action: 'approve', gkAssetId: b.gkAssetId, price: parsePrice(b.price ?? b.priceHigh ?? b.priceLow) } }, res);
     if (res.statusCode === 200 && res.body?.approval) b.listingApproval = res.body.approval;
   }
   const listHandler = async (req, res) => { await approvalFor(req); return listMod.default(req, res); };

@@ -146,6 +146,8 @@ console.log('\n--- 8. package hash binds exactly what publishes ---');
   ok(build({ media: [...PHOTOS, m('m-pages', 'PAGES', '9'.repeat(64))] }).packageHash !== a.packageHash, 'a new photo changes the hash');
   ok(build({ media: [PHOTOS[1], PHOTOS[0], PHOTOS[2]] }).packageHash === a.packageHash, 'storage order of rows does not change the hash (publish order is by view)');
   ok(build({ governed: { ...OML, variant: 'Alex Ross B&W Sketch Virgin' } }).packageHash !== a.packageHash, 'a different edition changes the hash');
+  ok(build({ isTPB: true }).packageHash !== a.packageHash && build({ isTPB: true }).categoryId === '267' && a.categoryId === '259104', 'the eBay category is part of the approved package (a TPB flag moves it and changes the hash)');
+  ok(build({ isMagazine: true }).categoryId === '180', 'magazine category');
   ok(appendShippingAndReturns('x', 'USPS Ground Advantage') !== appendShippingAndReturns('x', 'USPS Priority Mail') && /SHIPPING/.test(appendShippingAndReturns('x')), 'shipping text is appended after hashing (V1.1b seller-shipping work is independent)');
 }
 
@@ -164,6 +166,15 @@ console.log('\n--- 9. server-signed approval ---');
   ok(checkListingApproval(ap, { principalId: P, gkAssetId: A, currentPackageHash: build({ price: 99 }).packageHash }).reason === 'stale-package', 'any change to the package makes the approval stale');
   ok(checkListingApproval(ap, { principalId: P, gkAssetId: A, currentPackageHash: null }).reason === 'package-unavailable', 'a non-approvable package can never match');
   ok(isApprovalCurrent({ approvedPackageHash: pkg.packageHash }, pkg) && !isApprovalCurrent({ approvedPackageHash: 'x' }, pkg), 'the UI current-check agrees');
+  // expiry: an old review is not good forever, even for an unchanged package
+  const H24 = 24 * 60 * 60 * 1000;
+  const old25 = issueListingApproval({ principalId: P, gkAssetId: A, packageHash: pkg.packageHash, now: Date.now() - H24 - 60000 });
+  ok(checkListingApproval(old25, { principalId: P, gkAssetId: A, currentPackageHash: pkg.packageHash }).reason === 'expired', 'an approval older than 24 hours is EXPIRED even though the package is unchanged');
+  const fresh23 = issueListingApproval({ principalId: P, gkAssetId: A, packageHash: pkg.packageHash, now: Date.now() - H24 + 60000 });
+  ok(checkListingApproval(fresh23, { principalId: P, gkAssetId: A, currentPackageHash: pkg.packageHash }).ok, 'an approval just inside 24 hours is still valid');
+  const future = issueListingApproval({ principalId: P, gkAssetId: A, packageHash: pkg.packageHash, now: Date.now() + 3600000 });
+  ok(checkListingApproval(future, { principalId: P, gkAssetId: A, currentPackageHash: pkg.packageHash }).reason === 'expired', 'an approval dated in the future (clock tampering) is refused');
+  ok(checkListingApproval(ap, { principalId: P, gkAssetId: A, currentPackageHash: pkg.packageHash, now: Date.now() + 2 * H24 }).reason === 'expired', 'a valid approval expires as the clock moves on');
   ok(issueListingApproval({ principalId: P, gkAssetId: A, packageHash: null }) === null, 'no approval can be issued for a non-hashed package');
   const saved = process.env.GRAILKEY_SESSION_SECRET; process.env.GRAILKEY_SESSION_SECRET = 'short';
   ok(issueListingApproval({ principalId: P, gkAssetId: A, packageHash: pkg.packageHash }) === null, 'fails closed below the 32-char secret floor');

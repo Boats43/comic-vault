@@ -117,12 +117,13 @@ const handler = async (req, res) => { await approveForTest(req); return rawHandl
 // api/listing-preview.js "approve" action (same auth, same durable row + media, same eBay-metadata mock) -- never forged here.
 // A request may set `__noApproval = true` for the negative case.
 let lastApproveStatus = null;
+let previewSeq = 0; // each approval call looks like a distinct client (the preview endpoint rate-limits per principal+IP)
 async function approveForTest(req) {
   const b = req.body || {};
   if (!b.gkAssetId || b.listingApproval || req.__noApproval) return;
   const pm = String(b.price ?? b.priceHigh ?? b.priceLow ?? '').replace(/,/g, '').match(/[\d.]+/);
   const res = mockRes();
-  await previewHandler({ method: 'POST', headers: req.headers, body: { action: 'approve', gkAssetId: b.gkAssetId, price: pm ? parseFloat(pm[0]) : null } }, res);
+  await previewHandler({ method: 'POST', headers: { ...req.headers, 'x-forwarded-for': `smoke-preview-${++previewSeq}` }, body: { action: 'approve', gkAssetId: b.gkAssetId, price: pm ? parseFloat(pm[0]) : null } }, res);
   lastApproveStatus = res.statusCode;
   if (res.statusCode === 200 && res.body?.approval) b.listingApproval = res.body.approval;
 }
@@ -814,7 +815,7 @@ console.log('-- V1.1a LISTING PACKAGE (real preview + real publish handlers, rea
   const noEbayWrites = () => !fetchCalls.includes('GetUser') && !fetchCalls.includes('AddFixedPriceItem') && !fetchCalls.includes('UploadSiteHostedPictures') && mockState.mediaCalls.length === 0 && lastAddFixedPriceItemBody === '';
   const callPreview = async (action, extra = {}, tok = token) => {
     const r = mockRes();
-    await previewHandler({ method: 'POST', headers: { authorization: `Bearer ${tok}` }, body: { action, gkAssetId: CREEPY_ASSET_ID, price: 61.41, ...extra } }, r);
+    await previewHandler({ method: 'POST', headers: { authorization: `Bearer ${tok}`, 'x-forwarded-for': `smoke-preview-${++previewSeq}` }, body: { action, gkAssetId: CREEPY_ASSET_ID, price: 61.41, ...extra } }, r);
     return r;
   };
   const publishWith = async (label, { bodyOver = {}, noApproval = false, approval } = {}) => {
@@ -898,6 +899,46 @@ console.log('-- V1.1a LISTING PACKAGE (real preview + real publish handlers, rea
   await installReceipts(CREEPY_GOVERNED, { draft: { selectedMediaIds: ['00000000-0000-7000-8000-00000000ffff'] } });
   r = await callPreview('preview');
   assertTrue(r.body?.package?.photos?.selected?.length === 0 && r.body.package.unresolved.some((u) => u.field === 'photos' && u.severity === 'blocking'), "[V1.1a photos] a media id that is not this asset's durable photo selects nothing (no substitution)");
+
+  // 8. FULL NEGATIVE MATRIX (each presents an approval that must NOT authorize this publication; every one: zero eBay writes).
+  await installReceipts(CREEPY_GOVERNED);
+  const baseline = (await callPreview('approve')).body?.approval;
+  const baselineHash = JSON.parse(baseline.body).packageHash;
+  assertTrue(!!baseline, '[V1.1a negatives] a fresh, valid approval exists for the current package');
+  p = await publishWith('wrongprincipal', { noApproval: true, approval: issueListingApproval({ principalId: OTHER_PRINCIPAL, gkAssetId: CREEPY_ASSET_ID, packageHash: baselineHash }) });
+  assertTrue(p.res.statusCode === 409 && p.res.body?.reason === 'invalid:principal-mismatch' && noEbayWrites(), `[V1.1a negatives] another principal's approval is refused (got ${p.res.body?.reason})`);
+  p = await publishWith('expired', { noApproval: true, approval: issueListingApproval({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, packageHash: baselineHash, now: Date.now() - 25 * 60 * 60 * 1000 }) });
+  assertTrue(p.res.statusCode === 409 && p.res.body?.reason === 'expired' && noEbayWrites(), `[V1.1a negatives] an expired approval (25h) is refused even though the package is unchanged (got ${p.res.body?.reason})`);
+  p = await publishWith('price', { noApproval: true, approval: baseline, bodyOver: { price: '$61.42' } });
+  assertTrue(p.res.statusCode === 409 && noEbayWrites(), `[V1.1a negatives] a modified price cannot ride on the old approval (got ${p.res.statusCode} ${p.res.body?.error})`);
+  // modified title (valid seller title) / governed facts (publisher => specifics, description, title) / condition (operator grade)
+  await installReceipts(CREEPY_GOVERNED, { draft: { ...TEST_DRAFT, titleOverride: 'Creepy #1 (1964) Warren Publishing' } });
+  p = await publishWith('modtitle', { noApproval: true, approval: baseline });
+  assertTrue(p.res.statusCode === 409 && p.res.body?.reason === 'stale-package' && noEbayWrites(), `[V1.1a negatives] a modified TITLE makes the old approval stale (got ${p.res.body?.reason})`);
+  await installReceipts({ ...CREEPY_GOVERNED, publisher: 'Eerie Publications' });
+  p = await publishWith('modspecifics', { noApproval: true, approval: baseline });
+  assertTrue(p.res.statusCode === 409 && p.res.body?.reason === 'stale-package' && noEbayWrites(), `[V1.1a negatives] modified governed facts make it stale (got ${p.res.body?.reason})`);
+  await installReceipts({ ...CREEPY_GOVERNED, gradeAuthority: 'OPERATOR_CONFIRMED', operatorGrade: '8.0', operatorGradeNumeric: 8, operatorIsGraded: false });
+  p = await publishWith('modcondition', { noApproval: true, approval: baseline });
+  assertTrue(p.res.statusCode === 409 && p.res.body?.reason === 'stale-package' && noEbayWrites(), `[V1.1a negatives] a modified CONDITION (operator grade) makes it stale (got ${p.res.body?.reason})`);
+  await installReceipts(CREEPY_GOVERNED);
+
+  // 9. DUPLICATE PUBLICATION: one approval, one listing. A second publish with the SAME still-valid approval is blocked by the
+  //    existing duplicate-listing preflight (the approval itself is stateless; the ledger is the duplicate guard).
+  {
+    const goodNow = (await callPreview('approve')).body?.approval;
+    fetchCalls.length = 0; mockState.mediaCalls.length = 0; addFixedPriceItemBehavior = 'success'; lastAddFixedPriceItemBody = '';
+    const k1 = `list-ebay-v11a-dup1-${Date.now()}`;
+    const first = mockRes();
+    await handler({ method: 'POST', __noApproval: true, headers: { authorization: `Bearer ${token}` }, body: baseItem({ gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID, outcomeIdempotencyKey: k1, listingApproval: goodNow }) }, first);
+    assertTrue(first.statusCode === 200, `[V1.1a duplicate] first publication succeeds (got ${first.statusCode})`);
+    fetchCalls.length = 0; mockState.mediaCalls.length = 0; lastAddFixedPriceItemBody = '';
+    const second = mockRes();
+    await handler({ method: 'POST', __noApproval: true, headers: { authorization: `Bearer ${token}` }, body: baseItem({ gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID, outcomeIdempotencyKey: `${k1}-b`, listingApproval: goodNow }) }, second);
+    assertTrue(second.statusCode === 409 && !fetchCalls.includes('AddFixedPriceItem') && lastAddFixedPriceItemBody === '', `[V1.1a duplicate] a second publication with the same valid approval is refused with ZERO AddFixedPriceItem calls (got ${second.statusCode} ${second.body?.error || ''})`);
+    await cleanup(client, k1); await cleanup(client, `${k1}-b`);
+    await client.query(`DELETE FROM data1_dev.outcome_event WHERE gk_asset_id = $1 AND external_listing_id = $2 AND outcome_type = 'LISTED' AND occurred_at > now() - interval '5 minutes'`, [CREEPY_ASSET_ID, FAKE_ITEM_ID]);
+  }
 
   await installReceipts(CREEPY_GOVERNED); // genuine receipts + the default PNG selection for everything after this block
 }

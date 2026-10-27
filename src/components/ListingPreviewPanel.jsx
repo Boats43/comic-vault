@@ -79,7 +79,7 @@ export default function ListingPreviewPanel({ item, price, onSaveListingFields }
   return (
     <div data-testid="listing-preview-panel" style={box}>
       <div style={{ fontWeight: 700 }}>Listing package</div>
-      <div className="muted small" style={{ marginBottom: 6 }}>A draft is not permission to publish. Review it, correct it, then approve this exact package.</div>
+      <div className="muted small" style={{ marginBottom: 6 }}>A draft is not permission to publish. Step 1: review and correct. Step 2: approve this exact package (valid 24 hours). Step 3: use the List on eBay button below, which still requires its own price acknowledgement and recorded LIST action.</div>
       <button className="reset-btn" onClick={refresh} disabled={busy}>{busy ? "Working…" : pkg ? "Refresh preview" : "Prepare listing preview"}</button>
       {error && <div style={{ color: "#ef4444", marginTop: 6 }}>{error}</div>}
       {pkg && (
@@ -122,7 +122,8 @@ export default function ListingPreviewPanel({ item, price, onSaveListingFields }
           <div>{pkg.price.amount != null ? `$${pkg.price.amount.toFixed(2)}` : "No approved price"} <span className="muted">— {pkg.price.disclosure}</span></div>
 
           <div style={h}>DESCRIPTION</div>
-          <div style={{ whiteSpace: "normal" }} dangerouslySetInnerHTML={{ __html: pkg.descriptionHtml }} />
+          <div style={{ whiteSpace: "normal" }} dangerouslySetInnerHTML={{ __html: pkg.descriptionBody }} />
+          <div className="muted" style={{ marginTop: 6 }} data-testid="approval-scope-note">Shipping and return terms are fixed text added when you publish; the shipping service is resolved from eBay at that moment. <strong>This approval covers the category, title, condition, item specifics, description above, photographs and price. It does not cover shipping or return terms.</strong></div>
 
           {pkg.unresolved.length > 0 && (
             <div>

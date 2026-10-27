@@ -113,12 +113,13 @@ const handler = async (req, res) => { await approveForTest(req); return rawHandl
 // api/listing-preview.js "approve" action (same auth, same durable row + media, same eBay-metadata mock) -- never forged here.
 // A request may set `__noApproval = true` for the negative case.
 let lastApproveStatus = null;
+let previewSeq = 0; // each approval call looks like a distinct client (the preview endpoint rate-limits per principal+IP)
 async function approveForTest(req) {
   const b = req.body || {};
   if (!b.gkAssetId || b.listingApproval || req.__noApproval) return;
   const pm = String(b.price ?? b.priceHigh ?? b.priceLow ?? '').replace(/,/g, '').match(/[\d.]+/);
   const res = mockRes();
-  await previewHandler({ method: 'POST', headers: req.headers, body: { action: 'approve', gkAssetId: b.gkAssetId, price: pm ? parseFloat(pm[0]) : null } }, res);
+  await previewHandler({ method: 'POST', headers: { ...req.headers, 'x-forwarded-for': `smoke-preview-${++previewSeq}` }, body: { action: 'approve', gkAssetId: b.gkAssetId, price: pm ? parseFloat(pm[0]) : null } }, res);
   lastApproveStatus = res.statusCode;
   if (res.statusCode === 200 && res.body?.approval) b.listingApproval = res.body.approval;
 }
