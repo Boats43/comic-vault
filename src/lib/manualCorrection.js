@@ -576,6 +576,31 @@ export const IDENTITY_INDEPENDENT_FIELDS_TO_PRESERVE = [
   'assetType', 'assetTypeConfident', 'assetCategory', 'gradeLocked',
 ];
 
+// C3-R7 - prior research is SUPERSEDED HISTORY, never current evidence. When a correction changes the
+// identity/variant, every identity-dependent price and comp pool is cleared (above); the value that was shown
+// (e.g. an $18.71 priced off a different variant's pool) is kept here as an inert, labelled record so it can be
+// audited but can never be re-read as the corrected book's market value. Nothing reads this field for pricing.
+export const SUPERSEDED_RESEARCH_MAX = 10;
+export const buildSupersededResearchEntry = (oldItem, nowIso = new Date().toISOString()) => {
+  if (!oldItem) return null;
+  const hadPrice = oldItem.price != null && String(oldItem.price) !== '' && String(oldItem.price) !== '$0.00';
+  const compsCount = Array.isArray(oldItem.rawComps?.prices) ? oldItem.rawComps.prices.length
+    : (oldItem.rawComps?.count ?? oldItem.comps?.count ?? null);
+  if (!hadPrice && !compsCount) return null;
+  return {
+    supersededAt: nowIso,
+    reason: 'identity-or-variant-correction',
+    status: 'SUPERSEDED',
+    priorIdentity: {
+      title: oldItem.title ?? null, issue: oldItem.issue ?? null, year: oldItem.year ?? null,
+      variant: oldItem.variant ?? null,
+    },
+    price: oldItem.price ?? null, priceLow: oldItem.priceLow ?? null, priceHigh: oldItem.priceHigh ?? null,
+    pricingSource: oldItem.pricingSource ?? null,
+    compsCount,
+  };
+};
+
 // ─────────────────────────── the merge itself ───────────────────────────
 
 /**
@@ -638,6 +663,12 @@ export const buildCorrectedCatalogueItem = (oldItem, enrichData) => {
   // avoids this: this correction's newly-locked field(s) are added,
   // everything else oldItem already had stays.
   merged.identityAuthority = mergeIdentityAuthority(enrichData, oldItem);
+
+  // C3-R7 - keep the superseded prior research (inert history) next to the recomputed, current evidence.
+  const supersededEntry = buildSupersededResearchEntry(oldItem);
+  const priorSuperseded = Array.isArray(oldItem?.supersededResearch) ? oldItem.supersededResearch : [];
+  if (supersededEntry) merged.supersededResearch = [...priorSuperseded, supersededEntry].slice(-SUPERSEDED_RESEARCH_MAX);
+  else if (priorSuperseded.length) merged.supersededResearch = priorSuperseded;
 
   for (const field of IDENTITY_INDEPENDENT_FIELDS_TO_PRESERVE) {
     merged[field] = oldItem[field];

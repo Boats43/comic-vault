@@ -27,7 +27,7 @@ import { checkRateLimit } from '../../api/rate-limit.js';
 import { isSupportedAssetCategory } from './assetCategories.js';
 import { respondPhysicalCopyError } from './physicalCopyErrors.js';
 import { CATEGORY_REQUIRED_CODE, OUTDATED_CLIENT_MESSAGE, markClientContractRefusal } from './clientContract.js';
-import { normalizeOwnershipAttestation, OWNERSHIP_ATTESTATION_REQUIRED_CODE, CAPTURE_REFERENCE_ONLY_CODE } from './ownershipAttestation.js';
+import { normalizeOwnershipAttestation, OWNERSHIP_ATTESTATION_REQUIRED_CODE } from './ownershipAttestation.js';
 
 function extractBearerToken(req) {
   const header = req.headers?.authorization || req.headers?.Authorization;
@@ -78,15 +78,11 @@ export async function handleCaptureScan(req, res) {
       message: 'Saving an owned physical asset requires you to confirm that you physically possess the item and that the photo shows the item itself.',
     });
   }
-  // A capture the scan itself flagged as a suspected screen/reproduction is reference imagery, not
-  // qualifying physical evidence. (This is a flag from the scan, never proof about ownership or possession.)
-  if (scanPayload?.captureAuthenticity?.status === 'SCREEN_SUSPECTED') {
-    return res.status(400).json({
-      error: CAPTURE_REFERENCE_ONLY_CODE, code: CAPTURE_REFERENCE_ONLY_CODE,
-      message: 'This photo was flagged as a possible screen or reproduction, so it can be kept for reference but not saved as an owned physical asset. Take a photo of the item itself to save it.',
-    });
-  }
-
+  // C3-R1 — a model-generated SCREEN_SUSPECTED read is an ADVISORY WARNING, never an independent refusal.
+  // It is an unverified claim (verified:false, basis:'model-claim'); a valid attested capture from this
+  // device's own photo is not refused on it. The claim is preserved as provenance by captureFromScan
+  // (buildMintProvenance) so it stays auditable. Ownership authority is unchanged: the operator's explicit
+  // attestation above is still REQUIRED, and attestation is a claim, not independently verified legal ownership.
   try {
     const result = await captureFromScan({ principalId, scanPayload, photos, idempotencyKey, assetClass, copyDisposition, ownershipAttestation });
     return res.status(200).json(result);

@@ -132,8 +132,8 @@ ok(res.statusCode === 400 && res.body?.code === 'OWNERSHIP_ATTESTATION_REQUIRED'
 res = await post({ assetClass: 'comic', ownershipAttestation: { attested: true }, scanPayload: { correlationId: randomUUID(), collectionItemId: 'never-created' }, photos, idempotencyKey: randomUUID() });
 ok(res.statusCode === 400 && res.body?.code === 'OWNERSHIP_ATTESTATION_REQUIRED', 'a bare { attested: true } is refused');
 res = await post({ assetClass: 'comic', ownershipAttestation: buildOwnershipAttestation('t'), scanPayload: { correlationId: randomUUID(), collectionItemId: 'never-created', captureAuthenticity: { status: 'SCREEN_SUSPECTED' } }, photos, idempotencyKey: randomUUID() });
-ok(res.statusCode === 400 && res.body?.code === 'CAPTURE_REFERENCE_ONLY', `attested but scan-flagged SCREEN_SUSPECTED -> 400 CAPTURE_REFERENCE_ONLY (got ${res.statusCode} ${res.body?.code})`);
-ok(!/own(ed)? .*screen|proves|possess/.test(String(res.body?.message).replace(/physical asset/g, '')) || /possible screen or reproduction/.test(res.body?.message), 'the refusal says "possible", never that detection proves anything about ownership');
+// C3-R1 (2026-10-26): a model SCREEN_SUSPECTED read is ADVISORY, not a refusal - an attested capture proceeds past the screen gate.
+ok(res.body?.code !== 'CAPTURE_REFERENCE_ONLY', `attested but scan-flagged SCREEN_SUSPECTED is no longer refused at a screen gate (got ${res.statusCode} ${res.body?.code})`);
 
 console.log('\n-- 11. real handler + real Development DB: attested capture records the assertion durably --');
 const client = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });

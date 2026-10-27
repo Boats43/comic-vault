@@ -13,6 +13,7 @@
 
 // Issue 6 — Shared grade utilities for numeric extraction
 import { extractNumericFromGrade } from '../src/lib/gradeUtils.js';
+import { partitionByEdition, placeListing } from '../src/lib/variantEditionAxis.js';
 // FIX 3 — Vercel KV persistent cache (replaces in-memory Map)
 import { kvGet, kvSet, KV_TTL } from './kv-cache.js';
 // GK-184 — true provider-evidence retrieval time (see src/lib/evidenceObservedAt.js)
@@ -583,6 +584,29 @@ export const computeMatchConfidence = (comps, opts = {}) => {
  *   premium/specific signal (drives out.premiumVariantIsolated downstream).
  */
 export const applyVariantPreferenceFilter = (pool, rawVariant) => {
+  // C3-R4 - HARD edition axis (colour virgin / B&W-sketch virgin / trade-dress are distinct physical editions).
+  // The legacy token match (applyVariantPreferenceCore) treats the generic token "virgin" as an any-match and
+  // admitted mutually exclusive editions. Here: (1) a listing that AFFIRMS the target edition forms the pool on
+  // its own; (2) otherwise mutually exclusive editions are removed and the legacy match runs on what remains,
+  // so a colour-unstated "virgin" listing stays labelled nearby-family and the applicability verdict stays
+  // honest. Excluded listings are reported with a reason (I13), never priced.
+  const part = partitionByEdition(pool, rawVariant);
+  if (!part) return applyVariantPreferenceCore(pool, rawVariant);
+  const axis = {
+    kind: part.kind, exactCount: part.exact.length, nearbyCount: part.nearby.length,
+    excludedCount: part.excluded.length, excluded: part.excluded.slice(0, 20),
+    nearby: part.nearby.slice(0, 20).map((n) => ({ title: n.title ?? null, price: n.price ?? null, note: n.editionNote })),
+  };
+  console.log(`[comps] edition-axis ${part.kind}: stated-exact=${axis.exactCount} nearby=${axis.nearbyCount} excluded=${axis.excludedCount}`);
+  if (part.exact.length > 0) {
+    return { pool: part.exact, isolated: true, matchMode: 'edition-axis', matched: true, editionAxis: axis };
+  }
+  const excludedSet = new Set(pool.filter((it) => placeListing(it?.title, part.kind).place === 'EXCLUDED'));
+  const remaining = pool.filter((it) => !excludedSet.has(it));
+  return { ...applyVariantPreferenceCore(remaining, rawVariant), editionAxis: axis };
+};
+
+const applyVariantPreferenceCore = (pool, rawVariant) => {
   const variant = canonicalizeRatioVariant(rawVariant); // GATE B: "1/25" / "1 in 25" match listings that say "1:25"
   const before = pool.length;
   // GrailKey Directive AB (GK-101) — `matched` is the evidence-applicability
@@ -1402,6 +1426,7 @@ export const fetchComps = async ({
   // variant-blind pool ("keeping all") -- see applyVariantPreferenceFilter's
   // `matched` field below, the source of truth this is copied from.
   let variantApplicability = null;
+  let variantEditionAxis = null; // C3-R4 - edition-axis partition (exact/nearby/excluded) of the winning attempt
   let fellBack = false;
   let eraFilterBypassed = false;
   let eraRejectedReferenceRows = [];  // Track B Phase 0, Commit 2 — I13 reference bucket for era-rejected rows
@@ -1430,6 +1455,7 @@ export const fetchComps = async ({
       let _variantFallback = false;
       let _premiumVariantIsolated = false;
       let _variantApplicability = null; // GrailKey Directive AB (GK-101)
+      let _variantEditionAxis = null; // C3-R4
       let _fellBack = false;
       let _eraFilterBypassed = false;
       let _eraExcludedVariantCount = 0;
@@ -1657,6 +1683,7 @@ export const fetchComps = async ({
         // Read from varPrefResult (Filter 1c itself), not artistResult —
         // artist narrowing is an independent creator-match axis and must
         // not be able to promote an unmatched variant to matched.
+        if (varPrefResult.editionAxis) _variantEditionAxis = varPrefResult.editionAxis;
         if (varPrefResult.matched === true) _variantApplicability = 'CONFIRMED';
         else if (varPrefResult.matched === false) _variantApplicability = 'UNVERIFIED';
       }
@@ -2104,6 +2131,7 @@ export const fetchComps = async ({
         variantFallback: _variantFallback,
         premiumVariantIsolated: _premiumVariantIsolated,
         variantApplicability: _variantApplicability, // GrailKey Directive AB (GK-101)
+        variantEditionAxis: _variantEditionAxis, // C3-R4
         fellBack: _fellBack,
         eraFilterBypassed: _eraFilterBypassed,
         eraRejectedReferenceRows: _eraRejectedReferenceRows,
@@ -2178,6 +2206,7 @@ export const fetchComps = async ({
         variantFallback = filtered.variantFallback;
         premiumVariantIsolated = filtered.premiumVariantIsolated;
         variantApplicability = filtered.variantApplicability; // GrailKey Directive AB (GK-101)
+        variantEditionAxis = filtered.variantEditionAxis || null; // C3-R4
         fellBack = filtered.fellBack;
         eraFilterBypassed = filtered.eraFilterBypassed;
         eraRejectedReferenceRows = filtered.eraRejectedReferenceRows || [];
@@ -2522,6 +2551,7 @@ export const fetchComps = async ({
       variantFallback,
       premiumVariantIsolated,
       variantApplicability, // GrailKey Directive AB (GK-101) — CONFIRMED | UNVERIFIED | null
+      variantEditionAxis, // C3-R4
       eraFilterBypassed,
       // GK-168 (2026-08-24, Creepy #1 facsimile dispatch, plan review) —
       // surfaces the era filter's own rejectedReferenceRows (already

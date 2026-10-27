@@ -15,7 +15,7 @@ export function getAssetConfirmationBadge(item) {
   if (item?.assetType === 'book') {
     return { text: '⚠ book detected', state: 'book', color: '#f59e0b' };
   }
-  if (item?.assetTypeConfident === false) {
+  if (item?.assetTypeConfident === false && item?.assetTypeConfidentOverride !== true) {
     return { text: '⚠ not confirmed as a comic', state: 'uncertain', color: '#f59e0b' };
   }
   return { text: '✓ comic confirmed', state: 'confirmed', color: '#888' };

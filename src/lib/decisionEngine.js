@@ -303,7 +303,8 @@ export function computeDecision(item, context = {}) {
   // blocker above). Still routes to RESEARCH via criticalWarnings below,
   // so the card shows a price with an explicit caution rather than either
   // a hard wall or a silent LIST_NOW.
-  if (item.assetTypeConfident === false) {
+  // C3-R6 — the server's Q32 comic-category consensus override supersedes the raw model flag.
+  if (item.assetTypeConfident === false && item.assetTypeConfidentOverride !== true) {
     decision.warnings.push('asset-type-uncertain');
     decision.evidence.assetTypeUncertain = {
       message: item.listingHardLockBanner

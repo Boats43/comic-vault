@@ -10,6 +10,7 @@
 //             priceHigh?, keyIssue?, identifiedBy? }
 
 import Anthropic from "@anthropic-ai/sdk";
+import { describeEditionAxis } from '../src/lib/variantEditionAxis.js';
 import {
   fetchComps,
   getOAuthToken,
@@ -5574,28 +5575,34 @@ export default async function handler(req, res) {
     // '(GK-127, issue facet)' pattern already established at the
     // resolveIdentity call site above — same operator-correction
     // authority, scoped to the year field.
-    const yearEvidence = createEvidenceSet();
-    if (yearForResolution != null) {
-      addEvidence(yearEvidence, 'year', 'vision', yearForResolution);
-    }
-    const catalogYearForEvidence = pcYear ?? cvYear ?? null;
-    if (catalogYearForEvidence != null) {
-      addEvidence(yearEvidence, 'year', 'catalog', catalogYearForEvidence);
-    }
-    if (poolYearHint?.year != null) {
-      addEvidence(yearEvidence, 'year', 'pool-consensus', poolYearHint.year);
-    }
     const firstEligibleForYearEvidence = selectFirstEligibleVisual(parsedVisualRows);
     const physicalYearCandidateForEvidence = extractFirstEligibleYearCandidate(firstEligibleForYearEvidence?.rawTitle || null);
-    if (physicalYearCandidateForEvidence != null) {
-      addEvidence(yearEvidence, 'year', 'first-eligible-visual', physicalYearCandidateForEvidence);
-    }
     const yearOperatorConfirmed = manualCorrectionRequest?.valid === true
       && Array.isArray(manualCorrectionRequest.validation?.acceptedFields)
       && manualCorrectionRequest.validation.acceptedFields.includes('year');
-    if (yearOperatorConfirmed && confirmedYear != null) {
-      addEvidence(yearEvidence, 'year', 'user', confirmedYear);
-    }
+    // C3-R5 — built by a function so the SAME evidence can be rebuilt without a catalog anchor that a LATER
+    // gate (pc-anchor-gate / operator-title anchor rejection, both below) rejects for this book's edition.
+    const buildYearEvidence = (catalogYear) => {
+      const ev = createEvidenceSet();
+      if (yearForResolution != null) {
+        addEvidence(ev, 'year', 'vision', yearForResolution);
+      }
+      if (catalogYear != null) {
+        addEvidence(ev, 'year', 'catalog', catalogYear);
+      }
+      if (poolYearHint?.year != null) {
+        addEvidence(ev, 'year', 'pool-consensus', poolYearHint.year);
+      }
+      if (physicalYearCandidateForEvidence != null) {
+        addEvidence(ev, 'year', 'first-eligible-visual', physicalYearCandidateForEvidence);
+      }
+      if (yearOperatorConfirmed && confirmedYear != null) {
+        addEvidence(ev, 'year', 'user', confirmedYear);
+      }
+      return ev;
+    };
+    const catalogYearForEvidence = pcYear ?? cvYear ?? null;
+    const yearEvidence = buildYearEvidence(catalogYearForEvidence);
     const reconciledYear = reconcileYear(yearEvidence);
     out.yearReconciliation = reconciledYear;
     console.log(
@@ -5638,7 +5645,7 @@ export default async function handler(req, res) {
     // is not the same claim as "nothing else disagrees"). Consumed by
     // the identity-gate (2b) and the era filter's advisory mode (2c) —
     // never re-derived at either site, per C6's single-writer rule.
-    out.yearAuthority = (() => {
+    const deriveYearAuthority = (reconciledYear) => {
       if (confirmedYear == null) return 'NONE';
       if (reconciledYear.value != null && String(reconciledYear.value) === String(confirmedYear)) {
         return reconciledYear.authority;
@@ -5653,7 +5660,8 @@ export default async function handler(req, res) {
       const disagrees = (reconciledYear.conflicts || []).some((c) => String(c.value) !== String(confirmedYear))
         || (reconciledYear.value != null && String(reconciledYear.value) !== String(confirmedYear));
       return disagrees ? 'CONTESTED' : 'CORROBORATED';
-    })();
+    };
+    out.yearAuthority = deriveYearAuthority(reconciledYear);
 
     // Q86: structured year provenance on the response — {value, source,
     // confidence}. Scalar out.confirmedYear stays for every existing
@@ -6047,6 +6055,26 @@ export default async function handler(req, res) {
         out.pcGradedPrice = null;
         priceCharting = null;
       }
+    }
+    // C3-R5 — a REJECTED catalog anchor cannot create a year conflict. The year reconciliation above ran BEFORE
+    // pc-anchor-gate / the operator-title anchor check rejected this book's PriceCharting match, so the rejected
+    // anchor's year (Avengers #4 (1964) vs the physical 2023 book) had already been recorded as a disagreeing
+    // 'catalog' source -> YEAR_CONTESTED. Now that the anchor is rejected, rebuild the evidence WITHOUT it (a
+    // ComicVine year, if any, is an independent accepted source and stays). The rejection itself stays visible on
+    // the card (out.pcMatchRejectedForYearConflict / operatorIdentityAnchorRejected, I13) — only its power to
+    // contest the year is removed. Genuine conflicts from accepted evidence are still produced by reconcileYear.
+    if (priceCharting == null && pcYear != null
+      && (out.pcMatchRejectedForYearConflict || out.operatorIdentityAnchorRejected)
+      && out.yearReconciliation) {
+      const priorYearAuthority = out.yearAuthority;
+      const rebuiltYear = reconcileYear(buildYearEvidence(cvYear ?? null));
+      rebuiltYear.rejectedCatalogYear = pcYear;
+      out.yearReconciliation = rebuiltYear;
+      out.yearAuthority = deriveYearAuthority(rebuiltYear);
+      console.log(
+        `[reconcile-year] rejected PC anchor year ${pcYear} removed from year evidence — ` +
+        `yearAuthority ${priorYearAuthority} -> ${out.yearAuthority} conflicts=${JSON.stringify(rebuiltYear.conflicts)}`
+      );
     }
     if (priceCharting?.productName) {
       const canonicalTitle = projectCanonicalTitleFromAnchor(priceCharting.productName);
@@ -10089,6 +10117,10 @@ export default async function handler(req, res) {
           out.priceNote = `No price: only ${vEv.applicable} listing(s) name the ${vEv.ratio} variant (${vEv.nonVariant} other listing(s) are not that variant). A band needs at least 3 — set the price yourself or refresh later.`;
           out.variantEvidence = vEv;
         }
+        // C3-R4/R8 - a sparse EXACT-edition pool is described truthfully (asking prices, other editions excluded).
+        if (out.variantEditionAxis && !(vEv && vEv.insufficient)) {
+          out.priceNote = `No price: insufficient verified comps (${rawComps.count}). ${describeEditionAxis(out.variantEditionAxis) || ''}`.trim();
+        }
         console.log(
           '[P0-A-refuse] tier-bypass path blocked —',
           'rawComps.count:', rawComps.count,
@@ -10157,6 +10189,10 @@ export default async function handler(req, res) {
     // thin-and-blended.
     if (rawComps?.premiumVariantIsolated) {
       out.premiumVariantIsolated = true;
+    }
+    // C3-R4 - edition-axis partition (exact / nearby-labelled / excluded-with-reason) surfaced for the card (I13).
+    if (rawComps?.variantEditionAxis) {
+      out.variantEditionAxis = rawComps.variantEditionAxis;
     }
 
     // GrailKey Directive AB (GK-101) — evidence applicability custody.
