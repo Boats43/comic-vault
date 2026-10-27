@@ -238,6 +238,19 @@ console.log('  (test setup) transient governed canonical rows created for Creepy
   console.log('  (test setup) priced LIST action + asset-owned photo evidence ensured (idempotent)\n');
 }
 
+// C1 RECEIPT FIXTURES (2026-10-27) -- the publish gate requires a verified authority receipt on the asset's durable canonical row
+// (principal + row + asset + current media evidence version). Install GENUINE receipts (real issueAuthorityReceipt, this process's
+// own session secret) on the transient rows. Nothing about the gate is relaxed; negative tests below corrupt one dimension at a time.
+const receiptFx = await import(pathToFileURL(path.join(repoRoot, 'tests', 'helpers', 'c1ReceiptFixtures.mjs')).href);
+const __assetsForReceipts = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+const installReceipts = async (attrs, opts = {}) => receiptFx.installFixtureReceipts({
+  client, rowIds: CREEPY_LINK_IDS, principalId: opts.principalId || JIMMY, gkAssetId: CREEPY_ASSET_ID,
+  contentHashes: opts.contentHashes || await __assetsForReceipts.getAssetMediaContentHashes({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID }),
+  attrs, bind: opts.bind, response: opts.response, tamper: opts.tamper,
+});
+await installReceipts(CREEPY_GOVERNED);
+console.log('  (test setup) genuine authority receipts installed on the transient canonical rows\n');
+
 console.log('-- real success: valid token + gkAssetId + decisionEventId + LIST operatorActionEventId --\n');
 {
   fetchCalls.length = 0; mockState.mediaCalls.length = 0;
@@ -350,7 +363,7 @@ console.log('-- GATE B RAW CONDITION COPY: the REAL handler\'s outbound AddFixed
   const OML = { title: 'Old Man Logan', issue: '25', year: '2017', publisher: 'Marvel', variant: '1:25 Mike Deodato Teaser Variant' };
   // Grade-authority keys are server-protected from ordinary collection writes (GK-260/261, correctly), so this fixture sets the
   // governed attributes directly on the test's OWN transient canonical rows (created above, deleted in cleanup).
-  const setGoverned = (attrs) => client.query(`UPDATE data1_dev.collection_item SET attributes = $1::jsonb WHERE id = ANY($2) AND principal_id = $3`, [JSON.stringify(attrs), CREEPY_LINK_IDS, JIMMY]);
+  const setGoverned = (attrs) => installReceipts(attrs); // same governed attrs, each with a genuine receipt matching that identity
   const runWith = async (label, governedAttrs, clientOverrides = {}) => {
     await setGoverned(governedAttrs);
     fetchCalls.length = 0; mockState.mediaCalls.length = 0; addFixedPriceItemBehavior = 'success'; lastAddFixedPriceItemBody = '';
@@ -455,6 +468,8 @@ console.log('-- GOVERNED FACTS fail-closed: no resolvable durable canonical row 
   assertTrue(res.statusCode === 409 && res.body?.error === 'LISTING_FACTS_UNAVAILABLE', `missing governed facts -> 409 LISTING_FACTS_UNAVAILABLE (got ${res.statusCode} ${res.body?.error})`);
   assertTrue(!fetchCalls.includes('AddFixedPriceItem') && mockState.mediaCalls.length === 0 && !fetchCalls.includes('UploadSiteHostedPictures') && lastAddFixedPriceItemBody === '', 'no picture upload and no AddFixedPriceItem attempted — never lists on client-supplied facts');
   for (const id of CREEPY_LINK_IDS) await createCollectionItem({ principalId: JIMMY, id, assetCategory: 'comic', attributes: { ...CREEPY_GOVERNED } });
+  // C1: the recreated rows must carry genuine receipts again (a bare createCollectionItem has none -> every later scenario would 403).
+  await installReceipts(CREEPY_GOVERNED);
 }
 
 console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-mile — all refuse BEFORE AddFixedPriceItem --\n');
@@ -479,6 +494,9 @@ console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-
   // --- V1 CERTIFICATION / GK-240: forged READY evidence + omitted soldCompDiagnostics, NO Q41 ack ---
   // Before the fix the real authority functions returned READY for exactly this request shape, so the
   // endpoint would have proceeded toward AddFixedPriceItem with no acknowledgement. It must now refuse.
+  // C1: this scenario is specifically "the durable row carries NO verifying server receipt" -- remove the fixture receipts for it
+  // (negative control), and reinstall them right after so the rest of the suite runs against a genuinely receipt-backed row.
+  await installReceipts(CREEPY_GOVERNED, { tamper: () => undefined });
   r = await run(base({
     q41Override: null,
     decision: { action: 'LIST_NOW', confidence: 'high', blockers: [], warnings: [] },
@@ -491,6 +509,7 @@ console.log('-- OUTCOME #1 PACKET SAFETY: price binding / shipping / photo last-
   assertTrue(r.statusCode === 403 && r.body?.error === 'ACTION_AUTHORITY_NOT_READY' && noEbayWrite() && mockState.mediaCalls.length === 0 && !fetchCalls.includes('UploadSiteHostedPictures'),
     `forged LIST_NOW decision + omitted soldCompDiagnostics + no Q41 -> 403 ACTION_AUTHORITY_NOT_READY, zero eBay writes (got ${r.statusCode} ${r.body?.error})`);
   assertTrue(Array.isArray(r.body?.actionAuthority?.reasonCodes) && (r.body.actionAuthority.reasonCodes.includes('NO_SOLD_EVIDENCE') || r.body.actionAuthority.reasonCodes.includes('NO_MARKET_EVIDENCE')) && r.body.authorityReceipt === 'UNVERIFIED:absent', 'the refusal names the missing evidence AND says no verifying server receipt backed it (failed closed, not skipped)');
+  await installReceipts(CREEPY_GOVERNED); // reinstall genuine receipts for the remaining scenarios
   // --- PRICE: durable LIST action cannot be substituted ---
   const unpriced = await (await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href)).recordOperatorAction({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, actionCode: 'LIST', source: 'test-fixture', idempotencyKey: 'list-ebay-packet-safety-unpriced-list-v1' });
   r = await run(base({ operatorActionEventId: unpriced.operatorActionEventId }));
@@ -684,6 +703,79 @@ console.log('\n-- idempotent replay: the SAME idempotencyKey twice returns the S
   assertTrue(count.rows[0].n === 1, 'exactly one durable row exists, not two');
 
   await cleanup(client, idempotencyKey);
+}
+
+console.log('-- C1 PUBLICATION-RECEIPT GATE, LIVE (real handler + real Development rows): every invalid receipt is refused BEFORE any eBay call --\n');
+{
+  const OTHER_PRINCIPAL = '01a0283a-b1b6-7f90-9b41-000000000c1c';
+  const noEbay = () => !fetchCalls.includes('GetUser') && !fetchCalls.includes('AddFixedPriceItem') && !fetchCalls.includes('UploadSiteHostedPictures') && mockState.mediaCalls.length === 0 && lastAddFixedPriceItemBody === '';
+  const attempt = async (label, installOpts, expectedReason, { reqToken = token } = {}) => {
+    if (installOpts) await installReceipts(CREEPY_GOVERNED, installOpts);
+    fetchCalls.length = 0; mockState.mediaCalls.length = 0; addFixedPriceItemBehavior = 'success'; lastAddFixedPriceItemBody = '';
+    const key = `list-ebay-c1-live-${label}-${Date.now()}`;
+    const res = mockRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${reqToken}` }, body: baseItem({
+      gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID, outcomeIdempotencyKey: key }) }, res);
+    const leaked = await queryOutcomeEventByIdempotencyKey(client, key);
+    if (leaked) await cleanup(client, key);
+    return { res, noEbay: noEbay(), leaked: !!leaked, expectedReason };
+  };
+  const expectRefusal = (label, r) => {
+    assertTrue(r.res.statusCode === 403 && r.res.body?.error === 'ACTION_AUTHORITY_NOT_READY' && r.res.body?.refusalReason === r.expectedReason,
+      `[C1 live: ${label}] refused 403 ACTION_AUTHORITY_NOT_READY with ${r.expectedReason} (got ${r.res.statusCode} ${r.res.body?.refusalReason})`);
+    assertTrue(r.noEbay && !r.leaked, `[C1 live: ${label}] ZERO eBay calls, no media upload, no outcome row written`);
+  };
+  const badSig = (r) => ({ ...r, sig: r.sig.slice(0, -4) + (r.sig.endsWith('AAAA') ? 'BBBB' : 'AAAA') });
+
+  // POSITIVE (fixtures installed above): a verified receipt lets the same request reach AddFixedPriceItem (first success block, plus):
+  {
+    await installReceipts(CREEPY_GOVERNED);
+    fetchCalls.length = 0; mockState.mediaCalls.length = 0; addFixedPriceItemBehavior = 'success'; lastAddFixedPriceItemBody = '';
+    const key = `list-ebay-c1-live-positive-${Date.now()}`;
+    const res = mockRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body: baseItem({
+      gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID, outcomeIdempotencyKey: key }) }, res);
+    assertTrue(res.statusCode === 200 && res.body?.listingId === FAKE_ITEM_ID, `[C1 live: valid receipt] authorized publication reaches the mocked AddFixedPriceItem (got ${res.statusCode})`);
+    assertTrue(fetchCalls.indexOf('GetUser') !== -1 && fetchCalls.indexOf('GetUser') < fetchCalls.indexOf('AddFixedPriceItem'), '[C1 live: valid receipt] GetUser precedes AddFixedPriceItem');
+    await cleanup(client, key);
+  }
+  // POSITIVE (READY standing, no Q41 acknowledgement): the receipt alone is sufficient authority when the signed evidence is READY.
+  {
+    await installReceipts(CREEPY_GOVERNED, { response: receiptFx.readyResponse() });
+    fetchCalls.length = 0; mockState.mediaCalls.length = 0; addFixedPriceItemBehavior = 'success'; lastAddFixedPriceItemBody = '';
+    const key = `list-ebay-c1-live-ready-${Date.now()}`;
+    const res = mockRes();
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body: baseItem({
+      q41Override: null, gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: CREEPY_LIST_OPERATOR_ACTION_EVENT_ID, outcomeIdempotencyKey: key }) }, res);
+    assertTrue(res.statusCode === 200 && res.body?.listingId === FAKE_ITEM_ID, `[C1 live: READY receipt, no Q41] publishes via the READY path (got ${res.statusCode} ${res.body?.error || ''} ${res.body?.refusalReason || ''})`);
+    await cleanup(client, key);
+  }
+
+  // NEGATIVES: one corrupted dimension at a time. Each refuses before ANY eBay call.
+  expectRefusal('absent receipt', await attempt('absent', { tamper: () => undefined }, 'AUTHORITY_RECEIPT_UNVERIFIED_ABSENT'));
+  expectRefusal('forged signature', await attempt('forged', { tamper: badSig }, 'AUTHORITY_RECEIPT_UNVERIFIED_BAD_SIGNATURE'));
+  expectRefusal('malformed body', await attempt('malformed', { tamper: (r) => ({ ...r, body: 12345 }) }, 'AUTHORITY_RECEIPT_UNVERIFIED_MALFORMED'));
+  expectRefusal('unsupported version', await attempt('version', { tamper: (r) => ({ ...r, v: 99 }) }, 'AUTHORITY_RECEIPT_UNVERIFIED_VERSION'));
+  expectRefusal('receipt re-labelled to another principal', await attempt('relabel', { tamper: (r) => ({ ...r, principalId: OTHER_PRINCIPAL }) }, 'AUTHORITY_RECEIPT_UNVERIFIED_PRINCIPAL_MISMATCH'));
+  expectRefusal('receipt genuinely issued for another principal', await attempt('otherprincipal', { tamper: (r, id) => receiptFx.issueFixtureReceipt({
+    principalId: OTHER_PRINCIPAL, collectionItemId: id, gkAssetId: CREEPY_ASSET_ID, contentHashes: [], identity: CREEPY_GOVERNED }) }, 'AUTHORITY_RECEIPT_UNVERIFIED_PRINCIPAL_MISMATCH'));
+  expectRefusal('identity mismatch (receipt for a different book)', await attempt('identity', { tamper: (r, id) => receiptFx.issueFixtureReceipt({
+    principalId: JIMMY, collectionItemId: id, gkAssetId: CREEPY_ASSET_ID, contentHashes: [], identity: { title: 'Batman', issue: '9', year: '1940' } }) }, 'AUTHORITY_RECEIPT_IDENTITY_MISMATCH'));
+  expectRefusal('unbound receipt (no asset)', await attempt('unbound', { bind: { gkAssetId: null } }, 'AUTHORITY_RECEIPT_UNBOUND'));
+  expectRefusal('receipt bound to another asset', await attempt('otherasset', { bind: { gkAssetId: '01a0aaaa-0000-7000-8000-00000000dead' } }, 'AUTHORITY_RECEIPT_ASSET_MISMATCH'));
+  expectRefusal('receipt bound to another catalogue row (cross-row replay)', await attempt('otherrow', { bind: { collectionItemId: 'cv_not_this_row' } }, 'AUTHORITY_RECEIPT_ASSET_MISMATCH'));
+  expectRefusal('stale media evidence version', await attempt('stale', { bind: { evidenceVersion: 'deadbeefdeadbeefdeadbeefdeadbeef' } }, 'AUTHORITY_RECEIPT_EVIDENCE_VERSION_STALE'));
+  expectRefusal('receipt signed before ANY media existed (null evidence version)', await attempt('noevidence', { bind: { evidenceVersion: null } }, 'AUTHORITY_RECEIPT_EVIDENCE_VERSION_STALE'));
+
+  // PRINCIPAL ISOLATION: another principal's valid session cannot publish JIMMY's asset, with or without receipts.
+  {
+    await installReceipts(CREEPY_GOVERNED);
+    const r = await attempt('isolation', null, null, { reqToken: mintTestToken(OTHER_PRINCIPAL) });
+    assertTrue(r.res.statusCode >= 400 && r.res.statusCode < 500 && r.res.statusCode !== 200 && r.noEbay && !r.leaked,
+      `[C1 live: principal isolation] another principal cannot publish this asset (got ${r.res.statusCode} ${r.res.body?.error || ''}); zero eBay calls, no outcome row`);
+  }
+  // Restore the genuine receipts for anything that runs after this block.
+  await installReceipts(CREEPY_GOVERNED);
 }
 
 // Restore Creepy to UNMANAGED, exactly as found before this test ran.

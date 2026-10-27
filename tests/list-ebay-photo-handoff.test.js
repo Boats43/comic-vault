@@ -219,6 +219,22 @@ const CREEPY_LINK_IDS = ['cv_1789188155734_itagfk', 'cv_1789271538761_1hsflc'];
 }
 for (const id of CREEPY_LINK_IDS) await createCollectionItem({ principalId: JIMMY, id, assetCategory: 'comic', attributes: { title: 'creepy', issue: '1', year: '1964', publisher: 'Warren Publishing' } });
 
+// C1 RECEIPT FIXTURES (2026-10-27) -- genuine authority receipts (real issueAuthorityReceipt) bound to principal + row + asset +
+// the asset's CURRENT media evidence version, installed on the transient canonical rows. The gate is not relaxed.
+{
+  const receiptFx = await import(pathToFileURL(path.join(repoRoot, 'tests', 'helpers', 'c1ReceiptFixtures.mjs')).href);
+  const assetsForReceipts = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+  const fxClient = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  await fxClient.connect();
+  try {
+    await receiptFx.installFixtureReceipts({
+      client: fxClient, rowIds: CREEPY_LINK_IDS, principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID,
+      contentHashes: await assetsForReceipts.getAssetMediaContentHashes({ principalId: JIMMY, gkAssetId: CREEPY_ASSET_ID }),
+      attrs: { title: 'creepy', issue: '1', year: '1964', publisher: 'Warren Publishing' },
+    });
+  } finally { await fxClient.end(); }
+}
+
 console.log('\n=== api/list-ebay.js -- GK-208 photo handoff, real handler proof ===\n');
 
 console.log('-- REGRESSION PROOF (the exact real bug): images array present, matchConfidence NOT LOW (the common case) -> uploads, AddFixedPriceItem receives a real PictureURL --\n');
