@@ -2632,6 +2632,18 @@ export default async function handler(req, res) {
     // matches can still populate confident-looking identity fields for a
     // poster that happens to share a comic's title.
     out.assetTypeConfident = assetTypeConfident !== false;
+    // C3 GATE 2 - explicit, attributable OPERATOR classification ("This is a comic"). Resolves ONLY the model's
+    // unresolved object-type doubt (assetTypeConfident:false), for a request that names the comic category. It is
+    // NOT ownership, NOT physical evidence and NOT publication authority, and it does not bypass the Q32
+    // merchandise hard block, variant matching, comp evidence requirements or any listing gate downstream.
+    if (!out.assetTypeConfident && req.body?.operatorAssetTypeConfirmed === true && assetType === 'comic') {
+      out.assetTypeConfident = true;
+      out.assetTypeOperatorConfirmation = {
+        classification: 'comic', basis: 'operator-explicit', principalId: auth.principalId,
+        confirmedAt: new Date().toISOString(), supersedesModelFlag: 'assetTypeConfident=false',
+      };
+      console.log('[asset-type-gate] operator confirmed classification=comic (explicit, attributed) - model doubt resolved; merchandise block and listing gates unchanged');
+    }
     if (!out.assetTypeConfident) {
       // Q133 Slice 1c — text fix only: this has been advisory-only since
       // Q110 (2026-07-18); the real gating behavior is logged accurately
@@ -10118,8 +10130,8 @@ export default async function handler(req, res) {
           out.variantEvidence = vEv;
         }
         // C3-R4/R8 - a sparse EXACT-edition pool is described truthfully (asking prices, other editions excluded).
-        if (out.variantEditionAxis && !(vEv && vEv.insufficient)) {
-          out.priceNote = `No price: insufficient verified comps (${rawComps.count}). ${describeEditionAxis(out.variantEditionAxis) || ''}`.trim();
+        if (rawComps?.variantEditionAxis && !(vEv && vEv.insufficient)) {
+          out.priceNote = `No price: insufficient verified comps (${rawComps.count}). ${describeEditionAxis(rawComps.variantEditionAxis) || ''}`.trim();
         }
         console.log(
           '[P0-A-refuse] tier-bypass path blocked —',

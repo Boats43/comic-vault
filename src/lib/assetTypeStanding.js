@@ -11,3 +11,7 @@ export function resolveAssetTypeConfident(src) {
 
 /** True only when the asset type is still genuinely uncertain after any server-side Q32 override. */
 export const isAssetTypeUncertain = (src) => resolveAssetTypeConfident(src) === false;
+
+/** True when the card should offer the one-tap "This is a comic" action (genuinely unresolved, comic category). */
+export const canOfferOperatorComicConfirmation = (item) =>
+  !!item && (item.assetType === 'comic') && isAssetTypeUncertain(item) && item.assetTypeOperatorConfirmation?.classification !== 'comic';

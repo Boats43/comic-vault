@@ -574,6 +574,8 @@ export const IDENTITY_INDEPENDENT_FIELDS_TO_PRESERVE = [
   // listed here anyway for the same defensive, explicit reason assetType
   // already is.
   'assetType', 'assetTypeConfident', 'assetCategory', 'gradeLocked',
+  // C3 GATE 2 - the operator's explicit comic classification is the operator's own record, not derived from identity.
+  'assetTypeOperatorConfirmation',
 ];
 
 // C3-R7 - prior research is SUPERSEDED HISTORY, never current evidence. When a correction changes the

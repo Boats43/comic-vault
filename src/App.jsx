@@ -89,7 +89,7 @@ import { useClerk } from "@clerk/react";
 import { deriveMarketCopy, NEUTRAL_MARKET_FOOTER } from "./lib/marketEvidence.js";
 import { mergePricingBundle } from "./lib/pricingBundleMerge.js";
 import { getDisplayPrice, getAuthorityPrice, getAdvisoryContractPrice, isIdentityDisplayGated, describeActiveEvidenceProvenance, isIdentityAuthorityInsufficient, getDisplayConditionEvidence, POLYBAG_FLAG_OBSERVATION_TEXT } from "./lib/displayAuthority.js";
-import { resolveAssetTypeConfident, isAssetTypeUncertain } from './lib/assetTypeStanding.js';
+import { resolveAssetTypeConfident, isAssetTypeUncertain, canOfferOperatorComicConfirmation } from './lib/assetTypeStanding.js';
 
 // Same gate src/main.jsx uses to decide whether <ClerkProvider> is mounted
 // at all, and src/components/GrailKeyLoginGate.jsx uses to decide whether
@@ -4139,6 +4139,7 @@ export function CollectionDetail({
   onClearGradedOverride,
   onSetOperatorGrade,
   onClearOperatorGrade,
+  onConfirmAssetTypeComic,
   onAbortEnrich,
   onAddPhoto,
   onAddEvidence,
@@ -5021,6 +5022,17 @@ export function CollectionDetail({
           }}>
             📋 Identity: {identitySource} | <span style={{ color: assetBadge.color }}>{assetBadge.text}</span>
             {filterSummary && ` | ${filterSummary}`}
+            {onConfirmAssetTypeComic && canOfferOperatorComicConfirmation(item) && (
+              <button
+                onClick={() => onConfirmAssetTypeComic(item)}
+                style={{ marginLeft: 8, fontSize: 10, padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(212,175,55,0.5)', background: 'transparent', color: '#d4af37', cursor: 'pointer' }}
+              >
+                This is a comic
+              </button>
+            )}
+            {item.assetTypeOperatorConfirmation?.classification === 'comic' && (
+              <span style={{ marginLeft: 8, color: '#888' }}>(operator-confirmed comic)</span>
+            )}
           </div>
         );
       })()}
@@ -14207,6 +14219,8 @@ export default function App() {
           // GK-260 — the validated action, if this call is a Set/Change/
           // Clear grade or grading-format request rather than an ordinary
           // refresh. Undefined fields are dropped by JSON.stringify.
+          // C3 GATE 2 - explicit operator classification; re-sent on every refresh once recorded so it persists.
+          operatorAssetTypeConfirmed: (gradingAction?.assetTypeAction === 'CONFIRM_COMIC' || item.assetTypeOperatorConfirmation?.classification === 'comic') ? true : undefined,
           operatorGradeAction: gradingAction?.operatorGradeAction,
           operatorGradeValue: gradingAction?.operatorGradeValue,
           gradingFormatAction: gradingAction?.gradingFormatAction,
@@ -14310,6 +14324,7 @@ export default function App() {
       // GrailKey Commit C3 — see standard-merge comment for rationale.
       assetTypeConfident: resolveAssetTypeConfident(enrich) ?? item.assetTypeConfident ?? true,
       assetTypeCorroboratedBy: enrich.assetTypeCorroboratedBy ?? item.assetTypeCorroboratedBy ?? null,
+      assetTypeOperatorConfirmation: enrich.assetTypeOperatorConfirmation ?? item.assetTypeOperatorConfirmation ?? null,
       identityMissingFields: enrich.identityMissingFields ?? item.identityMissingFields ?? null,
       identityReasons: enrich.identityReasons ?? item.identityReasons ?? null,
       keyIssue: enrich.keyIssue || item.keyIssue,
@@ -14572,7 +14587,11 @@ export default function App() {
 
   // GK-260 — CLEAR. Governing grade immediately returns to the current
   // automated `grade` (never mutated by this function either way).
-  const clearItemOperatorGrade = useCallback(async (item) => {
+const confirmItemIsComic = useCallback(async (item) => {
+    await refreshMarketData(item, { assetTypeAction: 'CONFIRM_COMIC' });
+  }, [refreshMarketData]);
+
+    const clearItemOperatorGrade = useCallback(async (item) => {
     await refreshMarketData(item, { operatorGradeAction: 'CLEAR' });
   }, [refreshMarketData]);
 
@@ -16412,6 +16431,7 @@ export default function App() {
             onSetGradedOverride={setGradedOverride}
             onClearGradedOverride={clearGradedOverride}
             onSetOperatorGrade={setItemOperatorGrade}
+            onConfirmAssetTypeComic={confirmItemIsComic}
             onClearOperatorGrade={clearItemOperatorGrade}
             onAbortEnrich={() => {
               if (cardEnrichAbortRef.current) {
