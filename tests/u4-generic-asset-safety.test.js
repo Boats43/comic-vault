@@ -110,8 +110,9 @@ const bundleRes = mockRes();
 // check rather than the unrelated Production-only bundle-disable gate.
 process.env.GRAILKEY_CATALOG_ENVIRONMENT = 'development'; // GK-P0: the operator gate needs the environment-identity guard configured (the bundle Production-disable keys on === 'production' only)
 await listEbayHandler(bundleReq, bundleRes);
-assertTrue(bundleRes.statusCode === 400, `bundle with a generic member -> 400 (got ${bundleRes.statusCode}, body=${JSON.stringify(bundleRes.body)})`);
-assertTrue(bundleRes.body?.error === 'GENERIC_ASSET_NOT_LISTABLE', `bundle error code is GENERIC_ASSET_NOT_LISTABLE (got ${bundleRes.body?.error})`);
+// V1.1a closeout (GK-216): every bundle is refused fail-closed before member inspection, so a bundle holding a generic asset is refused too.
+assertTrue(bundleRes.statusCode === 503, `bundle with a generic member -> refused 503 (got ${bundleRes.statusCode}, body=${JSON.stringify(bundleRes.body)})`);
+assertTrue(bundleRes.body?.error === 'BUNDLE_LISTING_DISABLED', `bundle error code is BUNDLE_LISTING_DISABLED (got ${bundleRes.body?.error})`);
 assertTrue(fetchCallCount === 0, `still zero eBay network calls after the bundle attempt (got ${fetchCallCount})`);
 
 console.log('\n-- api/list-ebay.js: an ordinary comic item (no assetCategory) is UNAFFECTED by the new check --\n');

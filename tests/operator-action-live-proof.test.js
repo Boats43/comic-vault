@@ -120,6 +120,7 @@ try {
   }
 
   console.log('\n-- §10: idempotent retry vs. a new deliberate action --\n');
+  const countBeforeRetry = (await client.query('SELECT count(*)::int c FROM operator_action_event WHERE decision_event_id = $1 AND action_code = $2 AND action_value_amount = 65.00', [CHAIN2_DECISION_EVENT_ID, 'LIST'])).rows[0].c;
   const retry = await recordOperatorAction({
     principalId: JIMMY_PRINCIPAL_ID, gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID,
     actionCode: 'LIST', actionValueAmount: 65.00, source: 'test-fixture', idempotencyKey: followedKey, // SAME key as "followed" above
@@ -127,7 +128,9 @@ try {
   assertTrue(retry.operatorActionEventId === followed.operatorActionEventId, 'a transport retry (same idempotencyKey) replays the SAME row, zero duplicate');
   {
     const count = await client.query('SELECT count(*)::int c FROM operator_action_event WHERE decision_event_id = $1 AND action_code = $2 AND action_value_amount = 65.00', [CHAIN2_DECISION_EVENT_ID, 'LIST']);
-    assertTrue(count.rows[0].c === 1, 'exactly one row exists for the retried action, not two');
+    // The 65.00 LIST rows are permanent append-only fixtures that every prior run of this file leaves behind, so an absolute count of 1 can only hold on the first
+    // ever run. What the retry must prove is that it added NO row: the count is unchanged across the retry and the replayed id is the original row.
+    assertTrue(count.rows[0].c === countBeforeRetry && count.rows[0].c >= 1, `the retry added no row: ${countBeforeRetry} before, ${count.rows[0].c} after`);
   }
   {
     let conflictThrown = false, rightClass = false;

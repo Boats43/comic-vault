@@ -157,8 +157,11 @@ console.log('-- /api/list-ebay (bundle)');
   ok(u.statusCode === 403 && u.body.error === 'MARKETPLACE_OPERATOR_ONLY', `bundle, authenticated NON-operator -> 403 BEFORE any picture upload or AddFixedPriceItem (got ${u.statusCode} ${u.body?.error})`);
   const f = await callHandler(listHandler, { token: tok(USER2), headers: { 'x-operator': 'true' }, body: { ...bundleBody, isOperator: true, role: 'operator', principalId: OP } });
   ok(f.statusCode === 403, `bundle with forged operator flags -> 403 (got ${f.statusCode})`);
-  const o = await callHandler(listHandler, { token: tok(OP), body: { bundle: true, items: [{ title: 'only-one' }] } });
-  ok(o.statusCode === 400 && /at least 2 items/i.test(o.body?.error || ''), `operator reaches the existing bundle validation (needs 2 items) -> 400 (got ${o.statusCode} ${o.body?.error})`);
+  // V1.1a closeout (GK-216): even a genuine operator cannot publish a bundle in ANY environment -- refused before validation, picture upload or any provider call.
+  const o = await callHandler(listHandler, { token: tok(OP), body: bundleBody });
+  ok(o.statusCode === 503 && o.body?.error === 'BUNDLE_LISTING_DISABLED', `operator bundle publication is refused fail-closed (got ${o.statusCode} ${o.body?.error})`);
+  const o1 = await callHandler(listHandler, { token: tok(OP), body: { bundle: true, items: [{ title: 'only-one' }] } });
+  ok(o1.statusCode === 503 && o1.body?.error === 'BUNDLE_LISTING_DISABLED', `a malformed operator bundle is refused the same way (got ${o1.statusCode} ${o1.body?.error})`);
   ok(fetchCalls === 0, `zero network calls across every bundle case (fetchCalls=${fetchCalls})`);
   ok((await authorityRows()) === 0, 'zero operator_authority_event rows created by any bundle case');
 }
@@ -268,7 +271,7 @@ for (const route of ['list', 'delist']) {
   const r = child('list', {});
   ok(r.status === 400 && r.error === 'GRAILKEY_LINKAGE_INCOMPLETE', `control: unmodified configuration in the same child harness reaches the existing preflight (got ${r.status} ${r.error})`);
   const rb = child('bundle', {});
-  ok(rb.status === 400, `control: bundle route, operator, valid configuration reaches the bundle validation (got ${rb.status} ${rb.error})`);
+  ok(rb.status === 503 && rb.error === 'BUNDLE_LISTING_DISABLED', `control: bundle route, operator, valid configuration is refused fail-closed (V1.1a closeout, GK-216) (got ${rb.status} ${rb.error})`);
   const rs = child('status', {});
   ok(rs.status === 400, `control: status route, operator, valid configuration reaches the status validation (got ${rs.status} ${rs.error})`);
   // the session secret: an unusable secret cannot verify ANY token; the token module reports that as an invalid token (401) -- still fail closed

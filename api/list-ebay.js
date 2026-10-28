@@ -57,6 +57,7 @@ import { uploadImageViaMediaApi, MediaApiError, hasMediaScope } from "../src/lib
 // endpoint has no mandatory GrailKey auth today, and this dispatch does
 // not add one).
 import { verifyToken, InvalidTokenError } from "../src/modules/auth/index.js";
+import { liveMarketplacePublishAllowed, PREVIEW_PUBLISH_DISABLED } from "../src/lib/liveMarketplaceGuard.js";
 import { listAssetMediaForListing, getMediaById } from "../src/modules/assets/index.js";
 import * as media from "../src/modules/media/index.js";
 import { acquirePublicationMutex, getPublicationIdentity, recordOutcomeEvent, validateOutcomeAttachment, resolveOwnedAssetForListing, resolveCollectionItemLink, getCanonicalCollectionItemIdForAsset, getOperatorActionForListing, getAssetMediaContentHashes, authorizeOperatorManualListing, recordMarketplaceAttemptPhase, ListingAttemptBlockedError, AuthorizationFailedError as AssetAuthorizationFailedError, NotFoundError, ValidationFailedError } from "../src/modules/assets/index.js";
@@ -670,6 +671,13 @@ async function handleListEbay(req, res, ctx) {
   // OPERATOR_MANUAL authority or attempt-ledger write. 401 unauthenticated, 403 not an operator, 503 operator authority
   // cannot be established. Nothing the client sends (role, principal id, operator flag) is read. The B1 protections
   // below (Q41, price binding, inventory authority, attempt ledger, reconciliation) are unchanged.
+  // V1.1a CLOSEOUT -- a PREVIEW (or any non-production hosted) deployment must never publish to live eBay. Allow-list on VERCEL_ENV, enforced
+  // before the operator gate and before any other work, so there is no provider read, picture upload or ledger write on that path.
+  if (!liveMarketplacePublishAllowed()) {
+    console.error(`[ebay] PREVIEW_PUBLISH_DISABLED (VERCEL_ENV=${process.env.VERCEL_ENV}) -- refusing before any work`);
+    res.status(403).json(PREVIEW_PUBLISH_DISABLED);
+    return;
+  }
   const operatorGate = await requireMarketplaceOperator(req, { label: "list-ebay" });
   if (!operatorGate.ok) {
     res.status(operatorGate.status).json(operatorGate.body);
@@ -788,13 +796,14 @@ async function handleListEbay(req, res, ctx) {
       // real per-item linkage. Development is unaffected (no durable
       // Production asset has ever been part of a bundle listing; this
       // closes GK-216's own previously-disclosed bundle bypass).
-      if (process.env.GRAILKEY_CATALOG_ENVIRONMENT === 'production') {
-        res.status(503).json({
-          error: 'BUNDLE_LISTING_DISABLED_PRODUCTION',
-          message: 'Bundle listing is disabled in Production until it can independently prove GK-207 linkage, Inventory Authority state, and duplicate-listing safety for every item (GK-216\'s disclosed gap).',
-        });
-        return;
-      }
+      // V1.1a CLOSEOUT (GK-216): bundle publication is FAIL-CLOSED IN EVERY ENVIRONMENT (it was Production-only). Refused before any picture
+      // upload, seller-account check or AddFixedPriceItem; zero provider writes. The code below this refusal is retained, unreachable, until
+      // a future dispatch builds per-item GK-207 linkage, Inventory Authority and duplicate-listing proof.
+      res.status(503).json({
+        error: 'BUNDLE_LISTING_DISABLED',
+        message: 'Bundle listing is disabled until it can prove GrailKey linkage, Inventory Authority state and duplicate-listing safety for every item. Nothing was listed.',
+      });
+      return;
       const items = Array.isArray(item.items) ? item.items : [];
       if (items.length < 2) {
         res.status(400).json({ error: "Bundle requires at least 2 items" });

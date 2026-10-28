@@ -479,14 +479,10 @@ console.log('-- BUYER-FACING SANITATION (bundle): per-book internal reasoning ne
   };
   const res = mockRes();
   await handler(req, res);
-  const body = lastAddFixedPriceItemBody;
-  assertTrue(res.statusCode === 200 && body.includes('<AddFixedPriceItemRequest'), `real handler reached the real BUNDLE AddFixedPriceItem construction (status ${res.statusCode})`);
-  const leaked = ['INTERNAL_TEST_DO_NOT_SHOW', 'REFUSED because', 'SECRET_', 'INTERNAL_FLAG_DIAG', '<script>', '&lt;script&gt;'].filter((n) => body.includes(n));
-  assertTrue(leaked.length === 0, `bundle: NO per-book internal reason / flag / id / script text in any buyer-facing bundle field${leaked.length ? ' — LEAKED: ' + JSON.stringify(leaked) : ''}`);
-  assertTrue(body.includes('<h2>Sanitation Series — 2-Book Lot</h2>') && body.includes('<strong>Sanitation Series #1</strong>') && body.includes('<strong>Sanitation Series #2</strong>'), 'bundle: ordinary header + per-book title/issue lines intact');
-  assertTrue(!body.includes('KEY:') && !body.includes('First appearance of Test Hero') && body.includes('(1975)</li>') && !body.includes('— VF'), 'bundle: no unverified key-issue/grade claim per book; year intact');
-  assertTrue(!/combined market value|18% off/.test(body), 'bundle: no market-value pricing claim in buyer text');
-  assertTrue(body.includes('<Title>Sanitation Series #1 #2 Lot'), 'bundle: ordinary bundle title intact');
+  // V1.1a closeout (GK-216): bundle publication is fail-closed in every environment, so the bundle packet is never built. The bundle-copy projection
+  // itself (no internal reason / flag / id / script text) stays covered at the unit level in tests/buyer-safe-listing-copy.test.js.
+  assertTrue(res.statusCode === 503 && res.body?.error === 'BUNDLE_LISTING_DISABLED', `bundle publication is refused fail-closed (status ${res.statusCode} ${res.body?.error})`);
+  assertTrue(lastAddFixedPriceItemBody === '' && !fetchCalls.includes('AddFixedPriceItem') && mockState.mediaCalls.length === 0, 'bundle refusal: zero provider writes (no AddFixedPriceItem, no picture upload)');
 }
 
 console.log('-- GOVERNED FACTS fail-closed: no resolvable durable canonical row -> NOTHING reaches eBay --\n');
