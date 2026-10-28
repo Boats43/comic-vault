@@ -255,7 +255,7 @@ try {
     const bytes = bb ? Buffer.byteLength(JSON.stringify(bb), 'utf8') : -1;
     ok(res.statusCode === 200 && bb && bytes > 0 && bytes <= 16384, `T8 a 300-record pool authorizes and the stored snapshot is bounded (${bytes} bytes <= 16384)`);
     ok(bb && bb.pool.truncated === true && bb.reconstructability.verdict !== 'FULL', 'T8 the bounded snapshot is flagged truncated and is not FULL');
-    const bare = await mint(PA, 'incomplete', { noBundle: true, noReceipt: true, listAmount: 25 });
+    const bare = await mint(PA, 'incomplete', { noBundle: true, listAmount: 25 });
     addBehavior = 'success'; res = await call(PA, bare, { amount: 25 }); createdListings.push(res.body?.listingId);
     const ib = (await authRow(bare.gkAssetId))?.evidence?.pricingBasis;
     ok(res.statusCode === 200 && ib && ib.reconstructability.verdict === 'NOT_RECONSTRUCTABLE' && ib.reconstructability.missing.includes('comparable records'), `T8 a row with no pricing bundle still authorizes (no demonstrated inconsistency) but is recorded NOT_RECONSTRUCTABLE (${res.statusCode})`);

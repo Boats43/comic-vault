@@ -15,7 +15,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fx = JSON.parse(readFileSync(path.join(root, 'tests', 'fixtures', 'ebay', 'itemtype-sequence-v1487.json'), 'utf8'));
-const baseline = readFileSync(path.join(root, 'tests', 'fixtures', 'ebay', 'addfixedpriceitem-ready-baseline-b403f33.xml'), 'utf8');
+// A Windows checkout (core.autocrlf) rewrites the LF-captured fixture to CRLF: a checkout artifact, not a packet difference.
+const baseline = readFileSync(path.join(root, 'tests', 'fixtures', 'ebay', 'addfixedpriceitem-ready-baseline-b403f33.xml'), 'utf8').replace(/\r\n/g, '\n');
 const OA = await import(pathToFileURL(path.join(root, 'src', 'lib', 'operatorAuthority.js')).href);
 const mod = await import(pathToFileURL(path.join(root, 'api', 'list-ebay.js')).href);
 

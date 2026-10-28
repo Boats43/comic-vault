@@ -155,10 +155,15 @@ const { upsertMarketplaceConnection } = await import(pathToFileURL(path.join(rep
 const { CONNECT_SCOPES } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'ebayUserOAuth.js')).href);
 const { createPhysicalAsset, recordDecision, recordOperatorAction, recordOutcomeEvent, linkCollectionItem, attachMedia } =
   await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
+const { issueAuthorityReceipt, computeEvidenceVersion } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'authorityReceipt.js')).href);
+const { getAssetMediaContentHashes } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'assets', 'index.js')).href);
 const { enrollAsset } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'inventory', 'index.js')).href);
-const { createCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
+const { createCollectionItem, updateCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
 
-const listHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
+const rawListHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
+// V1.1a -- a publish needs the seller's server-signed APPROVAL of the exact package; obtained from the REAL api/listing-preview.js approve action (never forged).
+const __attachApproval = (await import(pathToFileURL(path.join(repoRoot, 'tests', 'helpers', 'listingApprovalFixture.mjs')).href)).makeApprover({ repoRoot, mockRes: () => mockRes(), tag: 'gk265-phas' });
+const listHandler = async (req, res) => { await __attachApproval(req); return rawListHandler(req, res); };
 const delistHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'delist-ebay.js')).href)).default;
 const reconcilerHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'ebay-outcome-reconciler.js')).href)).default;
 
@@ -194,6 +199,11 @@ async function mintListableAsset(principalId, label) {
   const { operatorActionEventId } = await recordOperatorAction({
     principalId, gkAssetId, decisionEventId, actionCode: 'LIST', actionValueAmount: 25, source: 'test-fixture', idempotencyKey: `${n}-action`,
   });
+  // C1: a publishable row carries a genuine server-issued authority receipt bound to this principal, row, asset and current evidence (the gate is not relaxed).
+  const hashes = await getAssetMediaContentHashes({ principalId, gkAssetId });
+  const plainAttrs = { title: 'GK-265 Test Comic', publisher: 'Test Publisher', year: '1990' };
+  const authorityReceipt = issueAuthorityReceipt({ principalId, binding: { collectionItemId: canonicalId, gkAssetId, evidenceVersion: computeEvidenceVersion(hashes) }, response: { title: plainAttrs.title, issue: null, year: plainAttrs.year } });
+  await updateCollectionItem({ principalId, id: canonicalId, assetCategory: 'comic', attributes: { ...plainAttrs, authorityReceipt } });
   return { gkAssetId, decisionEventId, operatorActionEventId };
 }
 

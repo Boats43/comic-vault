@@ -89,7 +89,10 @@ const { verifyAuthorityReceipt, computeEvidenceVersion } = await imp('src', 'lib
 const { governingTitleForMerge } = await imp('src', 'lib', 'operatorIdentityAuthority.js');
 const enrichHandler = (await imp('api', 'enrich.js')).default;
 const collectionHandler = (await imp('api', 'collection.js')).default;
-const listHandler = (await imp('api', 'list-ebay.js')).default;
+const rawListHandler = (await imp('api', 'list-ebay.js')).default;
+// V1.1a -- a publish needs the seller's server-signed APPROVAL of the exact package; obtained from the REAL api/listing-preview.js approve action (never forged).
+const __attachApproval = (await import(pathToFileURL(path.join(repoRoot, 'tests', 'helpers', 'listingApprovalFixture.mjs')).href)).makeApprover({ repoRoot, mockRes: () => mockRes(), tag: 'v1-oml-ref' });
+const listHandler = async (req, res) => { await __attachApproval(req); return rawListHandler(req, res); };
 
 const db = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });
 await db.connect();

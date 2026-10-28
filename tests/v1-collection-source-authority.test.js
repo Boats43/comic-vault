@@ -17,6 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { metaFetch, shippingResponse, mockState } from './helpers/ebayPacketMocks.js';
 
+import { createHash as __createHash } from 'node:crypto';
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 for (const line of readFileSync(path.join(repoRoot, '.env.development.local'), 'utf8').split(/\r?\n/)) {
   const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
@@ -47,7 +48,10 @@ global.fetch = async (url, opts) => {
 const unauthorizedWrites = () => ebayCalls.filter((c) => c === 'AddFixedPriceItem' || c === 'UploadSiteHostedPictures' || c === 'media-api').length;
 
 const collectionHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'collection.js')).href)).default;
-const listHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
+const rawListHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
+// V1.1a -- a publish needs the seller's server-signed APPROVAL of the exact package; obtained from the REAL api/listing-preview.js approve action (never forged).
+const __attachApproval = (await import(pathToFileURL(path.join(repoRoot, 'tests', 'helpers', 'listingApprovalFixture.mjs')).href)).makeApprover({ repoRoot, mockRes: () => mockRes(), tag: 'v1-collect' });
+const listHandler = async (req, res) => { await __attachApproval(req); return rawListHandler(req, res); };
 const { issueAuthorityReceipt, computeEvidenceVersion } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'authorityReceipt.js')).href).catch(() => ({ issueAuthorityReceipt: null }));
 
 let passed = 0, failed = 0;
@@ -92,11 +96,12 @@ const wipeOutcomes = () => client.query(`DELETE FROM data1_dev.outcome_event WHE
 // A request that carries NO evidence of its own and NO Q41 acknowledgement: whatever authority it gets must come from the stored row.
 const listRequest = (extra = {}) => ({
   method: 'POST', headers: { authorization: `Bearer ${token}` },
-  body: { title: 'Creepy #1', publisher: 'Warren Publishing', year: '1964', price: '$61.41', grade: 'VG', images: [TINY_PNG_DATA_URL],
+  body: { title: 'Creepy #1', publisher: 'Warren Publishing', year: '1964', price: '$61.41', grade: 'VG', 
     gkAssetId: CREEPY_ASSET_ID, decisionEventId: CHAIN2_DECISION_EVENT_ID, operatorActionEventId: LIST_ACTION_ID,
     outcomeIdempotencyKey: `src-auth-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...extra },
 });
-const tryList = async (extra) => { ebayCalls.length = 0; const r = mockRes(); await listHandler(listRequest(extra), r); return r; };
+// The seller's package approval is obtained first (it reads eBay metadata through the same mocked fetch); the counted window then covers ONLY the publish request itself.
+const tryList = async (extra) => { const rq = listRequest(extra); await __attachApproval(rq); ebayCalls.length = 0; const r = mockRes(); await rawListHandler(rq, r); return r; };
 const collectionWrite = async (id, attributes, { assetCategory = 'comic', method = 'POST' } = {}) => {
   const r = mockRes();
   await collectionHandler(method === 'PUT'
@@ -215,7 +220,9 @@ await wipeOutcomes();
 console.log('\n-- operator intent is preserved in explicitly operator-sourced fields --\n');
 await resetRows();
 const lQ41 = await tryList({ q41Override: { priceOverridden: true, manualPrice: 61.41 } });
-ok(lQ41.statusCode === 200 && ebayCalls.includes('AddFixedPriceItem'), `the explicit Q41 price acknowledgement still works with no receipt (HTTP ${lQ41.statusCode} ${lQ41.body?.error || ''})`);
+// C1 (receipt-bound publication): a Q41 price acknowledgement is operator intent about PRICE only; it never substitutes for the server-issued authority receipt.
+// The former expectation (publish succeeds with no receipt) is retired; the receipt-backed Q41 publish is proven by the receipt cases above.
+ok(lQ41.statusCode === 403 && lQ41.body?.error === 'ACTION_AUTHORITY_NOT_READY' && unauthorizedWrites() === 0, `a Q41 price acknowledgement alone (no receipt) is refused with zero eBay writes (HTTP ${lQ41.statusCode} ${lQ41.body?.error || ''})`);
 await wipeOutcomes();
 
 // ═════════════════════ cleanup ═════════════════════

@@ -65,7 +65,10 @@ const A = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'asse
 const { enrollAsset } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'inventory', 'index.js')).href);
 const { createCollectionItem, updateCollectionItem } = await import(pathToFileURL(path.join(repoRoot, 'src', 'modules', 'collection', 'index.js')).href);
 const { issueAuthorityReceipt, computeEvidenceVersion } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'authorityReceipt.js')).href);
-const handler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
+const rawHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
+// V1.1a -- a publish needs the seller's server-signed APPROVAL of the exact package; obtained from the REAL api/listing-preview.js approve action (never forged).
+const __attachApproval = (await import(pathToFileURL(path.join(repoRoot, 'tests', 'helpers', 'listingApprovalFixture.mjs')).href)).makeApprover({ repoRoot, mockRes: () => mockRes(), tag: 'b1rc-schem' });
+const handler = async (req, res) => { await __attachApproval(req); return rawHandler(req, res); };
 
 const db = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });
 await db.connect();

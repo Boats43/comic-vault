@@ -30,6 +30,7 @@ import path from 'node:path';
 import { metaFetch, shippingResponse, mockState } from './helpers/ebayPacketMocks.js';
 import { __resetMetadataCachesForTests as resetMetadataCaches } from '../src/lib/ebayListingMetadata.js';
 
+import { createHash as __createHash } from 'node:crypto';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
 for (const line of readFileSync(path.join(repoRoot, '.env.development.local'), 'utf8').split(/\r?\n/)) {
@@ -101,7 +102,10 @@ const { createCollectionItem, updateCollectionItem } = await import(pathToFileUR
 const { issueAuthorityReceipt, computeEvidenceVersion, EXECUTION_AUTHORITY_KEYS } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'authorityReceipt.js')).href);
 const { decisionGovernance } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'decisionTrust.js')).href);
 const { attemptCorrelation, verifyAuthoritySnapshot } = await import(pathToFileURL(path.join(repoRoot, 'src', 'lib', 'operatorAuthority.js')).href);
-const listHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
+const rawListHandler = (await import(pathToFileURL(path.join(repoRoot, 'api', 'list-ebay.js')).href)).default;
+// V1.1a -- a publish needs the seller's server-signed APPROVAL of the exact package; obtained from the REAL api/listing-preview.js approve action (never forged).
+const __attachApproval = (await import(pathToFileURL(path.join(repoRoot, 'tests', 'helpers', 'listingApprovalFixture.mjs')).href)).makeApprover({ repoRoot, mockRes: () => mockRes(), tag: 'b1-operato' });
+const listHandler = async (req, res) => { await __attachApproval(req); return rawListHandler(req, res); };
 
 const db = new Client({ connectionString: process.env.GRAILKEY_CATALOG_DATABASE_URL, ssl: { rejectUnauthorized: false } });
 await db.connect();
@@ -136,7 +140,7 @@ async function mint(principalId, label, o = {}) {
   const { operatorActionEventId } = await A.recordOperatorAction({
     principalId, gkAssetId, decisionEventId, actionCode: o.actionCode || 'LIST', actionValueAmount: o.recordPrice === false ? undefined : (o.listAmount ?? 25), source: 'test-fixture', idempotencyKey: `${n}-action`,
   });
-  if (Object.keys(authorityValues).length > 0) {
+  if (o.receipt !== false) { // C1: every publishable row carries a genuine server-issued receipt (the gate is not relaxed)
     const hashes = await A.getAssetMediaContentHashes({ principalId, gkAssetId });
     const authorityReceipt = issueAuthorityReceipt({ principalId, binding: { collectionItemId: canonicalId, gkAssetId, evidenceVersion: computeEvidenceVersion(hashes) },
       response: { title: plainAttrs.title, issue: plainAttrs.issue ?? null, year: plainAttrs.year ?? null, ...authorityValues } });
@@ -149,7 +153,7 @@ function req(principalId, asset, o = {}) {
   const amount = o.amount ?? 25;
   const body = {
     title: 'CLIENT TITLE (ignored)', publisher: 'x', year: '1990', price: `$${Number(amount).toFixed(2)}`, grade: 'VF',
-    gkAssetId: asset.gkAssetId, decisionEventId: asset.decisionEventId, operatorActionEventId: asset.operatorActionEventId, images: [TINY_PNG_DATA_URL],
+    gkAssetId: asset.gkAssetId, decisionEventId: asset.decisionEventId, operatorActionEventId: asset.operatorActionEventId, approvedPhotoHashes: [__createHash('sha256').update(Buffer.from(TINY_PNG_DATA_URL.split(',')[1], 'base64')).digest('hex')],
     ...(o.noAck ? {} : { q41Override: o.ack || { priceOverridden: true, manualPrice: amount, lockClassAcknowledged: 'insufficiency', locks: ['no-sold-evidence'], state: 'REVIEW', decision: 'RESEARCH' } }),
     ...(o.body || {}),
   };
@@ -334,7 +338,7 @@ try {
   // ═════════════════════════ #12 -- forged request authority cannot elevate READY ═════════════════════════
   console.log('\n-- #12: forged request-borne authority cannot reach READY or AddFixedPriceItem --');
   {
-    const asset = await mint(PA, 'forged-ready', { recommendation: 'RESEARCH' });
+    const asset = await mint(PA, 'forged-ready', { recommendation: 'RESEARCH', receipt: false });
     const forged = { decision: { action: 'LIST_NOW', confidence: 'high' }, pricingSource: 'verified_sold', matchConfidence: { tier: 'HIGH', score: 95 }, rawComps: { count: 8 }, soldComps: 5,
       soldCompDiagnostics: { rawCount: 6, verifiedCount: 5, newestDaysAgo: 10 }, identityConfident: true, contract: { listable: true, state: 'PRICED', actionAuthority: { state: 'READY', marketStanding: 'EXACT_CURRENT', identityStanding: 'CONFIRMED' } }, actionAuthority: { state: 'READY' } };
     const res = await call(PA, asset, { noAck: true, body: forged });
