@@ -46,6 +46,29 @@ for (const env of ['production', 'development', undefined]) {
   ok(r.res.statusCode === 401 && r.calls === 0, `VERCEL_ENV=${String(env)}: not blocked by the Preview guard; the operator gate still answers 401 for an unauthenticated caller`);
 }
 
+console.log('--- 2b. delist-ebay (EndItem): same guard, zero provider calls on refusal ---');
+const delist = (await import('../api/delist-ebay.js')).default;
+let rl = 0;
+const callDelist = async (env, headers = {}) => {
+  if (env === undefined) delete process.env.VERCEL_ENV; else process.env.VERCEL_ENV = env;
+  fetchCalls = 0; const res = mockRes();
+  await delist({ method: 'POST', headers: { 'x-forwarded-for': `closeout-delist-${++rl}`, ...headers }, body: { ebayItemId: '110000000000' } }, res);
+  return { res, calls: fetchCalls };
+};
+for (const env of ['preview', 'staging', 'Preview', 'my-custom-env']) {
+  let r = await callDelist(env);
+  ok(r.res.statusCode === 403 && r.res.body?.error === 'PREVIEW_PUBLISH_DISABLED' && r.calls === 0, `VERCEL_ENV=${env}: delist refused 403 PREVIEW_PUBLISH_DISABLED, zero provider calls`);
+  r = await callDelist(env, { authorization: 'Bearer anything', 'x-operator': 'true' });
+  ok(r.res.statusCode === 403 && r.res.body?.error === 'PREVIEW_PUBLISH_DISABLED' && r.calls === 0, `VERCEL_ENV=${env}: credentials / operator headers do not bypass the delist guard`);
+}
+// Production behaviour is unchanged: these environments pass the guard and reach the existing operator gate (unauthenticated -> 401, no provider call).
+for (const env of ['production', 'development', undefined]) {
+  const r = await callDelist(env);
+  ok(r.res.statusCode === 401 && r.calls === 0, `VERCEL_ENV=${String(env)}: delist not blocked by the guard; the unchanged operator gate answers 401`);
+}
+const dsrc = readFileSync(new URL('../api/delist-ebay.js', import.meta.url), 'utf8');
+ok(dsrc.indexOf('liveMarketplacePublishAllowed()') > dsrc.indexOf('req.method !== "POST"') && dsrc.indexOf('liveMarketplacePublishAllowed()') < dsrc.indexOf('requireMarketplaceOperator(req'), 'order: method check, Preview guard, then the operator gate (before ownership lookup, token and EndItem)');
+
 console.log('\n--- 3. bundle publication is unreachable for a provider write in every environment (static) ---');
 const src = readFileSync(new URL('../api/list-ebay.js', import.meta.url), 'utf8');
 const i = src.indexOf('if (item.bundle === true) {');

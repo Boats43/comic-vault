@@ -26,6 +26,7 @@
 
 // GK-P0 -- OPERATOR-ONLY gate (replaces the bare verifyToken check; same 401 for an unauthenticated caller).
 import { requireMarketplaceOperator } from "../src/lib/marketplaceOperatorGate.js";
+import { liveMarketplacePublishAllowed, PREVIEW_PUBLISH_DISABLED } from "../src/lib/liveMarketplaceGuard.js";
 import { resolveOwnedAssetForListing, AuthorizationFailedError } from "../src/modules/assets/index.js";
 import {
   resolveEbayUserAccessToken,
@@ -56,6 +57,14 @@ export default async function handler(req, res) {
 
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  // V1.1a CLOSEOUT -- a PREVIEW (or any non-production hosted) deployment must never change live eBay listings. Same allow-list on VERCEL_ENV as
+  // api/list-ebay.js, enforced before the operator gate, the ownership lookup, the seller token and EndItem: zero provider calls on refusal.
+  if (!liveMarketplacePublishAllowed()) {
+    console.error(`[delist] PREVIEW_PUBLISH_DISABLED (VERCEL_ENV=${process.env.VERCEL_ENV}) -- refusing before any work`);
+    res.status(403).json({ ...PREVIEW_PUBLISH_DISABLED, message: 'Changing live eBay listings is disabled on Preview deployments. Nothing was ended.' });
     return;
   }
 
