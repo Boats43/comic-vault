@@ -25,6 +25,18 @@ ok(linkGate && !linkGate.includes('ApproveAndListControl'), 'NOT in the physical
 ok(/onApproveAndList && !listLocked/.test(app), 'the final-branch control is additionally withheld when the List button is locked');
 ok(app.includes('onApproveAndList={approveAndListItem}'), 'CollectionDetail receives the orchestrator wiring');
 
+console.log('\n--- 1b. BLACK-SCREEN REGRESSION: hook dependencies must be declared BEFORE the hook that lists them (TDZ at first render) ---');
+{
+  const at = app.indexOf('const approveAndListItem = useCallback(');
+  const end = app.indexOf('}, [', at);
+  const deps = app.slice(end + 4, app.indexOf(']);', end)).split(',').map((d) => d.trim()).filter(Boolean);
+  ok(at > 0 && deps.length > 0, 'approveAndListItem and its dependency list located (' + deps.join(', ') + ')');
+  for (const d of deps) {
+    const decl = app.indexOf('const ' + d + ' = ');
+    ok(decl > 0 && decl < at, 'dependency ' + d + ' is declared before approveAndListItem (a later declaration throws Cannot access before initialization and blanks the app)');
+  }
+}
+
 console.log('\n--- 2. the logic moved to shared modules (no copies left behind) ---');
 ok(!/lockClassAcknowledged:/.test(app), 'App.jsx no longer builds Q41 payloads inline');
 ok(/buildQ41Payload\(\{ kind: Q41_KIND\.INSUFFICIENCY/.test(app) && /buildQ41Payload\(\{ kind: Q41_KIND\.RESEARCH_NOT_LISTABLE/.test(app) && /buildQ41Override\(/.test(app), 'the existing buttons and handleList call the shared Q41 module');

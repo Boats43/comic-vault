@@ -14589,6 +14589,19 @@ export default function App() {
     await refreshMarketData(item, { operatorGradeAction: 'SET', operatorGradeValue: rawInput });
   }, [refreshMarketData]);
 
+  // GK-260 — CLEAR. Governing grade immediately returns to the current
+  // automated `grade` (never mutated by this function either way).
+const saveListingFields = useCallback(async (item, patch) => {
+    // V1.1a: persist the seller's listing corrections / signed approval on the item (local first, then server sync), awaiting the sync
+    // attempt so the caller can tell whether the durable copy exists before asking the server to approve.
+    const updated = { ...item, ...patch };
+    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(updated) : x)));
+    setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
+    const final = await persistCollectionItem(updated);
+    setCatalogue((prev) => prev.map((x) => (x.id === final.id ? { ...x, _syncStatus: final._syncStatus } : x)));
+    return final;
+  }, []);
+
   // V1.1a -- ONE seller action. Wires the injected dependencies of src/lib/approveAndList.js to the real, unchanged server endpoints:
   // /api/listing-preview (approve) -> Q41 acknowledgement (saved on the item) -> /api/operator-action (LIST at the exact price) ->
   // the existing listOnEbay (/api/list-ebay). The server re-checks every gate; this function only creates the artifacts in order.
@@ -14631,19 +14644,6 @@ export default function App() {
     };
     return approveAndList({ item, price, confirmed, deps, onStep });
   }, [listOnEbay, saveListingFields]);
-
-  // GK-260 — CLEAR. Governing grade immediately returns to the current
-  // automated `grade` (never mutated by this function either way).
-const saveListingFields = useCallback(async (item, patch) => {
-    // V1.1a: persist the seller's listing corrections / signed approval on the item (local first, then server sync), awaiting the sync
-    // attempt so the caller can tell whether the durable copy exists before asking the server to approve.
-    const updated = { ...item, ...patch };
-    setCatalogue((prev) => prev.map((x) => (x.id === item.id ? normalizeItem(updated) : x)));
-    setSelectedItem((cur) => (cur && cur.id === item.id ? normalizeItem(updated) : cur));
-    const final = await persistCollectionItem(updated);
-    setCatalogue((prev) => prev.map((x) => (x.id === final.id ? { ...x, _syncStatus: final._syncStatus } : x)));
-    return final;
-  }, []);
 
   const confirmItemIsComic = useCallback(async (item) => {
     await refreshMarketData(item, { assetTypeAction: 'CONFIRM_COMIC' });
